@@ -4,6 +4,7 @@ import type Provider from "oidc-provider";
 import { type ClientMetadata, type Configuration, errors, type KoaContextWithOIDC } from "oidc-provider";
 import type { Pool } from "pg";
 
+import { addressKey, httpsOrLoopback } from "./cimd.js";
 import { failureCode } from "./db.js";
 
 /**
@@ -30,8 +31,8 @@ import { failureCode } from "./db.js";
  * - `jwks`, `jwks_uri`, and `sector_identifier_uri` are refused. A public
  *   client has no keys, and oidc-provider would fetch `sector_identifier_uri`
  *   from this server at registration.
- * - `post_logout_redirect_uris` is dropped: agents do not use RP-initiated
- *   logout.
+ * - `post_logout_redirect_uris` is dropped, from every client oidc-provider
+ *   builds: RP-initiated logout is off (`oidc.ts`), and agents do not use it.
  *
  * No registration access token is issued, and registration management
  * (RFC 7592) is off: a client cannot read, change, or delete its registration.
@@ -125,7 +126,6 @@ export const CLIENT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 const GRANT_TYPES = new Set(["authorization_code", "refresh_token"]);
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const NOT_ACCEPTED = new Set(["jwks", "jwks_uri", "sector_identifier_uri"]);
 const DROPPED = new Set(["post_logout_redirect_uris"]);
 
@@ -135,17 +135,18 @@ function refuse(description: string): never {
 
 /**
  * Runs once per property below, before oidc-provider's own checks, on every
- * client oidc-provider builds. Only a registration request is checked: a
- * stored client loads without a `ctx`.
+ * client oidc-provider builds. `DROPPED` goes from every client. The rest is
+ * checked on a registration request only: a stored client loads without a
+ * `ctx`, and a CIMD client is checked by `cimd.ts`'s `allowClient`.
  */
 function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, value: unknown, metadata: ClientMetadata): void {
+  if (DROPPED.has(key)) {
+    delete metadata[key];
+    return;
+  }
   if (ctx?.oidc.route !== "registration") return;
   if (NOT_ACCEPTED.has(key)) {
     if (value !== undefined) refuse(`${key} is not accepted: registered clients are public and have no keys`);
-    return;
-  }
-  if (DROPPED.has(key)) {
-    delete metadata[key];
     return;
   }
   // A value of the wrong type is left to oidc-provider, which refuses it.
@@ -174,10 +175,7 @@ function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, 
     case "redirect_uris":
       if (Array.isArray(value)) {
         for (const uri of value) {
-          if (typeof uri !== "string") continue;
-          const url = URL.parse(uri);
-          const ok = url !== null && (url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)));
-          if (!ok) refuse("redirect_uris must be https, or http on localhost, 127.0.0.1, or [::1]");
+          if (typeof uri === "string" && !httpsOrLoopback(uri)) refuse("redirect_uris must be https, or http on localhost, 127.0.0.1, or [::1]");
         }
       }
       return;
@@ -213,23 +211,6 @@ export function registrationConfiguration(): {
 function unmapped(ip: string): string {
   const address = ip.split("%")[0] ?? "";
   return /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1] ?? address;
-}
-
-/**
- * The key a client address is limited by: an IPv4 address, or the /64 of an
- * IPv6 address, since one host usually holds a whole /64.
- */
-export function addressKey(ip: string): string {
-  const address = unmapped(ip);
-  if (!address.includes(":")) return address;
-  const [head = "", tail] = address.split("::");
-  const left = head === "" ? [] : head.split(":");
-  const right = tail === undefined || tail === "" ? [] : tail.split(":");
-  const groups = tail === undefined ? left : [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right];
-  return `${groups
-    .slice(0, 4)
-    .map((group) => Number.parseInt(group, 16).toString(16))
-    .join(":")}::/64`;
 }
 
 /** Most addresses `RegistrationLimiter` keeps a bucket for. */
@@ -268,8 +249,8 @@ function waitSeconds({ perMs }: Limit, tokens: number): number {
  * The registration rate limit: token buckets that each hold `burst` requests
  * and refill at their rate per hour. A request takes one from its own bucket
  * and one from the global bucket, or from neither when either is empty. Its
- * own bucket is its address's (`addressKey`), or the one shared by the
- * trusted ranges.
+ * own bucket is its address's (`addressKey`, an IPv6 address by its /64), or
+ * the one shared by the trusted ranges.
  *
  * At most `MAX_TRACKED_ADDRESSES` address buckets are kept, and the full
  * ones are dropped once per `SWEEP_INTERVAL_MS`. Past the most, the least
@@ -367,7 +348,7 @@ export function registrationMiddleware({ pool, path, settings, log }: Registrati
   const registration = routePattern(path);
   return async (ctx, next) => {
     if (ctx.method === "POST" && registration.test(ctx.path)) {
-      const wait = limiter.take(addressKey(ctx.ip));
+      const wait = limiter.take(ctx.ip);
       if (wait > 0) {
         ctx.status = 429;
         ctx.set("Retry-After", String(wait));

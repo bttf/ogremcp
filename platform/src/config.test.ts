@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import {
   DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
   DEFAULT_PORT,
@@ -33,6 +34,7 @@ describe("loadConfig", () => {
       discord: null,
       oidcKeys: null,
       tokenLifetimes: DEFAULT_TOKEN_LIFETIMES,
+      cimdFetchLimits: DEFAULT_CIMD_FETCH_LIMITS,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
@@ -117,6 +119,15 @@ describe("loadConfig", () => {
     for (const bad of ["160.79.104.0", "160.79.104.0/33", "claude.ai/21", "160.79.104.0/21/1"]) {
       expect(() => loadConfig({ DATABASE_URL: url, DCR_TRUSTED_RANGES: bad })).toThrow("DCR_TRUSTED_RANGES must list address ranges only");
     }
+  });
+
+  it("reads CIMD_TRUSTED_CLIENT_IDS as exact URLs that replace the default list", () => {
+    const ids = "https://claude.ai/oauth/mcp-oauth-client-metadata, https://agent.example/client.json";
+    expect(loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: ids }).cimdFetchLimits.trustedClientIds).toEqual([
+      "https://claude.ai/oauth/mcp-oauth-client-metadata",
+      "https://agent.example/client.json",
+    ]);
+    expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

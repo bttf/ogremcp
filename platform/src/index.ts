@@ -110,6 +110,7 @@ try {
     trustProxyHops: config.trustProxyHops,
     tokenLifetimes: config.tokenLifetimes,
     registration: config.registration,
+    cimdFetchLimits: config.cimdFetchLimits,
   });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);

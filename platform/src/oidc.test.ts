@@ -93,9 +93,13 @@ describe("OAuth server", () => {
       code_challenge_methods_supported: ["S256"],
     });
     expect(metadata["registration_endpoint"]).toBe(`${ISSUER}/oauth/register`);
+    // Claude uses CIMD only with both of these advertised (§9).
+    expect(metadata["client_id_metadata_document_supported"]).toBe(true);
+    expect(metadata["token_endpoint_auth_methods_supported"]).toContain("none");
+    // Off: a client's post_logout_redirect_uri would redirect without a click.
+    expect(metadata["end_session_endpoint"]).toBeUndefined();
     // Off until their own issues.
     expect(metadata["device_authorization_endpoint"]).toBeUndefined();
-    expect(metadata["client_id_metadata_document_supported"]).toBeUndefined();
 
     // The public halves only.
     const jwks = JSON.parse((await get(port, "/oauth/jwks")).body) as { keys: Record<string, unknown>[] };
@@ -378,7 +382,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     await signIn(browser);
     const path = await reachConsent(browser);
     const details = await browser.get(`${path}/details`, "application/json");
-    expect(await details.json()).toMatchObject({ client_name: "Test Agent", redirect_host: "agent.example", scopes: ["openid", "read"] });
+    expect(await details.json()).toMatchObject({ client_name: "Test Agent", client_host: null, redirect_host: "agent.example", scopes: ["openid", "read"] });
     // Another site cannot answer for the user.
     expect((await browser.post(`${path}/approve`, "https://evil.example")).status).toBe(403);
 
@@ -438,8 +442,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect(client).not.toHaveProperty("client_secret");
     expect(client).not.toHaveProperty("registration_access_token");
     expect(client).not.toHaveProperty("scope");
-    // oidc-provider's default, an empty list, stands while RP-initiated logout is on.
-    expect(client["post_logout_redirect_uris"] ?? []).toEqual([]);
+    expect(client).not.toHaveProperty("post_logout_redirect_uris");
     const stored = await pool.query("select 1 from oidc_models where model = 'Client' and oidc_id = $1 and not payload ? 'client_secret'", [client.client_id]);
     expect(stored.rowCount).toBe(1);
 

@@ -25,7 +25,7 @@ it("enables Approve once the page has been focused for a while, and waits again 
       case "/api/v1/me":
         return Response.json({ uuid: "00000000-0000-4000-8000-000000000000", providers: ["google"] });
       case "/interaction/abc/details":
-        return Response.json({ prompt: { name: "consent" }, client_name: "Claude", redirect_host: "claude.ai", scopes: ["read"] });
+        return Response.json({ prompt: { name: "consent" }, client_name: "Claude", client_host: "claude.ai", redirect_host: "claude.ai", scopes: ["read"] });
       default:
         return new Response("not found", { status: 404 });
     }
@@ -48,6 +48,7 @@ it("enables Approve once the page has been focused for a while, and waits again 
   });
   expect(container.querySelector("bdi")?.textContent).toBe("Claude");
   expect(container.textContent).toContain("Read your game state and search game info");
+  expect(container.textContent).toContain("Its name comes from claude.ai.");
   expect(approve?.disabled).toBe(true);
   expect(deny?.disabled).toBe(false);
   await vi.waitFor(() => expect(approve?.disabled).toBe(false), { timeout: APPROVE_DELAY_MS * 2 });
