@@ -38,8 +38,16 @@ function list<T extends z.ZodType>(item: T) {
 }
 
 /**
+ * Longest `client.version` and `client.build`. The real values are short
+ * ("1.15.9", "69722"), and an unknown flavor's facts go to the platform's
+ * log (§6.3.1), so a longer value is a ParseError.
+ */
+export const CLIENT_TEXT_MAX_LENGTH = 32;
+
+/**
  * Raw facts about the game client (§6.3). The interpreter maps them to a
  * flavor and rules (detect.ts, §6.3.1); the adapter never decides the flavor.
+ * zod's `int()` accepts safe integers only, so the numbers are finite.
  */
 export const clientSchema = z.object({
   /** `WOW_PROJECT_ID`. */
@@ -47,9 +55,9 @@ export const clientSchema = z.object({
   /** `C_Seasons.GetActiveSeason()`. Nil on a realm without a season. */
   season_id: nilable(z.number().int().nonnegative()),
   /** First return of `GetBuildInfo()`, e.g. "1.15.9". */
-  version: nilable(z.string().min(1)),
+  version: nilable(z.string().min(1).max(CLIENT_TEXT_MAX_LENGTH)),
   /** Second return of `GetBuildInfo()`. The client returns a string of digits. */
-  build: nilable(z.string().min(1)),
+  build: nilable(z.string().min(1).max(CLIENT_TEXT_MAX_LENGTH)),
   /** Fourth return of `GetBuildInfo()`, e.g. 11509. */
   interface: nilable(z.number().int().positive()),
 });
