@@ -7,14 +7,13 @@
   "required": ["kit", "version", "sdk", "tool_prefix", "root", "sources", "flavors"],
   "properties": {
     "kit": {
-      "description": "The kit's ID, e.g. `wow`.",
-      "type": "string",
-      "minLength": 1
+      "description": "The kit's ID in lowercase snake_case, e.g. `wow`. It appears in URL paths such as `/api/v1/kits/{kit}/manifest` (§8.2).",
+      "$ref": "#/$defs/snakeCase"
     },
     "version": {
-      "description": "The kit's version.",
+      "description": "The kit's version: semver `MAJOR.MINOR.PATCH` with an optional pre-release. The bridge updates only to a newer version and never downgrades (§7).",
       "type": "string",
-      "minLength": 1
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$"
     },
     "sdk": {
       "description": "The compatible `@ogmcp/sdk` version range, e.g. `^0.1.0`.",
@@ -22,10 +21,10 @@
       "minLength": 1
     },
     "tool_prefix": {
-      "description": "Prefix for this kit's MCP tools, which are named `{tool_prefix}_{verb}_{noun}` (§10.1). Lowercase snake_case, `[a-z0-9_]` only. At most 60 characters, so that a tool name fits in 64.",
+      "description": "Prefix for this kit's MCP tools, which are named `{tool_prefix}_{verb}_{noun}` (§10.1). Lowercase snake_case, at most 60 characters, so that a tool name fits in 64.",
       "type": "string",
       "maxLength": 60,
-      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+      "$ref": "#/$defs/snakeCase"
     },
     "root": { "$ref": "#/$defs/root" },
     "adapter": { "$ref": "#/$defs/adapter" },
@@ -36,9 +35,10 @@
       "items": { "$ref": "#/$defs/source" }
     },
     "flavors": {
-      "description": "The single registry of per-flavor config, keyed by flavor (§6.4). Ingest rejects a payload whose flavor is not a key here (§8.3).",
+      "description": "The single registry of per-flavor config, keyed by flavor (§6.4). Ingest rejects a payload whose flavor is not a key here (§8.3). `unknown` is reserved for payloads that map to no flavor (§6.3.1), so it is not a valid key.",
       "type": "object",
       "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/snakeCase", "not": { "const": "unknown" } },
       "additionalProperties": { "$ref": "#/$defs/flavor" }
     }
   },
@@ -57,7 +57,7 @@
           "items": { "$ref": "#/$defs/locateEntry" }
         },
         "verify": {
-          "description": "A glob, relative to root, that must match under a candidate root for it to count. No variables.",
+          "description": "A glob, relative to root, that must match under a candidate root for it to count. No variables, and it may not leave root.",
           "$ref": "#/$defs/relativePath"
         }
       }
@@ -101,7 +101,7 @@
       "required": ["install", "process"],
       "properties": {
         "install": {
-          "description": "Where the bridge installs the adapter, relative to root. Globs expand to each existing match. No variables.",
+          "description": "Where the bridge installs the adapter, relative to root. Globs expand to each existing match. No variables, and it may not leave root.",
           "$ref": "#/$defs/relativePath"
         },
         "process": {
@@ -135,7 +135,7 @@
           "enum": ["text"]
         },
         "path": {
-          "description": "Relative to root. Globs allowed; the bridge watches every match. No variables.",
+          "description": "Relative to root. Globs allowed; the bridge watches every match. No variables, and it may not leave root.",
           "$ref": "#/$defs/relativePath"
         },
         "trigger": {
@@ -167,10 +167,22 @@
       }
     },
     "relativePath": {
-      "description": "A path relative to root. Globs allowed. No variables, so no `{` or `}`.",
+      "description": "A path relative to root. Globs allowed. No variables, so no `{` or `}`. It may not leave root: no leading `/` or `\\`, no drive letter, and no `..` segment.",
       "type": "string",
       "minLength": 1,
-      "pattern": "^[^{}]*$"
+      "pattern": "^[^{}]*$",
+      "not": {
+        "anyOf": [
+          { "pattern": "^[/\\\\]" },
+          { "pattern": "^[A-Za-z]:" },
+          { "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)" }
+        ]
+      }
+    },
+    "snakeCase": {
+      "description": "Lowercase snake_case: `[a-z0-9_]` only, with no leading, trailing, or doubled `_` (§10.1).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
     }
   }
 }

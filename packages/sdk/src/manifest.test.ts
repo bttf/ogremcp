@@ -61,9 +61,19 @@ describe("manifest schema", () => {
     ["an uppercase tool_prefix", { ...example, tool_prefix: "WoW" }],
     ["a tool_prefix with a dot", { ...example, tool_prefix: "wow.era" }],
     ["an unknown source type", { ...example, sources: [{ ...source, type: "log_tail" }] }],
+    ["a kit ID that is not snake_case", { ...example, kit: "../x" }],
+    ["a version that is not semver", { ...example, version: "0.1" }],
+    ["the reserved flavor key unknown", { ...example, flavors: { unknown: example.flavors.forever } }],
   ])("rejects %s", (_case, manifest) => {
     expect(validate(manifest)).toBe(false);
   });
+
+  it.each(["/", "\\Games", "C:\\Windows", "../../..", "_*_/../../.ssh/id_ed25519", "_*_\\..\\x"])(
+    "rejects the path %s, which leaves root",
+    (path) => {
+      expect(validate({ ...example, adapter: { ...example.adapter, install: path } })).toBe(false);
+    },
+  );
 
   // manifest.ts is generated from the schema, so the two cannot drift.
   it("matches the generated TS types in manifest.ts", async () => {

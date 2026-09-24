@@ -8,11 +8,11 @@ export type LocateEntry = LocatePath | LocatePrompt;
  */
 export interface Manifest {
   /**
-   * The kit's ID, e.g. `wow`.
+   * The kit's ID in lowercase snake_case, e.g. `wow`. It appears in URL paths such as `/api/v1/kits/{kit}/manifest` (§8.2).
    */
   kit: string;
   /**
-   * The kit's version.
+   * The kit's version: semver `MAJOR.MINOR.PATCH` with an optional pre-release. The bridge updates only to a newer version and never downgrades (§7).
    */
   version: string;
   /**
@@ -20,7 +20,7 @@ export interface Manifest {
    */
   sdk: string;
   /**
-   * Prefix for this kit's MCP tools, which are named `{tool_prefix}_{verb}_{noun}` (§10.1). Lowercase snake_case, `[a-z0-9_]` only. At most 60 characters, so that a tool name fits in 64.
+   * Prefix for this kit's MCP tools, which are named `{tool_prefix}_{verb}_{noun}` (§10.1). Lowercase snake_case, at most 60 characters, so that a tool name fits in 64.
    */
   tool_prefix: string;
   root: Root;
@@ -32,7 +32,7 @@ export interface Manifest {
    */
   sources: Source[];
   /**
-   * The single registry of per-flavor config, keyed by flavor (§6.4). Ingest rejects a payload whose flavor is not a key here (§8.3).
+   * The single registry of per-flavor config, keyed by flavor (§6.4). Ingest rejects a payload whose flavor is not a key here (§8.3). `unknown` is reserved for payloads that map to no flavor (§6.3.1), so it is not a valid key.
    */
   flavors: {
     [k: string]: Flavor;
@@ -49,7 +49,7 @@ export interface Root {
    */
   locate: LocateEntry[];
   /**
-   * A glob, relative to root, that must match under a candidate root for it to count. No variables.
+   * A glob, relative to root, that must match under a candidate root for it to count. No variables, and it may not leave root.
    */
   verify: string;
 }
@@ -70,7 +70,7 @@ export interface LocatePrompt {
  */
 export interface Adapter {
   /**
-   * Where the bridge installs the adapter, relative to root. Globs expand to each existing match. No variables.
+   * Where the bridge installs the adapter, relative to root. Globs expand to each existing match. No variables, and it may not leave root.
    */
   install: string;
   /**
@@ -97,7 +97,7 @@ export interface Source {
    */
   format: "text";
   /**
-   * Relative to root. Globs allowed; the bridge watches every match. No variables.
+   * Relative to root. Globs allowed; the bridge watches every match. No variables, and it may not leave root.
    */
   path: string;
   /**
