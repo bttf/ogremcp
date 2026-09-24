@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -111,7 +112,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(401)
 			return
 		}
-		s.events.add("use:" + token)
+		event := "use:" + token
+		if body, _ := io.ReadAll(r.Body); len(body) > 0 {
+			event += " " + string(body)
+		}
+		s.events.add(event)
 		w.WriteHeader(200)
 	default:
 		w.WriteHeader(404)
@@ -316,6 +321,41 @@ func TestConcurrentRefresh(t *testing.T) {
 		}
 	}
 	if refreshes, revoked := s.state(); refreshes != 1 || revoked {
+		t.Errorf("server saw %d refreshes, revoked %v", refreshes, revoked)
+	}
+}
+
+func TestUnauthorizedRefreshesOnce(t *testing.T) {
+	s, store, c, _ := setup(t)
+	store.token = "rt-0"
+	if err := getKits(t, c, s.URL); err != nil {
+		t.Fatal(err)
+	}
+
+	// at-1 expires before the bridge expects it to, as when a Mac sleeps past
+	// its lifetime. The 401 gets a refresh, rt-2 is saved, and the request is
+	// sent again with at-2 and its body.
+	s.mu.Lock()
+	delete(s.access, "at-1")
+	s.mu.Unlock()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, s.URL+"/api/v1/kits", strings.NewReader("body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("Do after an early 401: %v", err)
+	}
+	res.Body.Close()
+
+	want := []string{"save:rt-1", "use:at-1", "save:rt-2", "use:at-2 body"}
+	if got := s.events.all(); !slices.Equal(got, want) {
+		t.Errorf("events: got %v, want %v", got, want)
+	}
+	if store.get() != "rt-2" {
+		t.Errorf("stored %q, want rt-2", store.get())
+	}
+	if refreshes, revoked := s.state(); refreshes != 2 || revoked {
 		t.Errorf("server saw %d refreshes, revoked %v", refreshes, revoked)
 	}
 }

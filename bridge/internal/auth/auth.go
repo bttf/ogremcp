@@ -19,9 +19,10 @@
 // start sends the old one, the server revokes the grant, and the user logs in
 // again.
 //
-// A 401 from the bridge API, or a refresh the server refuses, ends the login
-// (§8.3): the Store's refresh token is deleted, and calls return
-// ErrLoginRequired until Login succeeds again.
+// A 401 from the bridge API gets one refresh and one retry, since an access
+// token can expire before the bridge expects it to. A refresh the server
+// refuses, or a second 401, ends the login (§8.3): the Store's refresh token
+// is deleted, and calls return ErrLoginRequired until Login succeeds again.
 //
 // No token or device code is logged or put in an error. The user code is
 // shown to the user, who checks it on the web page.
@@ -169,12 +170,19 @@ func isLoopback(host string) bool {
 func (c *Client) AccessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.token(ctx, "")
+}
+
+// token returns an access token, refreshing it when it is about to expire.
+// refused, when not "", is an access token the server answered with 401: it
+// is refreshed however long it seems to have left. Called with mu held.
+func (c *Client) token(ctx context.Context, refused string) (string, error) {
 	if c.unsaved {
 		if err := c.save(); err != nil {
 			return "", err
 		}
 	}
-	if c.access != "" && c.now().Before(c.expiry) {
+	if c.access != "" && c.access != refused && c.now().Before(c.expiry) {
 		return c.access, nil
 	}
 	if c.refresh == "" {
@@ -203,9 +211,11 @@ func (c *Client) AccessToken(ctx context.Context) (string, error) {
 	return c.access, nil
 }
 
-// Do sends req, a request to the bridge API, with an access token. A 401
-// answer means the token is invalid or revoked (§8.3): Do ends the login, as a
-// refused refresh does, and returns ErrLoginRequired.
+// Do sends req, a request to the bridge API, with an access token. On a 401
+// answer it refreshes the token and sends req once more, so a request with a
+// body needs GetBody, which http.NewRequest sets for an in-memory body. A
+// second 401 means the token is invalid or revoked (§8.3): Do ends the login,
+// as a refused refresh does, and returns ErrLoginRequired.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if !c.onOrigin(req.URL) {
 		return nil, errors.New("an access token goes only to the server it came from")
@@ -214,15 +224,29 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req = req.Clone(req.Context())
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.userAgent())
-	res, err := c.http.Do(req)
+	res, err := c.sendWith(req, token)
+	if err != nil || res.StatusCode != http.StatusUnauthorized {
+		return res, err
+	}
+	res.Body.Close()
+
+	c.mu.Lock()
+	token, err = c.token(req.Context(), token)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode != http.StatusUnauthorized {
-		return res, nil
+	retry := req.Clone(req.Context())
+	if req.GetBody != nil {
+		if retry.Body, err = req.GetBody(); err != nil {
+			return nil, err
+		}
+	} else if req.Body != nil && req.Body != http.NoBody {
+		return nil, errReplaced
+	}
+	res, err = c.sendWith(retry, token)
+	if err != nil || res.StatusCode != http.StatusUnauthorized {
+		return res, err
 	}
 	res.Body.Close()
 	c.mu.Lock()
@@ -238,12 +262,23 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 }
 
+// sendWith sends a copy of req with token.
+func (c *Client) sendWith(req *http.Request, token string) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", c.userAgent())
+	return c.http.Do(req)
+}
+
 // adopt makes t the current tokens and saves its refresh token. Called with
 // mu held.
 func (c *Client) adopt(t tokenAnswer) error {
 	lifetime := time.Duration(t.ExpiresIn) * time.Second
 	c.access = t.AccessToken
-	c.expiry = c.now().Add(lifetime - min(expiryMargin, lifetime/2))
+	// Without its monotonic reading, the expiry is compared in wall-clock
+	// time. The monotonic clock stops while a Mac sleeps, and the token's
+	// lifetime does not.
+	c.expiry = c.now().Round(0).Add(lifetime - min(expiryMargin, lifetime/2))
 	c.refresh = t.RefreshToken
 	c.unsaved = true
 	return c.save()
