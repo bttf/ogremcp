@@ -1,7 +1,8 @@
 // Adapter zips (docs/architecture.md §5, §8.2). At build time the platform
-// zips each kit's `adapter/` folder and records the zip's sha256; at startup
-// the registry reads both back. The bridge verifies the sha256 before it
-// installs the zip (§7).
+// zips each kit's `adapter/` folder and records the zip's sha256 and the
+// adapter's version; at startup the registry reads them back. The bridge
+// verifies the sha256 before it installs the zip, and installs only a newer
+// version (§7).
 //
 // Adapted from bttf/wow-guide@df80260 cloud/src/addonPackage.ts and
 // cloud/src/buildAddon.ts.
@@ -10,6 +11,8 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32 } from "node:zlib";
+
+import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
 
 import type { CheckedKit } from "./validate.js";
 
@@ -24,6 +27,10 @@ export interface AdapterZip {
   path: string;
   /** Lower-case hex SHA-256 of the zip. */
   sha256: string;
+  /** The adapter's version, from its TOC (`readAdapterVersion`). */
+  version: string;
+  /** The zip's bytes. */
+  data: Buffer;
   /** Bytes of the zip. */
   size: number;
 }
@@ -32,6 +39,7 @@ export interface AdapterZip {
 interface AdapterRecord {
   folder: string;
   sha256: string;
+  version: string;
 }
 
 /**
@@ -47,19 +55,20 @@ export function writeAdapterZips(kits: readonly CheckedKit[], outDir: string): A
     if (adapterFolder === null) continue;
     const zip = zipAdapter(source.adapterDir, adapterFolder);
     const path = join(outDir, `${manifest.kit}.zip`);
-    const record: AdapterRecord = { folder: adapterFolder, sha256: sha256(zip) };
+    const record: AdapterRecord = { folder: adapterFolder, sha256: sha256(zip), version: readAdapterVersion(source.adapterDir) };
     writeFileSync(path, zip);
     writeFileSync(join(outDir, `${manifest.kit}.json`), `${JSON.stringify(record, null, 2)}\n`);
-    zips.push({ ...record, path, size: zip.length });
+    zips.push({ ...record, path, data: zip, size: zip.length });
   }
   return zips;
 }
 
 /**
  * Reads the zip the build wrote for `kit` from `dir`. Throws when it is
- * missing, when its bytes do not match the recorded sha256, or when it holds
- * another folder than the manifest names. It does not compare the zip with
- * the kit's `adapter/` folder: the build that made `dir` is the pin (§5).
+ * missing, when its bytes do not match the recorded sha256, when it holds
+ * another folder than the manifest names, or when the record has no semver
+ * version. It does not compare the zip with the kit's `adapter/` folder: the
+ * build that made `dir` is the pin (§5).
  */
 export function readAdapterZip(dir: string, kit: string, folder: string): AdapterZip {
   const path = join(dir, `${kit}.zip`);
@@ -71,10 +80,47 @@ export function readAdapterZip(dir: string, kit: string, folder: string): Adapte
   } catch {
     throw new Error(`no adapter zip for kit "${kit}" in ${dir}. The platform build makes it.`);
   }
-  if (record.sha256 !== sha256(zip) || record.folder !== folder) {
+  if (record.sha256 !== sha256(zip) || record.folder !== folder || typeof record.version !== "string" || !SEMVER.test(record.version)) {
     throw new Error(`the adapter zip for kit "${kit}" in ${dir} does not match its record or the manifest. Rebuild the platform.`);
   }
-  return { folder, path, sha256: record.sha256, size: zip.length };
+  return { folder, path, sha256: record.sha256, version: record.version, data: zip, size: zip.length };
+}
+
+/**
+ * The semver of the manifest's `version` (§6.1), from the SDK's schema, so
+ * adapter and manifest versions accept the same format.
+ */
+const SEMVER = new RegExp(schema.properties.version.pattern);
+
+/** A TOC metadata line `## Version: <value>`, as the adapter's Lua tests read it. */
+const TOC_VERSION = /^##\s*Version:(.*)$/;
+
+/**
+ * The adapter's version (§8.2): the `## Version` of the addon's TOC files, the
+ * `.toc` files at the top of `adapterDir`. The WoW client reads that line
+ * back, and the adapter stamps it into SavedVariables as `addon_version`
+ * (§6.3). `addon-v` release tags use the same number (§5). Throws unless
+ * there is a TOC, each TOC has one `## Version`, and all hold the same semver.
+ */
+export function readAdapterVersion(adapterDir: string): string {
+  const tocs = readdirSync(adapterDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && !entry.name.startsWith(".") && entry.name.toLowerCase().endsWith(".toc"))
+    .map((entry) => entry.name)
+    .sort();
+  let version: string | undefined;
+  for (const toc of tocs) {
+    const lines = readFileSync(join(adapterDir, toc), "utf8").replace(/^\uFEFF/, "").split(/\r?\n/);
+    const found = lines.flatMap((line) => TOC_VERSION.exec(line.trim())?.[1]?.trim() ?? []);
+    if (found.length !== 1 || !SEMVER.test(found[0] ?? "")) {
+      throw new Error(`${join(adapterDir, toc)} must have one "## Version:" line with a semver version such as 0.1.0 (§8.2)`);
+    }
+    if (version !== undefined && found[0] !== version) {
+      throw new Error(`the .toc files in ${adapterDir} name different versions; they must name the same one`);
+    }
+    version = found[0];
+  }
+  if (version === undefined) throw new Error(`${adapterDir} holds no .toc file, so the adapter has no version (§8.2)`);
+  return version;
 }
 
 /**
