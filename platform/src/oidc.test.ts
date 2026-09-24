@@ -119,11 +119,21 @@ class Browser {
   readonly cookies = new Map<string, string>();
   constructor(private readonly origin: string) {}
 
-  async get(path: string, accept = "text/html"): Promise<Response> {
+  get(path: string, accept = "text/html"): Promise<Response> {
+    return this.send("GET", path, { accept });
+  }
+
+  /** A POST of the consent page, from the page's origin: `origin`. */
+  post(path: string, origin: string): Promise<Response> {
+    return this.send("POST", path, { accept: "application/json", origin });
+  }
+
+  private async send(method: string, path: string, headers: Record<string, string>): Promise<Response> {
     const cookie = [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ");
     const res = await fetch(path.startsWith("http") ? path : `${this.origin}${path}`, {
+      method,
       redirect: "manual",
-      headers: { accept, ...(cookie === "" ? {} : { cookie }) },
+      headers: { ...headers, ...(cookie === "" ? {} : { cookie }) },
     });
     for (const line of res.headers.getSetCookie()) {
       const pair = line.split(";")[0] ?? "";
@@ -138,7 +148,9 @@ class Browser {
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Postgres", () => {
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const issuer = "http://localhost:4790";
   const redirectUri = "https://agent.example/callback";
+  const verifier = randomBytes(32).toString("base64url");
   let admin: Pool;
   let pool: Pool;
   let sessions: WebSessions;
@@ -155,16 +167,17 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     // A client stored as dynamic registration will store one (RED-304).
     await new PostgresAdapter(pool, "Client").upsert("agent", {
       client_id: "agent",
+      client_name: "Test Agent",
       redirect_uris: [redirectUri],
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code"],
       response_types: ["code"],
     });
     sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
-    const oidc = createOidcProvider({ pool, issuer: "http://localhost:4790", keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
+    const oidc = createOidcProvider({ pool, issuer, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
     const app = createApp({
       health: { checkDatabase: () => Promise.resolve() },
-      auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: "http://localhost:4790", log: () => {} },
+      auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: issuer, log: () => {} },
       oidc,
     });
     flowServer = createServer(app).listen(0, "127.0.0.1");
@@ -182,16 +195,20 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     }
   });
 
-  async function signIn(browser: Browser): Promise<string> {
-    const { rows } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
-    const user = rows[0] ?? { id: "", uuid: "" };
-    browser.cookies.set(sessions.cookieName, (await sessions.create(user.id)).token);
-    return user.uuid;
+  /** Signs the browser in as a new user, or as the user `userId`. Answers the user's id. */
+  async function signIn(browser: Browser, userId?: string): Promise<string> {
+    let id = userId;
+    if (id === undefined) {
+      const { rows } = await pool.query<{ id: string }>("insert into users default values returning id");
+      id = rows[0]?.id ?? "";
+    }
+    browser.cookies.set(sessions.cookieName, (await sessions.create(id)).token);
+    return id;
   }
 
   /** Starts an authorization request and answers the `/interaction/:uid` path it sends the browser to. */
   async function authorize(browser: Browser, extra = ""): Promise<string> {
-    const challenge = createHash("sha256").update(randomBytes(32).toString("base64url")).digest("base64url");
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
     const query = new URLSearchParams({
       client_id: "agent",
       redirect_uri: redirectUri,
@@ -205,6 +222,28 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     const location = res.headers.get("location") ?? "";
     expect(location).toMatch(/^\/interaction\/[\w-]+$/);
     return location;
+  }
+
+  /** Starts an authorization request in a signed-in browser and follows it to the consent page. Answers the interaction's path. */
+  async function reachConsent(browser: Browser): Promise<string> {
+    const resume = (await browser.get(await authorize(browser))).headers.get("location") ?? "";
+    const path = (await browser.get(resume)).headers.get("location") ?? "";
+    const page = await browser.get(path);
+    expect(page.status).toBe(303);
+    expect(page.headers.get("location")).toBe(`/consent/${path.split("/")[2]}`);
+    return path;
+  }
+
+  /** Follows the `location` an answer on the consent page gives, back through oidc-provider to the client. */
+  async function answer(browser: Browser, path: string, choice: "approve" | "deny"): Promise<URL> {
+    const res = await browser.post(`${path}/${choice}`, issuer);
+    expect(res.status).toBe(200);
+    const { location } = (await res.json()) as { location: string };
+    const callback = await browser.get(location);
+    expect(callback.status).toBe(303);
+    const url = new URL(callback.headers.get("location") ?? "");
+    expect(`${url.origin}${url.pathname}`).toBe(redirectUri);
+    return url;
   }
 
   async function prompt(interactionPath: string): Promise<{ name: string; reasons: string[] }> {
@@ -257,5 +296,44 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
 
     await signIn(browser);
     expect((await browser.get(path)).headers.get("location")).toContain("/oauth/authorize/");
+  });
+
+  it("approves at the consent page: the grant is saved and the client exchanges its code for a token", async () => {
+    const browser = new Browser(base);
+    await signIn(browser);
+    const path = await reachConsent(browser);
+    const details = await browser.get(`${path}/details`, "application/json");
+    expect(await details.json()).toMatchObject({ client_name: "Test Agent", redirect_host: "agent.example", scopes: ["openid"] });
+    // Another site cannot answer for the user.
+    expect((await browser.post(`${path}/approve`, "https://evil.example")).status).toBe(403);
+
+    const callback = await answer(browser, path, "approve");
+    const code = callback.searchParams.get("code") ?? "";
+    expect(code).not.toBe("");
+    const token = await fetch(`${base}/oauth/token`, {
+      method: "POST",
+      body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: "agent", code_verifier: verifier }),
+    });
+    expect(token.status).toBe(200);
+    expect(await token.json()).toMatchObject({ access_token: expect.any(String), token_type: "Bearer", scope: "openid" });
+  });
+
+  it("denies at the consent page: the client gets access_denied", async () => {
+    const browser = new Browser(base);
+    await signIn(browser);
+    const callback = await answer(browser, await reachConsent(browser), "deny");
+    expect(callback.searchParams.get("error")).toBe("access_denied");
+    expect(callback.searchParams.has("code")).toBe(false);
+  });
+
+  it("takes no answer from another browser, even one signed in as the same user", async () => {
+    const owner = new Browser(base);
+    const userId = await signIn(owner);
+    const path = await reachConsent(owner);
+    const other = new Browser(base);
+    await signIn(other, userId);
+    expect((await other.post(`${path}/approve`, issuer)).status).toBe(400);
+    expect((await other.post(`${path}/deny`, issuer)).status).toBe(400);
+    expect((await other.get(`${path}/details`, "application/json")).status).toBe(400);
   });
 });

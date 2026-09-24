@@ -205,3 +205,47 @@ code {
   padding-left: 20px;
   color: var(--og-ink-soft);
 }
+
+/* Agent consent */
+
+.og-consent strong,
+.og-consent code {
+  overflow-wrap: anywhere;
+}
+
+.og-consent ul {
+  margin: 0 0 16px;
+  padding-left: 20px;
+}
+
+.og-consent p[role="alert"] {
+  color: var(--og-error);
+}
+
+.og-consent__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.og-consent__actions button {
+  min-width: 120px;
+  border: 1px solid var(--og-ink);
+  cursor: pointer;
+}
+
+.og-consent__actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.og-button--secondary {
+  background: none;
+  color: var(--og-ink);
+}
+
+.og-button--secondary:hover {
+  background: var(--og-line);
+  color: var(--og-ink);
+}
