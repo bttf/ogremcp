@@ -1,0 +1,21 @@
+[
+  { "id": "npc-1", "type": "npc_location", "zone": "Elwynn Forest", "query": "Goldshire warrior trainer Elwynn Forest", "expect": ["Lyria Du Lac"] },
+  { "id": "npc-2", "type": "npc_location", "zone": "Durotar", "query": "Razor Hill hunter trainer Durotar", "expect": ["Thotar"] },
+  { "id": "npc-3", "type": "npc_location", "zone": "Westfall", "query": "Salma Saldean location Westfall", "expect": ["Saldean's Farm", "farm house", "56, 30"] },
+
+  { "id": "obj-1", "type": "object_location", "zone": "Elwynn Forest", "query": "Milly's Harvest quest where to find the crates Northshire", "expect": ["vineyard", "southeast from Northshire"] },
+  { "id": "obj-2", "type": "object_location", "zone": "Durotar", "query": "Cactus Apple Surprise quest where to find cactus apples Valley of Trials", "expect": ["near the cactus", "throughout the Valley of Trials", "around Valley of Trials"] },
+  { "id": "obj-3", "type": "object_location", "zone": "Westfall", "query": "Poor Old Blanchy quest where to find handful of oats Westfall", "expect": ["Sack of Oats", "Sacks of Oats", "farms in"] },
+
+  { "id": "qst-1", "type": "quest_step", "zone": "Elwynn Forest", "query": "Young Lovers quest Maybell Maclure Elwynn Forest next step", "expect": ["Love Letter to Tommy Joe"] },
+  { "id": "qst-2", "type": "quest_step", "zone": "Durotar", "query": "Sarkoth quest Hana'zua Valley of Trials what to do next", "expect": ["to Gornek", "claw back to Hana'zua"] },
+  { "id": "qst-3", "type": "quest_step", "zone": "Westfall", "query": "The Defias Brotherhood quest Gryan Stoutmantle Westfall next step", "expect": ["Wiley in Lakeshire"] },
+
+  { "id": "drp-1", "type": "drop_source", "zone": "Elwynn Forest", "query": "Large Candle drop Kobold Candles quest Elwynn Forest", "expect": ["Kobold Miner", "from kobolds", "from Kobolds"] },
+  { "id": "drp-2", "type": "drop_source", "zone": "Durotar", "query": "Scorpid Worker Tail drop Sting of the Scorpid Durotar", "expect": ["looted from Scorpid Worker"] },
+  { "id": "drp-3", "type": "drop_source", "zone": "Westfall", "query": "Goretusk Liver drop Westfall", "expect": ["Young Goretusk", "drop from: Goretusk"] },
+
+  { "id": "mec-1", "type": "mechanic", "zone": "Elwynn Forest", "query": "warrior Defensive Stance quest what level", "expect": ["level 10"] },
+  { "id": "mec-2", "type": "mechanic", "zone": "Durotar", "query": "hunter Taming the Beast quest level Durotar", "expect": ["level 10"] },
+  { "id": "mec-3", "type": "mechanic", "zone": "Elwynn Forest", "query": "apprentice riding skill level and cost", "expect": ["level 40"] }
+]

@@ -77,10 +77,13 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed
     throw parseError(describeIssue(result.error));
   }
   const { schema, client, character, captured_at, state } = result.data;
-  const { flavor, rules } = detect(client);
+  // A flavor the manifest does not register is not rejected here: ingest
+  // checks the registry (§6.1, §8.3).
+  const { flavor, rules, unknownFlavor } = detect(client);
   return {
     flavor,
     rules,
+    ...(unknownFlavor && { unknownFlavor }),
     // The GUID is the character key (§6.3), so a character without one has no key.
     character: character?.guid ? { key: character.guid, name: character.name, realm: character.realm } : null,
     capturedAt: capturedAt(captured_at),

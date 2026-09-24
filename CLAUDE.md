@@ -54,8 +54,9 @@ does, so that every import resolves.
   import or an alias (tsconfig `paths`, package.json `imports`) that leaves its
   own package, and any import that does not resolve.
 - In `platform`, only the kit registry, `platform/src/kits/registry.ts`, may
-  import `@ogmcp/kit-*`, and it may not re-export a kit. RED-311 creates it at
-  that path. If the path changes, change `KIT_REGISTRY` in
+  import `@ogmcp/kit-*`, and it may not re-export a kit. It imports a kit's
+  exports by name: no `import * as`, and a default import only of a kit's JSON
+  file. If the path changes, change `KIT_REGISTRY` in
   `.dependency-cruiser.cjs` and `scripts/lint-seams.mjs` too.
 - The CI `bridge` job fails if the bridge builds from Go code in the repo
   outside `bridge/`.
@@ -114,7 +115,9 @@ unreachable.
 ## Commands
 
 - `pnpm install`
-- `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package.
+- `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package. The platform
+  build also zips each kit's `adapter/` into `platform/dist/adapters` (§8.2);
+  the platform does not start without those zips.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
 - `make -C bridge dist`: unsigned dev builds of the bridge in `bridge/dist/`:
   the Windows binary and the macOS universal binary as a zipped `.app`. Needs
