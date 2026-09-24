@@ -24,7 +24,8 @@ import { currentUser, type WebSessions } from "./web-sessions.js";
  *   this site's `Origin`.
  *
  * A provider without credentials answers 503. Failures answer with a status
- * and a plain-text sentence; the sign-in page (RED-296) comes later.
+ * and a plain-text sentence. The web UI's Sign in page, `/signin`, links to
+ * the `GET /auth/{google,discord}` routes.
  */
 export interface AuthOptions {
   pool: Pool;
