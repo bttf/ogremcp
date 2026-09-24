@@ -22,9 +22,11 @@
     "test:adapter": "node test/run.mjs"
   },
   "dependencies": {
-    "@ogmcp/sdk": "workspace:*"
+    "@ogmcp/sdk": "workspace:*",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/node": "^24.13.6",
     "ajv": "^8.20.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
