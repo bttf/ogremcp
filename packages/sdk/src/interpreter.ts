@@ -24,12 +24,25 @@ export interface Character {
   realm: string;
 }
 
+/** Why an upload's flavor is "unknown" (§6.3.1). JSON-serializable. */
+export interface UnknownFlavor {
+  /** For logs, not for users. */
+  reason: string;
+  facts: Record<string, unknown> | null;
+}
+
 /** What `Interpreter.parse` returns for one upload. */
 export interface Parsed<State> {
   /** Mapped from the adapter's detection facts (§6.3.1). */
   flavor: string;
   /** E.g. `["hardcore"]`; `[]` on normal realms. */
   rules: string[];
+  /**
+   * Set only when `flavor` is "unknown": why, and the raw detection facts,
+   * for the platform to log (§6.3.1). `parse` is pure, so it returns them
+   * instead of logging. `facts` is null when the upload had none.
+   */
+  unknownFlavor?: UnknownFlavor;
   character: Character | null;
   /**
    * The adapter's capture stamp. When null, the platform falls back to the
