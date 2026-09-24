@@ -19,8 +19,8 @@ vi.mock("./detect.js", async (importOriginal) => {
 });
 
 const STUB = {
-  era: { name: "Zoëla", project_id: 2, version: "1.15.9", build: "69722", interface: 11509 },
-  forever: { name: "Grimble", project_id: 1, version: "1.60.1", build: "69893", interface: 16001 },
+  era: { name: "Zoëla", flavor: "classic_era", project_id: 2, version: "1.15.9", build: "69722", interface: 11509 },
+  forever: { name: "Grimble", flavor: "forever", project_id: 1, version: "1.60.1", build: "69893", interface: 16001 },
 };
 
 const files = { era: "", forever: "" };
@@ -48,17 +48,18 @@ function parse(input: string | Uint8Array) {
 describe.each(["era", "forever"] as const)("the %s stub world's file", (client) => {
   it("parses into the §6.2 Parsed shape with the §6.3 sections", () => {
     const text = files[client];
-    const { name, ...facts } = STUB[client];
+    const { name, flavor, ...facts } = STUB[client];
     const parsed = parse(text);
 
     expect(parsed).toMatchObject({
-      flavor: "unknown",
+      flavor,
       rules: [],
       character: { key: "Player-0000-00000001", name, realm: "Testrealm" },
       capturedAt: new Date(Number(/\["captured_at"\] = (\d+)/.exec(text)?.[1]) * 1000),
       adapterSchema: 1,
     });
     expect(detect).toHaveBeenLastCalledWith({ ...facts, season_id: null });
+    expect(parsed).not.toHaveProperty("unknownFlavor");
 
     const { state } = parsed;
     expect(state.character).toMatchObject({ name, level: 12, xp_max: 7600, in_combat: true, resting: true, dead: false });
@@ -80,6 +81,14 @@ it.each([0, -1, 9_000_000_000_000, 253_402_300_000])("reads captured_at %d as un
   expect(parse(text).capturedAt).toBeNull();
 });
 
+it("returns an unknown flavor's raw facts for the platform to log (§6.3.1)", () => {
+  const parsed = parse(files.era.replace('["interface"] = 11509', '["interface"] = 20506'));
+  expect(parsed).toMatchObject({
+    flavor: "unknown",
+    unknownFlavor: { reason: expect.stringContaining("20506"), facts: { project_id: 2, interface: 20506 } },
+  });
+});
+
 describe("malformed input is a ParseError", () => {
   const era = () => files.era;
   it.each([
@@ -87,7 +96,8 @@ describe("malformed input is a ParseError", () => {
     ["a function call", () => era().replace('"Zoëla"', 'os.execute("x")'), /unexpected "os"/],
     ["a newer schema", () => era().replace('["schema"] = 1,', '["schema"] = 2,'), /saves data format 2/],
     ["an older schema", () => era().replace('["schema"] = 1,', '["schema"] = 0,'), /out of date/],
-    ["a wrong type", () => era().replace('["level"] = 12,', '["level"] = "12",'), /at OpenGamerMCPDB\.state\.character\.level:/],
+    ["a 4 MB client version", () => era().replace('"1.15.9"', `"${"1".repeat(4_000_000)}"`), /at OpenGamerMCPDB\.client\.version:/],
+    ["a wrong type",() => era().replace('["level"] = 12,', '["level"] = "12",'), /at OpenGamerMCPDB\.state\.character\.level:/],
     ["no OpenGamerMCPDB", () => "OtherDB = {}", /holds no Open Gamer MCP data/],
     ["too deep", () => `OpenGamerMCPDB = ${"{".repeat(33)}${"}".repeat(33)}`, /more than 32 levels deep/],
     ["too many values", () => `OpenGamerMCPDB = {${"1,".repeat(200_000)}}`, /more than 200000 values/],
