@@ -15,7 +15,8 @@ import type { Interpreter, Manifest } from "@ogmcp/sdk";
 import { ADAPTERS_DIR, type AdapterZip, readAdapterZip } from "./adapter.js";
 import { checkKits, type KitSource } from "./validate.js";
 
-const require = createRequire(import.meta.url);
+// Only `resolve`: the registry finds kit files, and loads no module this way.
+const { resolve } = createRequire(import.meta.url);
 
 /** A kit's `adapter/` folder, next to the `manifest.json` that `manifestPath` names. */
 function adapterDir(manifestPath: string): string {
@@ -28,7 +29,7 @@ export const KIT_SOURCES: readonly KitSource[] = [
     package: "@ogmcp/kit-wow",
     manifest: wowManifest,
     interpreter: wowInterpreter,
-    adapterDir: adapterDir(require.resolve("@ogmcp/kit-wow/manifest.json")),
+    adapterDir: adapterDir(resolve("@ogmcp/kit-wow/manifest.json")),
   },
 ];
 

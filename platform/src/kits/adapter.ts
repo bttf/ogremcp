@@ -58,7 +58,8 @@ export function writeAdapterZips(kits: readonly CheckedKit[], outDir: string): A
 /**
  * Reads the zip the build wrote for `kit` from `dir`. Throws when it is
  * missing, when its bytes do not match the recorded sha256, or when it holds
- * another folder than the manifest names: the build is missing or stale.
+ * another folder than the manifest names. It does not compare the zip with
+ * the kit's `adapter/` folder: the build that made `dir` is the pin (§5).
  */
 export function readAdapterZip(dir: string, kit: string, folder: string): AdapterZip {
   const path = join(dir, `${kit}.zip`);
@@ -79,8 +80,9 @@ export function readAdapterZip(dir: string, kit: string, folder: string): Adapte
 /**
  * Zips the files that ship in `adapterDir`, each under `folder/`. Dotfiles,
  * dot-folders, test folders (`test`, `tests`), and test files (`*_test.*`,
- * `*.test.*`, `*.spec.*`) stay out. A link or other special file fails the
- * build: the bridge refuses links (§7).
+ * `*.test.*`, `*.spec.*`) stay out. A link or other special file, or a name
+ * with `\` or `:`, fails the build: the bridge refuses links and paths that
+ * leave the folder (§7).
  *
  * The zip is the same bytes for the same files: entries are sorted, every
  * entry has the same time and mode, and entries are stored, not deflated, so
@@ -94,6 +96,8 @@ export function zipAdapter(adapterDir: string, folder: string): Buffer {
 
 const TEST_DIR = /^tests?$/;
 const TEST_FILE = /(_test|\.test|\.spec)\.[^.]+$/;
+/** A separator or drive on Windows: `a\..\..\x.lua` would leave the folder there. */
+const UNSAFE_NAME = /[\\:]/;
 
 /** The shipped files under `dir`, as `/`-separated paths relative to the adapter folder. */
 function shippedFiles(root: string, dir: string): string[] {
@@ -101,6 +105,9 @@ function shippedFiles(root: string, dir: string): string[] {
   for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
     const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
+    if (UNSAFE_NAME.test(entry.name)) {
+      throw new Error(`${join(root, path)}: a name with "\\" or ":" is a path or drive on Windows, and the bridge refuses it (§7)`);
+    }
     if (entry.isDirectory()) {
       if (!TEST_DIR.test(entry.name)) files.push(...shippedFiles(root, path));
     } else if (entry.isFile()) {

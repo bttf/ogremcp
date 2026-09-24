@@ -101,4 +101,14 @@ describe("zipAdapter", () => {
     utimesSync(join(dir, "a.lua"), new Date(2001, 0, 1), new Date(2001, 0, 1));
     expect(zipAdapter(dir, "Addon").equals(first)).toBe(true);
   });
+
+  it("fails on a name that is a path on Windows (§7)", () => {
+    const bad = mkdtempSync(join(tmpdir(), "ogmcp-adapter-bad-"));
+    try {
+      writeFileSync(join(bad, "a\\..\\..\\evil.lua"), "-- evil\n");
+      expect(() => zipAdapter(bad, "Addon")).toThrow(/a name with "\\" or ":"/);
+    } finally {
+      rmSync(bad, { recursive: true, force: true });
+    }
+  });
 });
