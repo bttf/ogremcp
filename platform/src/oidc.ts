@@ -1,12 +1,13 @@
 import type { EventEmitter } from "node:events";
 
 import express, { type Express, type Request, type Response, type Router } from "express";
-import Provider, { type Account, type Configuration, errors, type Interaction, interactionPolicy } from "oidc-provider";
+import Provider, { type Account, type Configuration, errors, type Grant, type Interaction, interactionPolicy } from "oidc-provider";
 import type { Pool } from "pg";
 
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
+import { requireSameOrigin } from "./same-origin.js";
 import { currentUser } from "./web-sessions.js";
 
 /**
@@ -25,14 +26,14 @@ import { currentUser } from "./web-sessions.js";
  * no web session, or a web session of another user, is sent to
  * `/interaction/:uid`, which sends a signed-out browser to sign in and back,
  * and completes the login prompt with the signed-in user's uuid as the
- * account id.
+ * account id. The consent prompt goes to the web UI's Agent consent page,
+ * `/consent/:uid`, where the user approves or denies the agent (§9, §13.2).
  *
  * Off here, each for its own issue: dynamic client registration (RED-304),
  * static clients (RED-305), client ID metadata documents (RED-306), the
  * device flow (RED-307), loopback redirects (RED-308). oidc-provider's
  * defaults stand for scopes, resource indicators, and token lifetimes
- * (RED-302). The consent page is RED-303. The MCP endpoint's resource
- * metadata is `mcp.ts`.
+ * (RED-302). The MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
@@ -54,6 +55,12 @@ export const DISCOVERY_PATHS: readonly string[] = ["/.well-known/openid-configur
  * passes `return_to` on to `/auth/{google,discord}`.
  */
 export const SIGN_IN_PATH = "/signin";
+
+/**
+ * The web UI's Agent consent page (§13.2). An interaction at the consent
+ * prompt sends the browser to `/consent/:uid`.
+ */
+export const CONSENT_PATH = "/consent";
 
 /**
  * oidc-provider's endpoint paths. Its defaults collide with the web UI:
@@ -235,20 +242,107 @@ function signInRedirect(interaction: Interaction): string {
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(`/interaction/${interaction.uid}`)}`;
 }
 
+/** What oidc-provider's consent prompt found missing from the grant, in `prompt.details`. */
+interface ConsentDetails {
+  missingOIDCScope?: string[];
+  missingOIDCClaims?: string[];
+  /** Scopes by resource indicator. */
+  missingResourceScopes?: Record<string, string[]>;
+}
+
+/**
+ * The grant approval saves: the interaction's grant, or a new one when it has
+ * none, extended with what the consent prompt found missing. Those are the
+ * requested scopes and claims, and the requested scopes of each requested
+ * resource. It is not saved here.
+ */
+async function consentGrant(provider: Provider, interaction: Interaction, accountId: string): Promise<Grant> {
+  const existing = interaction.grantId === undefined ? undefined : await provider.Grant.find(interaction.grantId);
+  const grant = existing ?? new provider.Grant({ accountId, clientId: String(interaction.params["client_id"]) });
+  const details = interaction.prompt.details as ConsentDetails;
+  if (details.missingOIDCScope !== undefined) grant.addOIDCScope(details.missingOIDCScope);
+  if (details.missingOIDCClaims !== undefined) grant.addOIDCClaims(details.missingOIDCClaims);
+  for (const [resource, scopes] of Object.entries(details.missingResourceScopes ?? {})) grant.addResourceScope(resource, scopes);
+  return grant;
+}
+
+/**
+ * The requested scopes that `grant` holds, in the order of the request. A
+ * scope oidc-provider does not define never enters a grant, so it is left out.
+ */
+function grantedScopes(interaction: Interaction, grant: Grant): string[] {
+  const held = new Set(grant.getOIDCScope().split(" "));
+  for (const resource of Object.keys(grant.resources ?? {})) {
+    for (const scope of grant.getResourceScope(resource).split(" ")) held.add(scope);
+  }
+  const requested = interaction.params["scope"];
+  return typeof requested === "string" ? [...new Set(requested.split(" "))].filter((scope) => held.has(scope)) : [];
+}
+
+/**
+ * The host of the redirect URI, where approval sends the authorization code.
+ * A dynamically registered or CIMD client names itself, so the consent page
+ * shows this host too (§9). A URI without a host, such as a custom scheme,
+ * gives its scheme.
+ */
+function redirectHost(redirectUri: unknown): string | null {
+  const url = typeof redirectUri === "string" ? URL.parse(redirectUri) : null;
+  if (url === null) return null;
+  return url.host === "" ? url.protocol : url.host;
+}
+
+/**
+ * The interaction of a request under `/interaction/:uid/`, when it is this
+ * browser's (`findInteraction`) and the signed-in user's. Otherwise a JSON
+ * error is sent, and the answer is null.
+ */
+async function ownInteraction(
+  provider: Provider,
+  req: Request,
+  res: Response,
+): Promise<{ interaction: Interaction; accountId: string } | null> {
+  const interaction = await findInteraction(provider, req, res);
+  if (interaction === null) {
+    res.status(400).json({ error: "interaction_not_found" });
+    return null;
+  }
+  const user = currentUser(res);
+  if (user === null) {
+    res.status(401).json({ error: "signed_out", sign_in: signInRedirect(interaction) });
+    return null;
+  }
+  if (interaction.session?.accountId !== user.uuid) {
+    res.status(403).json({ error: "other_account" });
+    return null;
+  }
+  return { interaction, accountId: user.uuid };
+}
+
 /**
  * - `GET /interaction/:uid`, where oidc-provider sends the browser. Signed
  *   out, it goes to sign in and comes back here. Signed in, a login prompt is
  *   completed with the user's uuid and the time of the sign-in, and the
  *   browser goes back to oidc-provider. When the request asks for a fresh
  *   login (`needsFreshSignIn`), a sign-in from before it does not count: the
- *   browser goes through sign-in again first. The consent prompt is RED-303's
- *   page; until then it answers 501.
+ *   browser goes through sign-in again first. The consent prompt goes to the
+ *   Agent consent page, `/consent/:uid`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
- *   client, and what it asks for. It answers only the user the interaction
- *   belongs to.
+ *   client, the host of its redirect URI, and the scopes approval grants.
+ * - `POST /interaction/:uid/approve`: at the consent prompt, saves the grant
+ *   (`consentGrant`) and answers `{ location }`, where the browser goes on to
+ *   oidc-provider, which sends the code to the client.
+ * - `POST /interaction/:uid/deny`: at the consent prompt, answers
+ *   `{ location }` likewise, and the client gets `error=access_denied`.
+ *
+ * The last three answer only the browser the interaction started in, signed
+ * in as the user it belongs to (`ownInteraction`). The POSTs need this site's
+ * `Origin`. They answer JSON rather than a redirect: the page's
+ * Content-Security-Policy has `form-action 'self'`, which a form's redirect
+ * on to the client's origin would break.
  */
 function interactionRouter(provider: Provider, pool: Pool): Router {
   const router = express.Router();
+  const sameOrigin = requireSameOrigin(provider.issuer);
 
   router.use("/interaction", (_req, res, next) => {
     res.set("Cache-Control", "no-store");
@@ -271,15 +365,13 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       const returnTo = await provider.interactionResult(req, res, { login: { accountId: user.uuid, ts } });
       return res.redirect(303, returnTo);
     }
-    return sendText(res, 501, "Approving an agent is not available yet.");
+    return res.redirect(303, `${CONSENT_PATH}/${interaction.uid}`);
   });
 
   router.get("/interaction/:uid/details", async (req, res) => {
-    const interaction = await findInteraction(provider, req, res);
-    if (interaction === null) return res.status(400).json({ error: "interaction_not_found" });
-    const user = currentUser(res);
-    if (user === null) return res.status(401).json({ error: "signed_out", sign_in: signInRedirect(interaction) });
-    if (interaction.session?.accountId !== user.uuid) return res.status(403).json({ error: "other_account" });
+    const own = await ownInteraction(provider, req, res);
+    if (own === null) return;
+    const { interaction, accountId } = own;
     const clientId = String(interaction.params["client_id"]);
     const client = await provider.Client.find(clientId);
     res.json({
@@ -288,8 +380,25 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       client_id: clientId,
       client_name: client?.metadata().client_name ?? null,
       redirect_uri: interaction.params["redirect_uri"] ?? null,
-      scope: interaction.params["scope"] ?? null,
+      redirect_host: redirectHost(interaction.params["redirect_uri"]),
+      scopes: grantedScopes(interaction, await consentGrant(provider, interaction, accountId)),
     });
+  });
+
+  router.post("/interaction/:uid/approve", sameOrigin, async (req, res) => {
+    const own = await ownInteraction(provider, req, res);
+    if (own === null) return;
+    if (own.interaction.prompt.name !== "consent") return res.status(400).json({ error: "not_consent_prompt" });
+    const grantId = await (await consentGrant(provider, own.interaction, own.accountId)).save();
+    res.json({ location: await provider.interactionResult(req, res, { consent: { grantId } }) });
+  });
+
+  router.post("/interaction/:uid/deny", sameOrigin, async (req, res) => {
+    const own = await ownInteraction(provider, req, res);
+    if (own === null) return;
+    if (own.interaction.prompt.name !== "consent") return res.status(400).json({ error: "not_consent_prompt" });
+    const result = { error: "access_denied", error_description: "The user denied the request." };
+    res.json({ location: await provider.interactionResult(req, res, result) });
   });
 
   return router;

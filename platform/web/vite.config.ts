@@ -25,6 +25,6 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: { "/api": PLATFORM, "/auth": PLATFORM, "/health": PLATFORM },
+    proxy: { "/api": PLATFORM, "/auth": PLATFORM, "/health": PLATFORM, "/interaction": PLATFORM, "/oauth": PLATFORM },
   },
 });
