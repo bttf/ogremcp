@@ -1,7 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -48,11 +49,30 @@ describe("loadKitRegistry", () => {
     expect(kit?.adapter).toMatchObject({
       folder: "OpenGamerMCP",
       sha256: createHash("sha256").update(zip).digest("hex"),
+      version: expect.stringMatching(/^\d+\.\d+\.\d+/),
       size: zip.length,
     });
+    expect(kit?.adapter?.data.equals(zip)).toBe(true);
     // A local .DS_Store stays out of the zip.
     const files = readdirSync(wow.adapterDir).filter((file) => !file.startsWith(".")).sort();
     expect(readZipNames(zip)).toEqual(files.map((file) => `OpenGamerMCP/${file}`));
+  });
+
+  it("serves as the adapter version the addon_version the adapter stamps (§6.3, §8.2)", () => {
+    // The adapter's Lua tests write the SavedVariables file of each stub
+    // client to `out`. The stubs answer GetAddOnMetadata from the TOC.
+    const out = mkdtempSync(join(tmpdir(), "ogmcp-saved-variables-"));
+    try {
+      const run = spawnSync(process.execPath, [join(dirname(wow.adapterDir), "test", "run.mjs"), out], { encoding: "utf8" });
+      expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+      const files = readdirSync(out);
+      expect(files.length).toBeGreaterThan(0);
+      const stamped = files.map((file) => /\["addon_version"\] = "([^"]*)"/.exec(readFileSync(join(out, file), "utf8"))?.[1]);
+      const version = loadKitRegistry({ adaptersDir }).get("wow")?.adapter?.version;
+      expect(stamped).toEqual(files.map(() => version));
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 
   it("refuses to start with an invalid manifest or tool name", () => {
