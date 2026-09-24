@@ -19,6 +19,27 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # A throwaway Postgres, the major version Railway runs, for the migration
+    # steps and the platform's Postgres tests. Trust auth: the server listens
+    # on the runner only, so the job holds no database password.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres?sslmode=disable
+      TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres?sslmode=disable
+
     steps:
       - uses: actions/checkout@v5
 
@@ -37,6 +58,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm build
+
+      # §11: apply the migrations to the empty database with the command the
+      # Railway pre-deploy runs, then again: the second run applies nothing.
+      - name: Migrate (dry run)
+        run: node platform/dist/migrate.js --dry-run
+
+      - name: Migrate
+        run: node platform/dist/migrate.js
+
+      - name: Migrate again, which applies nothing
+        run: |
+          out=$(node platform/dist/migrate.js)
+          echo "$out"
+          test "$out" = "migrate: nothing to apply"
 
       - run: pnpm typecheck
 
