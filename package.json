@@ -12,6 +12,11 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "test:bridge": "cd bridge && go vet ./... && go test ./..."
+    "test:bridge": "cd bridge && go vet ./... && go test ./...",
+    "lint:seams": "node scripts/check-workspace-deps.mjs && depcruise --output-type err-long packages kits platform"
+  },
+  "devDependencies": {
+    "dependency-cruiser": "^18.4.0",
+    "typescript": "^5.9.3"
   }
 }

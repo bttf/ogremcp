@@ -40,6 +40,21 @@ cannot see this one.
 `bridge/` is a standalone Go module. Files outside the four package paths are
 MIT (root `LICENSE`).
 
+## Package seams (§5)
+
+CI enforces the dependency rules in the table above. `pnpm lint:seams` runs the
+TypeScript checks locally.
+
+- `scripts/check-workspace-deps.mjs` fails if a `package.json` declares a
+  workspace dependency that §5 does not allow.
+- dependency-cruiser (`.dependency-cruiser.cjs`) fails any other cross-package
+  import, including a relative import that leaves its own package.
+- In `platform`, only the kit registry, `platform/src/kits/registry.ts`, may
+  import `@ogmcp/kit-*`. RED-311 creates it at that path. If the path changes,
+  change `KIT_REGISTRY` in `.dependency-cruiser.cjs` too.
+- The CI `bridge` job fails if the bridge builds from Go code in the repo
+  outside `bridge/`.
+
 ## Stack decisions (D1, §13.1)
 
 - Node 24, TypeScript, pnpm 10 workspaces, Vitest for tests.
@@ -56,6 +71,7 @@ MIT (root `LICENSE`).
 - `pnpm install`
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
+- `pnpm lint:seams`: the package seam checks (§5).
 
 ## In-game testing
 

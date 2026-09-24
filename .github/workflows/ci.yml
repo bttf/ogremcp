@@ -38,6 +38,26 @@ jobs:
 
       - run: pnpm test
 
+  # Package seams (§5): each package declares and imports only the workspace
+  # packages it may depend on. Rules: .dependency-cruiser.cjs and
+  # scripts/check-workspace-deps.mjs. No build needed.
+  seams:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint:seams
+
   # The Go module in bridge/.
   bridge:
     runs-on: ubuntu-latest
@@ -58,6 +78,20 @@ jobs:
       - run: go vet ./...
 
       - run: go test ./...
+
+      # §5: the bridge depends on nothing else in the repo. Fail if a package
+      # it builds from lives in the repo but outside bridge/, for example
+      # through a go.work file or a replace directive with a local path.
+      - name: Check the bridge builds from nothing else in the repo
+        run: |
+          root=$(git rev-parse --show-toplevel)
+          outside=$(go list -deps -f '{{.Dir}}' ./... | awk -v root="${root}/" -v own="${root}/bridge/" 'index($0 "/", root) == 1 && index($0 "/", own) != 1')
+          if [ -n "$outside" ]; then
+            echo "::error::The bridge builds from code in the repo outside bridge/ (§5):"
+            echo "$outside"
+            exit 1
+          fi
+          echo "The bridge builds from nothing in the repo outside bridge/."
 
   # Scan every commit reachable from the checked-out ref for secrets. The repo
   # goes public at P9 without a history rewrite, so a secret in any commit
