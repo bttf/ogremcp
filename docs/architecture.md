@@ -190,6 +190,7 @@ ogmcp/
 ### 6.2 Interpreter interface `[v1]` (sketch)
 
 ```ts
+/** `State` must be JSON-serializable: snapshots store it as `jsonb` (§11). */
 interface Interpreter<State> {
   /** Pure: no DB or network. Throws ParseError(userMessage) on bad or unsupported input. */
   parse(sourceId: string, bytes: Uint8Array): Parsed<State>;
@@ -208,7 +209,7 @@ interface Parsed<State> {
 interface ToolDef<State> {
   name: string;                   // must start with `${tool_prefix}_`
   description: string;
-  inputSchema: JSONSchema;
+  inputSchema: ToolInputSchema;  // a JSON Schema whose type is "object" (MCP)
   annotations?: ToolAnnotations;  // §10.5
   paidOnly?: boolean;             // §10.2, §14
   handler(args: unknown, ctx: ToolContext<State>): Promise<ToolResult>;
@@ -485,7 +486,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | `devices` | Bridges: name, OS, versions, last seen, grant |
 | `user_games` | Enabled kits per user |
 | `uploads` | Gzipped raw bytes (`bytea`), sha256, instance, kit version, adapter schema, parse status/error |
-| `snapshots` | Typed state (`jsonb`), `flavor`, `rules`, character key + name, `snapshot_at`, upload ref |
+| `snapshots` | Typed state (`jsonb`), `flavor`, `rules`, character key, name, and realm, `snapshot_at`, upload ref |
 | `search_cache` | Shared search and page cache (§12). Not linked to users. |
 | `events` | Tool-call and ingest events (§16) |
 | `issues` | `report_issue` records (§16.2) |
