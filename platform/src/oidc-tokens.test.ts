@@ -28,6 +28,23 @@ const CLIENT_ID = "test-client";
 const REDIRECT_URI = "https://agent.example/callback";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+describe("OAuth token settings", () => {
+  it("does not advertise DPoP: requireToken accepts only Bearer tokens", async () => {
+    // Discovery reaches no model, so nothing queries the database.
+    const oidc = createOidcProvider({ pool: {} as Pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
+    const discovery = createServer(oidc.callback()).listen(0, "127.0.0.1");
+    try {
+      await once(discovery, "listening");
+      const res = await fetch(`http://127.0.0.1:${(discovery.address() as AddressInfo).port}/.well-known/openid-configuration`);
+      const metadata = (await res.json()) as Record<string, unknown>;
+      expect(metadata["revocation_endpoint"]).toMatch(/\/oauth\/revoke$/);
+      expect(metadata["dpop_signing_alg_values_supported"]).toBeUndefined();
+    } finally {
+      discovery.close();
+    }
+  });
+});
+
 describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres", () => {
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;

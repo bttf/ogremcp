@@ -92,13 +92,13 @@ function flowResource(ctx: KoaContextWithOIDC, resources: Resources): string | u
   return DEVICE_ROUTES.has(ctx.oidc.route) ? resources.bridge : resources.mcp;
 }
 
-/** The provider settings for scopes, resources, token lifetimes, and revocation. `createOidcProvider` spreads them in. */
+/** The provider settings for scopes, resources, token lifetimes, revocation, and DPoP. `createOidcProvider` spreads them in. */
 export function tokenConfiguration(
   issuer: string,
   lifetimes: TokenLifetimes,
 ): {
   settings: Pick<Configuration, "scopes" | "ttl" | "issueRefreshToken" | "rotateRefreshToken" | "expiresWithSession">;
-  features: Pick<NonNullable<Configuration["features"]>, "resourceIndicators" | "revocation">;
+  features: Pick<NonNullable<Configuration["features"]>, "resourceIndicators" | "revocation" | "dPoP">;
 } {
   const resources = resourcesOf(issuer);
   const scopes = new Map<string, Scope>([
@@ -138,6 +138,8 @@ export function tokenConfiguration(
         },
       },
       revocation: { enabled: true },
+      // requireToken accepts only Bearer tokens, so no token is DPoP-bound.
+      dPoP: { enabled: false },
     },
   };
 }
@@ -186,8 +188,8 @@ const BEARER = /^Bearer +([A-Za-z0-9._~+/-]+=*) *$/i;
  *   or a token for another resource.
  * - 403 `insufficient_scope` for a token for this resource without `scope`.
  *
- * Every challenge ends with the `challenge` params and `scope`. A DPoP-bound
- * token is refused: this checks bearer tokens only.
+ * Every challenge ends with the `challenge` params and `scope`. DPoP is off,
+ * and a DPoP-bound token would be refused: this checks bearer tokens only.
  */
 export function requireToken({ provider, resource, scope, challenge = {} }: RequireTokenOptions): RequestHandler {
   function deny(res: Response, status: 401 | 403, error?: "invalid_token" | "insufficient_scope", description?: string): void {
