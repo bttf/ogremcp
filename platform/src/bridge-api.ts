@@ -2,13 +2,15 @@ import express, { type RequestHandler, type Response, type Router } from "expres
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
 
+import { DEFAULT_INGEST, ingestHandler, type IngestSettings } from "./ingest.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { currentToken, requireToken, resourcesOf } from "./oidc-tokens.js";
 
 /**
- * The bridge's kit endpoints (§8.2). The bridge fetches the manifests and
+ * The bridge's endpoints (§8.2). The bridge fetches the manifests and
  * adapters of its user's enabled kits after login, at each start, and on a
- * timer (§7).
+ * timer (§7), and posts each changed source instance to the ingest endpoint
+ * (§8.3).
  *
  * Every route needs an access token for the bridge API,
  * `<PUBLIC_BASE_URL>/api/v1`, with scope `ingest` (`requireToken`, §8.1). The
@@ -23,6 +25,7 @@ import { currentToken, requireToken, resourcesOf } from "./oidc-tokens.js";
  * - `GET /api/v1/kits/{kit}/adapter`: the adapter zip the platform build made
  *   from `kits/{kit}/adapter` (§5), as `application/zip`, with its sha256 in
  *   `ADAPTER_SHA256_HEADER`.
+ * - `POST /api/v1/ingest`: one upload of one source instance (`ingest.ts`).
  *
  * The manifest and adapter routes serve every kit in the registry, enabled or
  * not. They do not depend on tier or on the device limit: every approved
@@ -79,9 +82,11 @@ export interface BridgeApiOptions {
   provider: Provider;
   pool: Pool;
   kits: KitRegistry;
+  /** The ingest limits. Default: `DEFAULT_INGEST`. */
+  ingest?: IngestSettings;
 }
 
-export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits }: BridgeApiOptions): Router {
+export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = DEFAULT_INGEST }: BridgeApiOptions): Router {
   const router = express.Router();
   const requireIngest = requireToken({ provider, resource: resourcesOf(new URL(publicBaseUrl).origin).bridge, scope: "ingest" });
   const noStore: RequestHandler = (_req, res, next) => {
@@ -141,6 +146,8 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits }: BridgeA
       res.set(ADAPTER_SHA256_HEADER, kit.adapter.sha256).type("application/zip").send(kit.adapter.data);
     }),
   );
+
+  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest }));
 
   return router;
 }

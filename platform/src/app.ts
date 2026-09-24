@@ -6,6 +6,7 @@ import { type AuthOptions, authRouter } from "./auth.js";
 import { bridgeApiRouter } from "./bridge-api.js";
 import { failureCode } from "./db.js";
 import { type HealthOptions, healthRouter } from "./health.js";
+import type { IngestSettings } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
@@ -31,6 +32,8 @@ export interface AppOptions {
    * `oidc`, the bridge's kit endpoints (§8.2). Left out, neither is served.
    */
   kits?: KitRegistry;
+  /** `INGEST_MAX_UNCOMPRESSED_BYTES`: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
+  ingest?: IngestSettings;
   /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
   https?: boolean;
   /**
@@ -51,6 +54,7 @@ export function createApp({
   mcpAllowedOrigins,
   webRoot,
   kits,
+  ingest,
   https = false,
   trustProxyHops = 0,
   log = console.error,
@@ -66,7 +70,7 @@ export function createApp({
   if (auth !== undefined && oidc !== undefined) {
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins }));
     // The bridge's routes take an access token, not a web session (§8.1).
-    if (kits !== undefined) app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits }));
+    if (kits !== undefined) app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest }));
   }
   if (webRoot !== undefined) app.use(webFiles(webRoot));
   if (auth !== undefined) {

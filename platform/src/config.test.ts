@@ -10,6 +10,7 @@ import {
   DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS,
   loadConfig,
 } from "./config.js";
+import { DEFAULT_INGEST } from "./ingest.js";
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
@@ -37,6 +38,7 @@ describe("loadConfig", () => {
       tokenLifetimes: DEFAULT_TOKEN_LIFETIMES,
       cimdFetchLimits: DEFAULT_CIMD_FETCH_LIMITS,
       deviceCodeMisses: DEFAULT_MISSES,
+      ingest: DEFAULT_INGEST,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });

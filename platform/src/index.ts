@@ -3,7 +3,7 @@
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
 // endpoint's discovery (§9), the bridge's device flow (§8.1), and the
-// bridge's kit endpoints (§8.2).
+// bridge's kit and ingest endpoints (§8.2, §8.3).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -130,6 +130,7 @@ const app = createApp({
   mcpAllowedOrigins: config.mcpAllowedOrigins,
   webRoot,
   kits,
+  ingest: config.ingest,
   https,
   trustProxyHops: config.trustProxyHops,
 });
