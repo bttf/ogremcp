@@ -1,0 +1,29 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-store/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+
+# Go
+bridge/bin/
+*.test
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+*.swp
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/
