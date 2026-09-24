@@ -233,7 +233,9 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
     try {
       parser = busboy({
         headers: req.headers,
-        limits: { fields: 1, files: 1, fieldSize: META_MAX_BYTES, fileSize: maxFileBytes },
+        // A request has two parts. busboy emits partsLimit when a third one
+        // ends, a part it skips (one without a form-data disposition) too.
+        limits: { fields: 1, files: 1, parts: 3, fieldSize: META_MAX_BYTES, fileSize: maxFileBytes },
       });
     } catch {
       resolve(badRequest("The request must be multipart/form-data."));
@@ -256,6 +258,9 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
       meta = value;
     });
     parser.on("file", (name, stream) => {
+      // busboy destroys the stream with an error when the body ends inside
+      // it. Unheard, that error would end the process.
+      stream.on("error", () => fail(badRequest("The request is not valid multipart/form-data.")));
       if (name !== "file") {
         stream.resume();
         return fail(badRequest(PARTS));
@@ -269,6 +274,7 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
     });
     parser.on("fieldsLimit", () => fail(badRequest(PARTS)));
     parser.on("filesLimit", () => fail(badRequest(PARTS)));
+    parser.on("partsLimit", () => fail(badRequest(PARTS)));
     parser.on("error", () => fail(badRequest("The request is not valid multipart/form-data.")));
     parser.on("close", () => {
       if (settled) return;

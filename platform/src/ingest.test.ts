@@ -277,6 +277,32 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect((await deviceRow(deviceId))["first_upload_at"]).toEqual(expect.any(Date));
   });
 
+  it("answers a body that ends inside the file part, and keeps serving", async () => {
+    const { accessToken, deviceId } = await token(await newUser());
+    const good = upload(savedVariables(CAPTURED_AT));
+    const head = [
+      "--X",
+      'Content-Disposition: form-data; name="meta"',
+      "",
+      JSON.stringify(good.meta),
+      "--X",
+      'Content-Disposition: form-data; name="file"; filename="OpenGamerMCP.lua.gz"',
+      "Content-Type: application/octet-stream",
+      "",
+      "",
+    ].join("\r\n");
+    // A whole body by its Content-Length, with no closing boundary.
+    const res = await fetch(`${base}/api/v1/ingest`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "multipart/form-data; boundary=X" },
+      body: Buffer.concat([Buffer.from(head), good.gz.subarray(0, 10)]),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as IngestAnswer).status).toBe("bad_request");
+    expect((await post(accessToken, good)).res.status).toBe(201);
+    expect(await uploadsOf(deviceId)).toHaveLength(1);
+  });
+
   it("refuses a read token, a device that is revoked or missing, and a device of another user", async () => {
     const user = await newUser();
     const body = upload(savedVariables(CAPTURED_AT));

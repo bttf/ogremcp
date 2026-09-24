@@ -6,10 +6,11 @@
 -- - client_errors holds the bridge's `client.errors` counters sent with the
 --   upload (§8.3, §16.1), until the events table (§16) takes them.
 -- - The dedup lookup (§8.3) reads the last upload of one source instance of
---   one device.
+--   one device. Its index starts with device_id, so it replaces
+--   uploads_device.
 --
--- Dropping a NOT NULL, adding a nullable column without a default, and a new
--- index rewrite no rows.
+-- Dropping a NOT NULL, adding a nullable column without a default, and
+-- adding or dropping an index rewrite no rows.
 --
 -- One transaction: a failure in any statement leaves nothing behind.
 
@@ -23,5 +24,7 @@ alter table uploads add column client_errors jsonb;
 
 create index uploads_device_instance_recent
   on uploads (device_id, kit, source_id, instance, id desc);
+
+drop index uploads_device;
 
 commit;
