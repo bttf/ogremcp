@@ -1,0 +1,5 @@
+# `bridge/` is a standalone Go module, so it is not a pnpm workspace package.
+packages:
+  - packages/*
+  - kits/*
+  - platform

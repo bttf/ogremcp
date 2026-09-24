@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "interpreter",
+    "outDir": "dist",
+    "noEmit": true
+  },
+  "include": ["interpreter/**/*.ts"]
+}

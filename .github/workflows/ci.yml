@@ -1,0 +1,84 @@
+# Build, type-check, and test every package on each PR and each push to main.
+# No secrets, no deploy: nothing here reaches Railway.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The TypeScript workspace packages: packages/sdk, kits/wow, platform.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # The pnpm version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+  # The Go module in bridge/.
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v5
+
+      # The module has no dependencies yet, so there is no go.sum to key the
+      # cache on. go.mod changes whenever a dependency does.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.mod
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+  # Scan every commit reachable from the checked-out ref for secrets. The repo
+  # goes public at P9 without a history rewrite, so a secret in any commit
+  # fails CI. False positives are allowlisted in .gitleaks.toml. No token needed.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
+
+      - name: Scan git history
+        run: ./gitleaks git --redact --no-banner .

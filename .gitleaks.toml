@@ -1,0 +1,6 @@
+# gitleaks configuration. CI scans the full git history on every PR.
+# Allowlist entries are for confirmed false positives only. Each entry names
+# the file and the exact fabricated value, so a real secret in the same file
+# still fails the scan. There are none yet.
+[extend]
+useDefault = true
