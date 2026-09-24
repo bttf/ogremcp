@@ -14,7 +14,8 @@ import { failureCode } from "./db.js";
  * Files are named `NNNN_short_description.sql`. A file is never edited once
  * it has been applied anywhere: a change is a new file with the next number.
  * There are no down-migrations. A file holds plain SQL, with no psql
- * meta-commands.
+ * meta-commands and no transaction statements other than an optional leading
+ * `begin;` and trailing `commit;` (`stripTransaction`).
  *
  * A file is pending when `schema_migrations` has no row with its number.
  * Pending files run in numeric order, each in its own transaction together
@@ -111,20 +112,130 @@ export async function migrationStatus(pool: Pool, dir: string = MIGRATIONS_DIR):
   return { tracked: applied !== null, pending: files.filter((file) => !applied?.has(file.version)) };
 }
 
+interface Statement {
+  /** The statement without its comments, trimmed. */
+  text: string;
+  /** Offset of its first character that is not whitespace or a comment. */
+  start: number;
+  /** Offset just past its semicolon, or the end of the file. */
+  end: number;
+}
+
+const IDENTIFIER_CHAR = /^[A-Za-z0-9_$]$/;
+const DOLLAR_TAG = /\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/y;
+
+/** Offset just past the quote that closes the one at `open`. A doubled quote, or with `backslash` a backslash, escapes the next character. */
+function closeQuote(sql: string, open: number, backslash: boolean): number {
+  const quote = sql.charAt(open);
+  let i = open + 1;
+  while (i < sql.length) {
+    const c = sql.charAt(i);
+    if (backslash && c === "\\") {
+      i += 2;
+    } else if (c === quote && sql.charAt(i + 1) === quote) {
+      i += 2;
+    } else if (c === quote) {
+      return i + 1;
+    } else {
+      i += 1;
+    }
+  }
+  return sql.length;
+}
+
+/**
+ * The statements of a file, split at the semicolons outside comments, quoted
+ * strings and identifiers, and dollar-quoted bodies. One pass over the text.
+ */
+function splitStatements(sql: string): Statement[] {
+  const statements: Statement[] = [];
+  let text = "";
+  let start = -1;
+  const push = (end: number) => {
+    const trimmed = text.trim();
+    if (trimmed !== "") statements.push({ text: trimmed, start, end });
+    text = "";
+    start = -1;
+  };
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql.charAt(i);
+    const pair = sql.slice(i, i + 2);
+    if (pair === "--") {
+      const eol = sql.indexOf("\n", i);
+      i = eol === -1 ? sql.length : eol;
+      text += " ";
+      continue;
+    }
+    if (pair === "/*") {
+      // Block comments nest in Postgres.
+      let depth = 1;
+      i += 2;
+      while (i < sql.length && depth > 0) {
+        const inner = sql.slice(i, i + 2);
+        if (inner === "/*" || inner === "*/") {
+          depth += inner === "/*" ? 1 : -1;
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+      text += " ";
+      continue;
+    }
+    if (c === ";") {
+      push(i + 1);
+      i += 1;
+      continue;
+    }
+    if (start === -1 && c.trim() !== "") start = i;
+    let stop = i + 1;
+    const before = sql.charAt(i - 1);
+    if (c === "'" || c === '"') {
+      // E'...' strings take backslash escapes.
+      const escaped = c === "'" && (before === "E" || before === "e") && !IDENTIFIER_CHAR.test(sql.charAt(i - 2));
+      stop = closeQuote(sql, i, escaped);
+    } else if (c === "$" && !IDENTIFIER_CHAR.test(before)) {
+      DOLLAR_TAG.lastIndex = i;
+      const tag = DOLLAR_TAG.exec(sql)?.[0];
+      if (tag !== undefined) {
+        const close = sql.indexOf(tag, i + tag.length);
+        stop = close === -1 ? sql.length : close + tag.length;
+      }
+    }
+    text += sql.slice(i, stop);
+    i = stop;
+  }
+  push(sql.length);
+  return statements;
+}
+
+/** First words of the statements that open, end, or change a transaction. */
+const TRANSACTION_CONTROL = new Set(["abort", "begin", "commit", "end", "release", "rollback", "savepoint", "start"]);
+
 /**
  * A file may open with `begin;` and close with `commit;`, the form that runs
  * as-is under psql. The runner supplies the transaction itself, so both are
- * taken out; one without the other is refused. Comments before the first and
- * after the last statement stay.
+ * taken out; one without the other is refused. Any other transaction
+ * statement is refused too: a `commit;` inside the file would commit part of
+ * it without its `schema_migrations` row. A `begin atomic` function body reads
+ * as one, so write the body in `$$` quotes. Comments stay.
  */
 export function stripTransaction(name: string, sql: string): string {
-  const opening = /^((?:\s*--[^\n]*\n|\s+)*)begin\s*;/i;
-  const closing = /commit\s*;((?:\s*--[^\n]*)*\s*)$/i;
-  const opens = opening.test(sql);
-  const closes = closing.test(sql);
+  const statements = splitStatements(sql);
+  const first = statements[0];
+  const last = statements[statements.length - 1];
+  const opens = first?.text.toLowerCase() === "begin";
+  const closes = statements.length > 1 && last?.text.toLowerCase() === "commit";
   if (opens !== closes) throw new Error(`migration file ${name} has a begin without a commit, or the other way round`);
-  if (!opens) return sql;
-  return sql.replace(opening, "$1").replace(closing, "$1");
+  for (const statement of opens ? statements.slice(1, -1) : statements) {
+    const word = /^[a-z]+/i.exec(statement.text)?.[0].toLowerCase();
+    if (word !== undefined && TRANSACTION_CONTROL.has(word)) {
+      throw new Error(`migration file ${name} has a ${word} statement: a file may only open with begin; and close with commit;`);
+    }
+  }
+  if (!opens || first === undefined || last === undefined) return sql;
+  return sql.slice(0, first.start) + sql.slice(first.end, last.start) + sql.slice(last.end);
 }
 
 export interface MigrateOptions {

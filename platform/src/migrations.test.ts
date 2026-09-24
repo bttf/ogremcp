@@ -49,6 +49,36 @@ describe("stripTransaction", () => {
     expect(() => stripTransaction("0001_x.sql", "begin;\ncreate table t (id int);\n")).toThrow(/0001_x\.sql has a begin without a commit/);
     expect(() => stripTransaction("0001_x.sql", "create table t (id int);\ncommit;\n")).toThrow(/0001_x\.sql/);
   });
+
+  it("reads a file with many leading blank and comment lines in linear time", () => {
+    // The backtracking pattern this replaced took 4 s at 9 such lines, and
+    // each further line multiplied the time.
+    const header = "  -- a comment\n\n".repeat(5_000);
+    const started = performance.now();
+    expect(stripTransaction("0001_x.sql", `${header}create table t (id int);\n`)).toBe(`${header}create table t (id int);\n`);
+    expect(stripTransaction("0001_x.sql", `${header}begin;\ncreate table t (id int);\ncommit;\n`)).toBe(`${header}\ncreate table t (id int);\n\n`);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("refuses a transaction statement inside the file, and not the words inside a body, string, or comment", () => {
+    for (const sql of [
+      "create table a (n int);\ncommit;\ncreate table b (n int);\n",
+      "begin;\ncreate table a (n int);\ncommit;\ncreate table b (n int);\ncommit;\n",
+      "create table a (n int);\nsavepoint s;\ncreate table b (n int);\nrollback to savepoint s;\n",
+      "create table a (n int);\nEND;\n",
+    ]) {
+      expect(() => stripTransaction("0003_x.sql", sql)).toThrow(/0003_x\.sql has a (commit|savepoint|end) statement/);
+    }
+    const body = [
+      "-- commit;",
+      "do $$ begin if true then perform 1; end if; end $$;",
+      "create function f() returns int language plpgsql as $f$ begin return 1; end; $f$;",
+      "comment on table a is 'commit; rollback;';",
+      "/* rollback; /* nested */ commit; */ select 1;",
+    ].join("\n");
+    expect(stripTransaction("0003_x.sql", body)).toBe(body);
+    expect(stripTransaction("0003_x.sql", `begin;\n${body}\ncommit;`)).toBe(`\n${body}\n`);
+  });
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("migrate against Postgres", () => {
