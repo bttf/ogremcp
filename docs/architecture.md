@@ -528,7 +528,8 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - **Hosted:** the platform as one Node service plus Postgres on Railway, deploying on push to `main` when a watched path changes (§5). Use the default Railway domain until a custom domain is bought.
 - **No Supabase, few vendors.**
-- **User login:** Google and Discord OAuth via **Arctic**, with hand-rolled DB web sessions following the Lucia guide pattern. Link a second provider only when a signed-in user connects it explicitly; never auto-merge accounts by email.
+- **User login:** Google and Discord OAuth via **`openid-client`** (panva), with hand-rolled DB web sessions following the Lucia guide pattern. Google is OpenID Connect with discovery; Discord is plain OAuth 2. Link a second provider only when a signed-in user connects it explicitly; never auto-merge accounts by email.
+  - Earlier drafts named Arctic. Its author deprecated it on npm on 2026-07-29, and the owner replaced it with `openid-client` on 2026-09-24.
 - **OAuth authorization server** (for MCP agents *and* bridge device-code): **`oidc-provider`** (panva). Don't hand-roll OAuth.
 - **MCP:** the official TypeScript SDK.
 - **Secrets from env:** OIDC signing keys (JWKS), cookie keys, Google/Discord credentials, Firecrawl key.
@@ -726,7 +727,7 @@ For moving from the Linear project "WoW Guide" (Red Pine workspace: milestones M
 | Name "Caddie" (briefly "Squire"); kit `caddie-kit-wow-classic` | Open Gamer MCP (`ogmcp`); `kits/wow`, one kit for every flavor (§6.4) |
 | "Connector" meaning the per-game bundle | "Kit" (§3) |
 | Monorepo (addon / bridge / cloud / shared) | Still one monorepo, re-laid out as packages with enforced seams (§5) |
-| Supabase for DB and auth | Postgres + Arctic + `oidc-provider` (§13.1) |
+| Supabase for DB and auth | Postgres + `openid-client` + `oidc-provider` (§13.1) |
 | v1 = personal/local (M1–M5); public = v2 (M6–M11) | Hosted remote MCP from the start: dogfood gate, then public beta (§18) |
 | Forever as the first target | Classic Era first; Forever joins as `experimental` (§6.4) |
 | Pixel-encode realtime in v2 | `[later]`, only if the combat-log spike falls short (§15) |

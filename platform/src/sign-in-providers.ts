@@ -1,18 +1,11 @@
-import {
-  ArcticFetchError,
-  decodeIdToken,
-  Discord,
-  Google,
-  OAuth2RequestError,
-  type OAuth2Tokens,
-} from "arctic";
+import * as client from "openid-client";
 
 import type { Config } from "./config.js";
 import type { ProviderName } from "./identities.js";
 
 /**
- * Google and Discord sign-in through Arctic (§13.1). Each provider builds the
- * authorization URL and turns the code of its callback into the provider's
+ * Google and Discord sign-in through `openid-client` (§13.1). Each provider
+ * builds the authorization URL and turns its callback into the provider's
  * stable id for the account. Neither asks for an email or a profile: the
  * service links accounts by id only and never merges them by email.
  */
@@ -20,30 +13,31 @@ export interface SignInProvider {
   /** For messages, e.g. "Google". */
   label: string;
   /**
-   * Whether the flow carries a PKCE code verifier. Google takes one. Arctic
-   * documents that Discord supports PKCE only for public clients, and this
-   * service is a confidential client, so Discord relies on `state` alone.
+   * Starts a flow: where to send the browser, and the values the callback is
+   * checked against. `codeVerifier` is null when the provider uses no PKCE.
+   * Rejects with a `SignInFailure`.
    */
-  pkce: boolean;
-  /** `codeVerifier` is null exactly when `pkce` is false. */
-  authorizationUrl(state: string, codeVerifier: string | null): URL;
-  /** Exchanges the code. Resolves to the provider's id for the account; rejects with a `SignInFailure`. */
-  identify(code: string, codeVerifier: string | null): Promise<string>;
+  begin(): Promise<{ url: URL; state: string; codeVerifier: string | null }>;
+  /**
+   * Finishes a flow from the callback's query. Resolves to the provider's id
+   * for the account; rejects with a `SignInFailure`.
+   */
+  finish(query: URLSearchParams, expected: { state: string; codeVerifier: string | null }): Promise<string>;
 }
 
 /** A provider for each name, or null where it is not configured. */
 export type SignInProviders = Record<ProviderName, SignInProvider | null>;
 
 /**
- * - `refused`: the provider turned the code down, or answered with an
- *   identity this service cannot use. Starting again may work.
- * - `unavailable`: the provider could not be reached or answered with an
- *   error of its own.
+ * - `refused`: the provider turned the sign-in down, or its answer failed a
+ *   check (state, PKCE, ID token claims). Starting again may work.
+ * - `unavailable`: the provider could not be reached or answered with
+ *   something this service cannot read.
  */
 export class SignInFailure extends Error {
   constructor(
     readonly kind: "refused" | "unavailable",
-    /** An error class or a short reason, for the log. Never a token, a code, or a response body. */
+    /** An error class, code, or short reason, for the log. Never a token, a code, or a response body. */
     readonly reason: string,
   ) {
     super(`sign-in ${kind}: ${reason}`);
@@ -51,84 +45,146 @@ export class SignInFailure extends Error {
   }
 }
 
-/** Most time the Discord profile request may take. */
-const PROFILE_TIMEOUT_MS = 10_000;
+export interface ProviderOptions {
+  clientId: string;
+  /** Never logged or repeated. */
+  clientSecret: string;
+  /** The registered redirect URI, `<PUBLIC_BASE_URL>/auth/<provider>/callback`. */
+  redirectUri: string;
+  /** Every request to the provider goes through it. Default: the global `fetch`. Tests pass a fake provider. */
+  fetch?: typeof fetch;
+}
+
+/** Most time, in seconds, one request to a provider may take. */
+const TIMEOUT_SECONDS = 10;
 
 /** `oauth_identities.provider_user_id` is text; ids longer than this are refused. */
 const MAX_PROVIDER_USER_ID = 255;
 
-async function exchange(run: () => Promise<OAuth2Tokens>): Promise<OAuth2Tokens> {
-  try {
-    return await run();
-  } catch (err) {
-    if (err instanceof OAuth2RequestError) throw new SignInFailure("refused", `OAuth2RequestError ${err.code}`);
-    if (err instanceof ArcticFetchError) throw new SignInFailure("unavailable", "ArcticFetchError");
-    throw new SignInFailure("unavailable", err instanceof Error ? err.constructor.name : "unknown");
+/** openid-client error codes that mean a check on the provider's answer failed. */
+const CHECK_FAILED = new Set([
+  "OAUTH_JWT_CLAIM_COMPARISON_FAILED",
+  "OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED",
+  "OAUTH_JWT_TIMESTAMP_CHECK_FAILED",
+]);
+
+function failure(err: unknown): SignInFailure {
+  if (err instanceof SignInFailure) return err;
+  if (err instanceof client.ResponseBodyError) return new SignInFailure("refused", `ResponseBodyError ${err.error}`);
+  if (err instanceof client.AuthorizationResponseError) return new SignInFailure("refused", `AuthorizationResponseError ${err.error}`);
+  if (err instanceof client.ClientError) {
+    return new SignInFailure(CHECK_FAILED.has(err.code ?? "") ? "refused" : "unavailable", `ClientError ${err.code ?? "unknown"}`);
   }
+  return new SignInFailure("unavailable", err instanceof Error ? err.constructor.name : "unknown");
 }
 
-type GoogleClient = Pick<Google, "createAuthorizationURL" | "validateAuthorizationCode">;
+function callbackUrlWith(redirectUri: string, query: URLSearchParams): URL {
+  const url = new URL(redirectUri);
+  url.search = query.toString();
+  return url;
+}
 
-const GOOGLE_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
+/** Runs `load` once, and again after it failed. */
+function once<T>(load: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | null = null;
+  return () => {
+    pending ??= load().catch((err: unknown) => {
+      pending = null;
+      throw err;
+    });
+    return pending;
+  };
+}
 
 /**
- * Google, with the `openid` scope only. The account id is the ID token's
- * `sub`. The ID token comes straight from Google's token endpoint over TLS,
- * so its signature is not checked (OpenID Connect Core §3.1.3.7, step 6);
- * its issuer and audience are.
+ * Google as an OpenID Connect provider, found by discovery at
+ * `https://accounts.google.com` on first use. Authorization code flow with
+ * PKCE and `state`, scope `openid` only. The account id is the ID token's
+ * `sub`. openid-client checks the ID token's issuer, audience, and times; its
+ * signature is not checked, as it comes straight from Google's token endpoint
+ * over TLS (OpenID Connect Core §3.1.3.7, step 6).
  */
-export function googleProvider(client: GoogleClient, clientId: string): SignInProvider {
+export function googleProvider({ clientId, clientSecret, redirectUri, fetch: fetchImpl = fetch }: ProviderOptions): SignInProvider {
+  const configuration = once(() =>
+    client.discovery(new URL("https://accounts.google.com"), clientId, clientSecret, undefined, {
+      [client.customFetch]: (url, options) => fetchImpl(url, options),
+      timeout: TIMEOUT_SECONDS,
+    }),
+  );
   return {
     label: "Google",
-    pkce: true,
-    authorizationUrl(state, codeVerifier) {
-      if (codeVerifier === null) throw new Error("Google sign-in needs a PKCE code verifier");
-      return client.createAuthorizationURL(state, codeVerifier, ["openid"]);
-    },
-    async identify(code, codeVerifier) {
-      if (codeVerifier === null) throw new Error("Google sign-in needs a PKCE code verifier");
-      const tokens = await exchange(() => client.validateAuthorizationCode(code, codeVerifier));
-      let claims: Record<string, unknown>;
+    async begin() {
       try {
-        claims = decodeIdToken(tokens.idToken()) as Record<string, unknown>;
-      } catch {
-        throw new SignInFailure("unavailable", "no readable ID token");
+        const config = await configuration();
+        const state = client.randomState();
+        const codeVerifier = client.randomPKCECodeVerifier();
+        const url = client.buildAuthorizationUrl(config, {
+          redirect_uri: redirectUri,
+          scope: "openid",
+          state,
+          code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
+          code_challenge_method: "S256",
+        });
+        return { url, state, codeVerifier };
+      } catch (err) {
+        throw failure(err);
       }
-      if (typeof claims["iss"] !== "string" || !GOOGLE_ISSUERS.has(claims["iss"])) throw new SignInFailure("refused", "ID token issuer");
-      if (claims["aud"] !== clientId) throw new SignInFailure("refused", "ID token audience");
-      const sub = claims["sub"];
+    },
+    async finish(query, expected) {
+      if (expected.codeVerifier === null) throw new SignInFailure("refused", "no PKCE code verifier");
+      let sub: unknown;
+      try {
+        const tokens = await client.authorizationCodeGrant(await configuration(), callbackUrlWith(redirectUri, query), {
+          expectedState: expected.state,
+          pkceCodeVerifier: expected.codeVerifier,
+          idTokenExpected: true,
+        });
+        sub = tokens.claims()?.sub;
+      } catch (err) {
+        throw failure(err);
+      }
       if (typeof sub !== "string" || sub === "" || sub.length > MAX_PROVIDER_USER_ID) throw new SignInFailure("refused", "ID token subject");
       return sub;
     },
   };
 }
 
-type DiscordClient = Pick<Discord, "createAuthorizationURL" | "validateAuthorizationCode">;
+/** Discord's OAuth 2 endpoints. Discord publishes no discovery document. */
+const DISCORD: client.ServerMetadata = {
+  issuer: "https://discord.com",
+  authorization_endpoint: "https://discord.com/oauth2/authorize",
+  token_endpoint: "https://discord.com/api/oauth2/token",
+};
 
 /**
- * Discord, with the `identify` scope only. The account id is the `id` of
- * `GET /users/@me`, a snowflake.
+ * Discord as a plain OAuth 2 provider, a confidential client with `state`,
+ * scope `identify` only. The account id is the `id` of `GET /users/@me`, a
+ * snowflake.
  */
-export function discordProvider(client: DiscordClient, fetchProfile: typeof fetch = fetch): SignInProvider {
+export function discordProvider({ clientId, clientSecret, redirectUri, fetch: fetchImpl = fetch }: ProviderOptions): SignInProvider {
+  const config = new client.Configuration(DISCORD, clientId, clientSecret);
+  config[client.customFetch] = (url, options) => fetchImpl(url, options);
+  config.timeout = TIMEOUT_SECONDS;
   return {
     label: "Discord",
-    pkce: false,
-    authorizationUrl(state) {
-      return client.createAuthorizationURL(state, null, ["identify"]);
+    async begin() {
+      const state = client.randomState();
+      const url = client.buildAuthorizationUrl(config, { redirect_uri: redirectUri, scope: "identify", state });
+      return { url, state, codeVerifier: null };
     },
-    async identify(code) {
-      const tokens = await exchange(() => client.validateAuthorizationCode(code, null));
+    async finish(query, expected) {
       let body: unknown;
       try {
-        const res = await fetchProfile("https://discord.com/api/v10/users/@me", {
-          headers: { Authorization: `Bearer ${tokens.accessToken()}` },
-          signal: AbortSignal.timeout(PROFILE_TIMEOUT_MS),
+        const tokens = await client.authorizationCodeGrant(config, callbackUrlWith(redirectUri, query), { expectedState: expected.state });
+        const res = await fetchImpl("https://discord.com/api/users/@me", {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+          redirect: "manual",
+          signal: AbortSignal.timeout(TIMEOUT_SECONDS * 1000),
         });
         if (!res.ok) throw new SignInFailure("unavailable", `profile status ${res.status}`);
         body = await res.json();
       } catch (err) {
-        if (err instanceof SignInFailure) throw err;
-        throw new SignInFailure("unavailable", err instanceof Error ? err.constructor.name : "unknown");
+        throw failure(err);
       }
       const id = (body as { id?: unknown } | null)?.id;
       if (typeof id !== "string" || !/^\d{1,32}$/.test(id)) throw new SignInFailure("refused", "profile id");
@@ -146,13 +202,7 @@ export function callbackUrl(publicBaseUrl: string, provider: ProviderName): stri
 export function createSignInProviders(config: Pick<Config, "publicBaseUrl" | "google" | "discord">): SignInProviders {
   const { google, discord, publicBaseUrl } = config;
   return {
-    google:
-      google === null
-        ? null
-        : googleProvider(new Google(google.clientId, google.clientSecret, callbackUrl(publicBaseUrl, "google")), google.clientId),
-    discord:
-      discord === null
-        ? null
-        : discordProvider(new Discord(discord.clientId, discord.clientSecret, callbackUrl(publicBaseUrl, "discord"))),
+    google: google === null ? null : googleProvider({ ...google, redirectUri: callbackUrl(publicBaseUrl, "google") }),
+    discord: discord === null ? null : discordProvider({ ...discord, redirectUri: callbackUrl(publicBaseUrl, "discord") }),
   };
 }

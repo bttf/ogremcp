@@ -13,8 +13,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "arctic": "^3.7.0",
     "express": "^5.2.1",
+    "openid-client": "^6.8.8",
     "pg": "^8.23.0"
   },
   "devDependencies": {

@@ -3,9 +3,8 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { Discord, Google, OAuth2Tokens } from "arctic";
 import type { Pool } from "pg";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import type { AuthOptions } from "./auth.js";
@@ -71,28 +70,54 @@ function idToken(claims: Record<string, unknown>): string {
 }
 
 /**
- * Real Arctic clients whose token requests are replaced: the code is the
- * account id the provider reports. Google's ID token and Discord's profile
- * both carry `SHARED_EMAIL`.
+ * Google and Discord as the injected `fetch` sees them, so that openid-client
+ * runs its own checks. A code is the account id the provider reports. Google's
+ * ID token and Discord's profile both carry `SHARED_EMAIL`. Token requests
+ * are kept for the test to read.
  */
-function fakeProviders(): { providers: SignInProviders; google: Google } {
-  const google = new Google("google-client", "unused", callbackUrl(BASE, "google"));
-  vi.spyOn(google, "validateAuthorizationCode").mockImplementation(async (code) =>
-    new OAuth2Tokens({
-      access_token: "google-access",
-      token_type: "Bearer",
-      id_token: idToken({ iss: "https://accounts.google.com", aud: "google-client", sub: code, email: SHARED_EMAIL }),
-    }),
-  );
-  const discord = new Discord("discord-client", "unused", callbackUrl(BASE, "discord"));
-  vi.spyOn(discord, "validateAuthorizationCode").mockImplementation(async (code) =>
-    new OAuth2Tokens({ access_token: `discord-access-${code}`, token_type: "Bearer" }),
-  );
-  const profile = (async (_url: string | URL | Request, init?: RequestInit) => {
-    const token = new Headers(init?.headers).get("authorization") ?? "";
-    return Response.json({ id: token.replace("Bearer discord-access-", ""), email: SHARED_EMAIL });
+function fakeProviders(): { providers: SignInProviders; tokenRequests: URLSearchParams[] } {
+  const tokenRequests: URLSearchParams[] = [];
+  const fake = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const form = new URLSearchParams((init?.body as string | URLSearchParams | undefined) ?? "");
+    const now = Math.floor(Date.now() / 1000);
+    switch (url) {
+      case "https://accounts.google.com/.well-known/openid-configuration":
+        return Response.json({
+          issuer: "https://accounts.google.com",
+          authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+          token_endpoint: "https://oauth2.googleapis.com/token",
+          jwks_uri: "https://www.googleapis.com/oauth2/v3/certs",
+          id_token_signing_alg_values_supported: ["RS256"],
+          code_challenge_methods_supported: ["plain", "S256"],
+        });
+      case "https://oauth2.googleapis.com/token":
+        tokenRequests.push(form);
+        return Response.json({
+          access_token: "google-access",
+          token_type: "Bearer",
+          expires_in: 3600,
+          id_token: idToken({ iss: "https://accounts.google.com", aud: "google-client", sub: form.get("code"), iat: now, exp: now + 3600, email: SHARED_EMAIL }),
+        });
+      case "https://discord.com/api/oauth2/token":
+        tokenRequests.push(form);
+        return Response.json({ access_token: `discord-access-${form.get("code")}`, token_type: "Bearer", expires_in: 604800, scope: "identify" });
+      case "https://discord.com/api/users/@me": {
+        const token = new Headers(init?.headers).get("authorization") ?? "";
+        return Response.json({ id: token.replace("Bearer discord-access-", ""), email: SHARED_EMAIL });
+      }
+      default:
+        return new Response("not found", { status: 404 });
+    }
   }) as typeof fetch;
-  return { providers: { google: googleProvider(google, "google-client"), discord: discordProvider(discord, profile) }, google };
+  const secret = "unused";
+  return {
+    providers: {
+      google: googleProvider({ clientId: "google-client", clientSecret: secret, redirectUri: callbackUrl(BASE, "google"), fetch: fake }),
+      discord: discordProvider({ clientId: "discord-client", clientSecret: secret, redirectUri: callbackUrl(BASE, "discord"), fetch: fake }),
+    },
+    tokenRequests,
+  };
 }
 
 describe("session tokens", () => {
@@ -145,11 +170,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     await pool.query("truncate users restart identity cascade");
   });
 
-  async function start(): Promise<{ browser: () => Browser; google: Google; sessions: WebSessions }> {
-    const { providers, google } = fakeProviders();
+  async function start(): Promise<{ browser: () => Browser; tokenRequests: URLSearchParams[]; sessions: WebSessions }> {
+    const { providers, tokenRequests } = fakeProviders();
     const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
     const base = await serve({ pool, sessions, providers, publicBaseUrl: BASE, log: () => {} });
-    return { browser: () => new Browser(base), google, sessions };
+    return { browser: () => new Browser(base), tokenRequests, sessions };
   }
 
   /** Starts a flow and follows it back to the callback, as a provider that approves `accountId`. */
@@ -173,7 +198,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
   }
 
   it("creates a user on a first sign-in and signs the same user in again", async () => {
-    const { browser, google } = await start();
+    const { browser, tokenRequests } = await start();
     const first = browser();
     const begin = await first.request("/auth/google");
     const authorize = new URL(begin.headers.get("location") ?? "");
@@ -187,7 +212,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(done.status).toBe(302);
     expect(done.headers.get("location")).toBe("/");
     // The verifier sent to Google's token endpoint is the one behind the challenge.
-    const verifier = vi.mocked(google.validateAuthorizationCode).mock.calls[0]?.[1] ?? "";
+    expect(tokenRequests[0]?.get("redirect_uri")).toBe(`${BASE}/auth/google/callback`);
+    const verifier = tokenRequests[0]?.get("code_verifier") ?? "";
     expect(createHash("sha256").update(verifier).digest("base64url")).toBe(authorize.searchParams.get("code_challenge"));
     const sessionCookie = done.headers.getSetCookie().find((line) => line.startsWith("ogmcp_session="));
     expect(sessionCookie).toMatch(/; Path=\/; Expires=.+; HttpOnly; SameSite=Lax$/);

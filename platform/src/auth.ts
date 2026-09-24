@@ -1,6 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
 
-import { generateCodeVerifier, generateState } from "arctic";
 import express, { type CookieOptions, type Response, type Router } from "express";
 import type { Pool } from "pg";
 
@@ -38,8 +37,8 @@ export interface AuthOptions {
 }
 
 /**
- * Holds `state`, the PKCE verifier (empty for Discord), and, for a link, the
- * uuid of the web session that started it, joined by dots. Every part is
+ * Holds `state`, the PKCE code verifier (empty for Discord), and, for a link,
+ * the uuid of the web session that started it, joined by dots. Every part is
  * base64url or a uuid, so none holds a dot. The cookie is sent only to the
  * provider's callback path.
  */
@@ -76,7 +75,7 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
   });
 
   for (const name of PROVIDERS) {
-    router.get(`/auth/${name}`, (req, res) => {
+    router.get(`/auth/${name}`, async (req, res) => {
       const provider = providers[name];
       if (provider === null) return sendText(res, 503, `Sign-in with ${label(name)} is not configured on this server.`);
       let linkSession = "";
@@ -85,13 +84,19 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
         if (user === null) return sendText(res, 401, `Sign in first, then connect your ${provider.label} account.`);
         linkSession = user.sessionUuid;
       }
-      const state = generateState();
-      const verifier = provider.pkce ? generateCodeVerifier() : null;
-      res.cookie(SIGN_IN_COOKIE, [state, verifier ?? "", linkSession].join("."), {
+      let flow: Awaited<ReturnType<typeof provider.begin>>;
+      try {
+        flow = await provider.begin();
+      } catch (err) {
+        if (!(err instanceof SignInFailure)) throw err;
+        log(`sign-in with ${name} could not start: ${err.kind}: ${err.reason}`);
+        return sendText(res, 502, `Could not reach ${provider.label} to start signing in. Try again.`);
+      }
+      res.cookie(SIGN_IN_COOKIE, [flow.state, flow.codeVerifier ?? "", linkSession].join("."), {
         ...signInCookie(name),
         maxAge: SIGN_IN_TTL_MS,
       });
-      res.redirect(provider.authorizationUrl(state, verifier).toString());
+      res.redirect(flow.url.toString());
     });
 
     router.get(`/auth/${name}/callback`, async (req, res) => {
@@ -112,15 +117,17 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
         storedState === undefined ||
         storedVerifier === undefined ||
         linkSession === undefined ||
-        !sameText(state, storedState) ||
-        provider.pkce !== (storedVerifier !== "")
+        !sameText(state, storedState)
       ) {
         return sendText(res, 400, `Sign-in with ${provider.label} could not be verified. Start again from the sign-in page.`);
       }
 
       let providerUserId: string;
       try {
-        providerUserId = await provider.identify(code, provider.pkce ? storedVerifier : null);
+        providerUserId = await provider.finish(new URL(req.originalUrl, publicBaseUrl).searchParams, {
+          state: storedState,
+          codeVerifier: storedVerifier === "" ? null : storedVerifier,
+        });
       } catch (err) {
         if (!(err instanceof SignInFailure)) throw err;
         log(`sign-in with ${name} failed: ${err.kind}: ${err.reason}`);
