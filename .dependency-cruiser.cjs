@@ -28,6 +28,16 @@ module.exports = {
       to: { dependencyTypes: ["local"], pathNot: "^$1/" },
     },
     {
+      // Without this rule, a relative import of another package's dist/ would
+      // pass when that package is not built yet, and TypeScript accepts it.
+      name: "no-unresolved-relative-import",
+      comment:
+        "A relative import must resolve, so that no-relative-import-across-packages can check where it points (§5).",
+      severity: "error",
+      from: { path: "^((packages|kits)/[^/]+|platform)/" },
+      to: { couldNotResolve: true, path: "^\\.\\.?/" },
+    },
+    {
       name: "sdk-imports-no-package",
       comment: "packages/sdk depends on nothing in the repo (§5).",
       severity: "error",
