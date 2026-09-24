@@ -25,6 +25,18 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: { "/api": PLATFORM, "/auth": PLATFORM, "/health": PLATFORM, "/interaction": PLATFORM, "/oauth": PLATFORM },
+    proxy: {
+      "/api": PLATFORM,
+      "/auth": PLATFORM,
+      "/health": PLATFORM,
+      "/interaction": PLATFORM,
+      "/oauth": PLATFORM,
+      // `/device` and `/device/:uid`, not `/devices`. A page load of `/device`
+      // is this server's page; its calls and form posts are the platform's.
+      "^/device(?:[/?]|$)": {
+        target: PLATFORM,
+        bypass: (req) => (req.method === "GET" && req.url?.split("?")[0] === "/device" && req.headers.accept?.includes("text/html") ? req.url : undefined),
+      },
+    },
   },
 });

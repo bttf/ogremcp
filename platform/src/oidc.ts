@@ -6,12 +6,13 @@ import type { Pool } from "pg";
 
 import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { failureCode } from "./db.js";
+import { createDevice, DEVICE_PAGE_PATH, deviceFlowConfiguration } from "./devices.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, type RegistrationSettings, registrationConfiguration, registrationMiddleware } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes, tokenConfiguration } from "./oidc-tokens.js";
 import { requireSameOrigin } from "./same-origin.js";
-import { currentUser } from "./web-sessions.js";
+import { type CurrentUser, currentUser } from "./web-sessions.js";
 
 /**
  * The OAuth authorization server for agents and bridges (§8.1, §9, §13.1):
@@ -22,8 +23,9 @@ import { currentUser } from "./web-sessions.js";
  * `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server` (RFC 8414). Only those paths reach
  * oidc-provider: every other request stays with Express, and oidc-provider
- * reads the request body only on its own paths. `/device`, the device flow's
- * page, does not reach it yet (RED-307).
+ * reads the request body only on its own paths. The device flow's page,
+ * `/device` and `/device/:uid`, reaches it too, but for a page load of
+ * `/device`, which gets the web UI's Device approval page (`devices.ts`).
  *
  * The web session is the login. An authorization request whose browser has
  * no web session, or a web session of another user, is sent to
@@ -31,19 +33,23 @@ import { currentUser } from "./web-sessions.js";
  * and completes the login prompt with the signed-in user's uuid as the
  * account id. The consent prompt goes to the web UI's Agent consent page,
  * `/consent/:uid`, where the user approves or denies the agent (§9, §13.2).
+ * A bridge's consent prompt is approved here: the user approved it on
+ * `/device` (§8.1).
  *
- * Client ID metadata documents are on (`cimd.ts`, RED-306), and dynamic
- * client registration is `oidc-registration.ts` (RED-304). Off here, each for
- * its own issue: static clients (RED-305), the device flow (RED-307),
- * loopback redirects (RED-308). RP-initiated logout is off: no target agent
- * uses it, and signing out of the web UI is `/auth/signout`. Scopes, resource
- * indicators, token lifetimes, revocation, and DPoP are `oidc-tokens.ts`. The
- * MCP endpoint's resource metadata is `mcp.ts`.
+ * Client ID metadata documents are on (`cimd.ts`, RED-306), dynamic client
+ * registration is `oidc-registration.ts` (RED-304), and the bridge's device
+ * flow and client are `devices.ts` (RED-307). Off here, each for its own
+ * issue: static agent clients (RED-305), loopback redirects (RED-308).
+ * RP-initiated logout is off: no target agent uses it, and signing out of the
+ * web UI is `/auth/signout`. Scopes, resource indicators, token lifetimes,
+ * revocation, and DPoP are `oidc-tokens.ts`. The MCP endpoint's resource
+ * metadata is `mcp.ts`.
  */
 
 /**
  * The path every oidc-provider endpoint this service serves is under, but
- * discovery. Only these paths and `DISCOVERY_PATHS` reach oidc-provider.
+ * discovery and the device flow's page. Only these paths, `DISCOVERY_PATHS`,
+ * and the page's (`deviceRoute`) reach oidc-provider.
  */
 export const OIDC_PATH_PREFIX = "/oauth/";
 
@@ -71,9 +77,9 @@ export const CONSENT_PATH = "/consent";
  * oidc-provider's endpoint paths. Its defaults collide with the web UI:
  * `/auth/:uid` (resume) with sign-in's `/auth/google`, so every endpoint
  * moves under `/oauth/`. The device flow's page stays at `/device`, the
- * web UI's device approval page (§8.1, §13.2); the device flow is off, and
- * RED-307 decides how that page is served. `end_session` and the last three
- * belong to features that are off.
+ * web UI's device approval page (§8.1, §13.2), and an interaction returns to
+ * `/device/:uid`. `end_session` and the last three belong to features that
+ * are off.
  */
 const ROUTES = {
   authorization: "/oauth/authorize",
@@ -86,11 +92,14 @@ const ROUTES = {
   end_session: "/oauth/logout",
   device_authorization: "/oauth/device/auth",
   pushed_authorization_request: "/oauth/par",
-  code_verification: "/device",
+  code_verification: DEVICE_PAGE_PATH,
   backchannel_authentication: "/oauth/backchannel",
   challenge: "/oauth/challenge",
   credential: "/oauth/credential",
 } as const satisfies Configuration["routes"];
+
+/** Where an interaction of the device flow returns: `device_resume`. */
+const DEVICE_RESUME = /^\/device\/[^/]+$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -143,6 +152,7 @@ export function createOidcProvider({
   const tokens = tokenConfiguration(issuer, tokenLifetimes);
   const cimd = cimdConfiguration(cimdFetchLimits, log, testOnlyFetch);
   const registrationConfig = registrationConfiguration();
+  const device = deviceFlowConfiguration();
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -158,6 +168,7 @@ export function createOidcProvider({
     ...tokens.settings,
     ...cimd.settings,
     ...registrationConfig.settings,
+    ...device.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
@@ -167,6 +178,7 @@ export function createOidcProvider({
       // Its post_logout_redirect_uri would redirect without a click, to any URI a client names.
       rpInitiatedLogout: { enabled: false },
       ...registrationConfig.features,
+      ...device.features,
     },
   };
   let provider: Provider;
@@ -207,7 +219,15 @@ export function mountOidc(app: Express, provider: Provider, pool: Pool): void {
   const callback = provider.callback();
   const issuer = new URL(provider.issuer);
   app.use((req, res, next) => {
-    if (DISCOVERY_PATHS.includes(req.path) || req.path.startsWith(OIDC_PATH_PREFIX)) {
+    const device = deviceRoute(req, res);
+    if (device === "web") return next();
+    if (device === "signed-out") {
+      // A form post goes back to the page, which sends the browser to sign in.
+      if (req.accepts(["json", "html"]) === "html") return res.redirect(303, ROUTES.code_verification);
+      res.set("Cache-Control", "no-store").status(401).json({ error: "signed_out" });
+      return;
+    }
+    if (device === "provider" || DISCOVERY_PATHS.includes(req.path) || req.path.startsWith(OIDC_PATH_PREFIX)) {
       req.headers["x-forwarded-host"] = issuer.host;
       req.headers["x-forwarded-proto"] = issuer.protocol.slice(0, -1);
       void callback(req, res);
@@ -216,6 +236,24 @@ export function mountOidc(app: Express, provider: Provider, pool: Pool): void {
     next();
   });
   app.use(interactionRouter(provider, pool));
+}
+
+/**
+ * Who takes a request for the device flow's page (§8.1, §13.2), or null for
+ * another path:
+ *
+ * - `web`: a page load of `/device`, the web UI's Device approval page.
+ * - `signed-out`: any other request for `/device` without a web session. The
+ *   page's calls and form posts need one, so that a signed-out browser never
+ *   marks a code as in use: oidc-provider does that before its login prompt.
+ * - `provider`: the rest of `/device`, and `/device/:uid`.
+ */
+function deviceRoute(req: Request, res: Response): "web" | "signed-out" | "provider" | null {
+  if (req.path === ROUTES.code_verification) {
+    if ((req.method === "GET" || req.method === "HEAD") && req.accepts(["json", "html"]) === "html") return "web";
+    return currentUser(res) === null ? "signed-out" : "provider";
+  }
+  return DEVICE_RESUME.test(req.path) ? "provider" : null;
 }
 
 /** The account of a user's uuid, while the user exists. The uuid is the subject (§11). */
@@ -327,6 +365,27 @@ function grantedScopes(interaction: Interaction, grant: Grant): string[] {
 }
 
 /**
+ * At the consent prompt of a bridge's interaction (§8.1): saves a new grant
+ * of what the device code asks for, and creates the device's row. The user's
+ * approval on `/device` started the interaction. Answers the grant's id.
+ * When the row is not created the grant is deleted again, so every grant a
+ * bridge holds has a device the user can revoke.
+ */
+async function approveDevice(provider: Provider, pool: Pool, interaction: Interaction, user: CurrentUser): Promise<string> {
+  // `devices.ts` gives each bridge's interaction a grant of its own.
+  if (interaction.grantId !== undefined) throw new Error("a bridge's interaction already holds a grant");
+  const grant = await consentGrant(provider, interaction, user.uuid);
+  const grantId = await grant.save();
+  try {
+    await createDevice(pool, user.id, grantId);
+  } catch (err) {
+    await grant.destroy().catch(() => {});
+    throw err;
+  }
+  return grantId;
+}
+
+/**
  * The host of the redirect URI, where approval sends the authorization code.
  * A dynamically registered or CIMD client names itself, so the consent page
  * shows this host too (§9). A URI without a host, such as a custom scheme,
@@ -359,7 +418,8 @@ async function ownInteraction(
   res: Response,
 ): Promise<{ interaction: Interaction; accountId: string } | null> {
   const interaction = await findInteraction(provider, req, res);
-  if (interaction === null) {
+  // A bridge's interaction is approved on /device, not on the consent page.
+  if (interaction === null || interaction.deviceCode !== undefined) {
     res.status(400).json({ error: "interaction_not_found" });
     return null;
   }
@@ -382,7 +442,8 @@ async function ownInteraction(
  *   browser goes back to oidc-provider. When the request asks for a fresh
  *   login (`needsFreshSignIn`), a sign-in from before it does not count: the
  *   browser goes through sign-in again first. The consent prompt goes to the
- *   Agent consent page, `/consent/:uid`.
+ *   Agent consent page, `/consent/:uid`. A bridge's consent prompt is
+ *   approved at once (`approveDevice`): the user approved on `/device`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
  *   client, the host of its `client_id` URL for a CIMD client, the host of
  *   its redirect URI, and the scopes approval grants.
@@ -422,6 +483,10 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       if (needsFreshSignIn(interaction, ts)) return res.redirect(303, signInRedirect(interaction));
       const returnTo = await provider.interactionResult(req, res, { login: { accountId: user.uuid, ts } });
       return res.redirect(303, returnTo);
+    }
+    if (interaction.deviceCode !== undefined) {
+      const grantId = await approveDevice(provider, pool, interaction, user);
+      return res.redirect(303, await provider.interactionResult(req, res, { consent: { grantId } }));
     }
     return res.redirect(303, `${CONSENT_PATH}/${interaction.uid}`);
   });

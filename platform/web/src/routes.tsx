@@ -1,6 +1,7 @@
 import { type RouteObject, useRoutes } from "react-router";
 
 import { Consent } from "./pages/Consent.js";
+import { Device } from "./pages/Device.js";
 import { Games } from "./pages/Games.js";
 import { Home } from "./pages/Home.js";
 import { NotFound } from "./pages/NotFound.js";
@@ -20,6 +21,8 @@ export const routes: RouteObject[] = [
       // Not under RequireSession: a signed-out browser goes to sign in with a
       // return_to that brings it back through the OAuth interaction.
       { path: "/consent/:uid", element: <Consent /> },
+      // Not under RequireSession either: a signed-out browser comes back with its code.
+      { path: "/device", element: <Device /> },
       {
         element: <RequireSession />,
         children: [

@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { BRIDGE_CLIENT_ID } from "./devices.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
@@ -100,18 +101,21 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres"
 
   /**
    * A new user's grant of `scope` on `resource`, and a refresh token of it, as
-   * an approval leaves them. The consent page is RED-303 and the device flow
-   * RED-307.
+   * an approval leaves them: the agent's for the MCP server, and the bridge's
+   * for the bridge API. The consent page is RED-303 and the device flow
+   * `devices.ts`.
    */
   async function approve(resource: string, scope: Scope): Promise<{ userUuid: string; grantId: string; refreshToken: string }> {
     const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
     const userUuid = rows[0]?.uuid ?? "";
-    const client = await provider.Client.find(CLIENT_ID);
+    const bridge = resource === RESOURCES.bridge;
+    const client = await provider.Client.find(bridge ? BRIDGE_CLIENT_ID : CLIENT_ID);
     if (client === undefined) throw new Error("the test client is missing");
-    const grant = new provider.Grant({ accountId: userUuid, clientId: CLIENT_ID });
+    const grant = new provider.Grant({ accountId: userUuid, clientId: client.clientId });
     grant.addResourceScope(resource, scope);
     const grantId = await grant.save();
-    const refreshToken = await new provider.RefreshToken({ accountId: userUuid, client, grantId, gty: "authorization_code", scope, resource }).save();
+    const gty = bridge ? "device_code" : "authorization_code";
+    const refreshToken = await new provider.RefreshToken({ accountId: userUuid, client, grantId, gty, scope, resource }).save();
     return { userUuid, grantId, refreshToken };
   }
 
@@ -121,9 +125,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres"
     return { status: res.status, body: text === "" ? {} : (JSON.parse(text) as Record<string, unknown>) };
   }
 
-  /** The token endpoint's answer to a refresh token. */
-  async function refresh(refreshToken: string): Promise<{ status: number; body: Record<string, unknown> }> {
-    return post("/oauth/token", { grant_type: "refresh_token", refresh_token: refreshToken });
+  /** The token endpoint's answer to a refresh token of the agent's, or with `params.client_id`, of that client's. */
+  async function refresh(refreshToken: string, params: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+    return post("/oauth/token", { grant_type: "refresh_token", refresh_token: refreshToken, ...params });
   }
 
   /** A POST with the issuer's Host, which `/mcp` checks. `fetch` cannot set it. */
@@ -161,12 +165,12 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres"
     );
 
     const bridge = await approve(RESOURCES.bridge, "ingest");
-    const ingest = await refresh(bridge.refreshToken);
+    const ingest = await refresh(bridge.refreshToken, { client_id: BRIDGE_CLIENT_ID });
     expect(ingest.body).toMatchObject({ scope: "ingest" });
     const ingestToken = String(ingest.body["access_token"]);
     const ingestAtIngest = await call("/api/v1/ingest", ingestToken);
     expect(ingestAtIngest.status).toBe(200);
-    expect(JSON.parse(ingestAtIngest.body)).toEqual({ userUuid: bridge.userUuid, clientId: CLIENT_ID, grantId: bridge.grantId, scopes: ["ingest"] });
+    expect(JSON.parse(ingestAtIngest.body)).toEqual({ userUuid: bridge.userUuid, clientId: BRIDGE_CLIENT_ID, grantId: bridge.grantId, scopes: ["ingest"] });
     const ingestAtMcp = await call("/mcp", ingestToken);
     expect(ingestAtMcp.status).toBe(401);
     expect(ingestAtMcp.headers["www-authenticate"]).toBe(
@@ -209,6 +213,27 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres"
     expect(error(await authorize({ scope: "ingest" }))).toBe("invalid_scope");
     // The allowed request goes on to sign-in and consent.
     expect(error(await authorize({ scope: "openid offline_access read", resource: RESOURCES.mcp }))).toMatch(/^\/interaction\//);
+  });
+
+  it("refuses a refresh that names the other resource or adds the other scope", async () => {
+    // Each refresh uses a new grant: a refused one can still use up its refresh token.
+    // oidc-provider checks the scope before the resource.
+    const agent = { client_id: CLIENT_ID };
+    const bridge = { client_id: BRIDGE_CLIENT_ID };
+    const refused: [string, Scope, Record<string, string>, string][] = [
+      [RESOURCES.mcp, "read", { ...agent, resource: RESOURCES.bridge }, "invalid_target"],
+      [RESOURCES.mcp, "read", { ...agent, scope: "read ingest" }, "invalid_scope"],
+      [RESOURCES.mcp, "read", { ...agent, resource: RESOURCES.bridge, scope: "ingest" }, "invalid_scope"],
+      [RESOURCES.bridge, "ingest", { ...bridge, resource: RESOURCES.mcp }, "invalid_target"],
+      [RESOURCES.bridge, "ingest", { ...bridge, scope: "ingest read" }, "invalid_scope"],
+      [RESOURCES.bridge, "ingest", { ...bridge, resource: RESOURCES.mcp, scope: "read" }, "invalid_scope"],
+    ];
+    for (const [resource, scope, params, error] of refused) {
+      const { refreshToken } = await approve(resource, scope);
+      const res = await refresh(refreshToken, params);
+      expect(res, JSON.stringify(params)).toMatchObject({ status: 400, body: { error } });
+      expect(res.body).not.toHaveProperty("access_token");
+    }
   });
 
   it("refuses an expired access token", async () => {

@@ -6,6 +6,7 @@ import type { Pool } from "pg";
 
 import { addressKey, httpsOrLoopback } from "./cimd.js";
 import { failureCode } from "./db.js";
+import { BRIDGE_CLIENT_ID, DEVICE_CODE_GRANT } from "./devices.js";
 
 /**
  * Dynamic client registration (§9, RFC 7591): the fallback for an agent that
@@ -135,7 +136,8 @@ function refuse(description: string): never {
 
 /**
  * Runs once per property below, before oidc-provider's own checks, on every
- * client oidc-provider builds. `DROPPED` goes from every client. The rest is
+ * client oidc-provider builds. `DROPPED` goes from every client, and the
+ * device code grant from every client but the bridge's (§8.1). The rest is
  * checked on a registration request only: a stored client loads without a
  * `ctx`, and a CIMD client is checked by `cimd.ts`'s `allowClient`.
  */
@@ -144,7 +146,13 @@ function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, 
     delete metadata[key];
     return;
   }
-  if (ctx?.oidc.route !== "registration") return;
+  if (ctx?.oidc.route !== "registration") {
+    // Registration refuses it below, as it does every grant type but the code flow's.
+    if (key === "grant_types" && Array.isArray(value) && value.includes(DEVICE_CODE_GRANT) && metadata.client_id !== BRIDGE_CLIENT_ID) {
+      refuse("grant_types may not hold the device code grant: only the Open Gamer MCP bridge uses it");
+    }
+    return;
+  }
   if (NOT_ACCEPTED.has(key)) {
     if (value !== undefined) refuse(`${key} is not accepted: registered clients are public and have no keys`);
     return;

@@ -2,6 +2,8 @@ import type { RequestHandler, Response } from "express";
 import type Provider from "oidc-provider";
 import { type Configuration, errors, type KoaContextWithOIDC } from "oidc-provider";
 
+import { BRIDGE_CLIENT_ID } from "./devices.js";
+
 /**
  * The scopes, audiences, and token lifetimes of the OAuth server (§8.1, §9),
  * and `requireToken`, which checks an access token on a route of the MCP
@@ -22,14 +24,17 @@ import { type Configuration, errors, type KoaContextWithOIDC } from "oidc-provid
  *
  * Agents sign in with the authorization code flow (§9), and bridges with the
  * device flow (§8.1). Each flow can ask only for its own resource and scope,
- * so every agent client, whether registered by DCR, CIMD, or statically, can
- * be granted only `read` (with `openid` and `offline_access`), and only a
- * bridge `ingest`. An authorization request for the bridge API fails with
- * `invalid_target`, and one for `ingest` with `invalid_scope`, before it
- * reaches the consent page; a device request for the MCP server or `read`
- * fails the same way. A request without a `resource` gets its flow's
- * resource. At the token endpoint the grant already names the resource, and
- * a token request without `resource` gets the granted one.
+ * and the bridge API is the bridge's own client's alone (`devices.ts`), which
+ * has no other. So every agent client, whether registered by DCR, CIMD, or
+ * statically, can be granted only `read` (with `openid` and
+ * `offline_access`), and only the bridge `ingest`. An authorization request
+ * for the bridge API fails with `invalid_target`, and one for `ingest` with
+ * `invalid_scope`, before it reaches the consent page; a device request for
+ * the MCP server or `read` fails the same way. A request without a
+ * `resource` gets its flow's resource. At the token endpoint the grant
+ * already names the resource, and a token request without `resource` gets
+ * the granted one. A refresh that names another resource, or the other
+ * scope, is refused.
  *
  * Access tokens are opaque and stored in `oidc_models`. `requireToken` looks
  * each one up, so revoking a grant ends its access tokens at once, not when
@@ -80,7 +85,7 @@ export const DEFAULT_TOKEN_LIFETIMES: TokenLifetimes = {
   grantSeconds: 365 * DAY_SECONDS,
 };
 
-/** The routes of the device flow. RED-307 turns the flow on. */
+/** The routes of the device flow (`devices.ts`). */
 const DEVICE_ROUTES = new Set(["device_authorization", "code_verification", "device_resume"]);
 
 /**
@@ -125,9 +130,12 @@ export function tokenConfiguration(
         useGrantedResource: () => true,
         // At the start of a sign-in, this is also where the flow's scope is
         // checked: every request gets a resource there (`defaultResource`).
-        getResourceServerInfo: (ctx, resource) => {
+        getResourceServerInfo: (ctx, resource, client) => {
           const scope = scopes.get(resource);
           if (scope === undefined) throw new errors.InvalidTarget();
+          if ((resource === resources.bridge) !== (client.clientId === BRIDGE_CLIENT_ID)) {
+            throw new errors.InvalidTarget("this client cannot ask for that resource");
+          }
           const allowed = flowResource(ctx, resources);
           if (allowed !== undefined) {
             if (allowed !== resource) throw new errors.InvalidTarget("this sign-in flow cannot ask for that resource");
