@@ -32,6 +32,20 @@ it("round-trips UTF-8 and undoes Lua 5.1 escapes", () => {
   expect(read(text)["S"]).toEqual(["Zoëla 你", "Zoëla", 'q"q \\ \n\tA', "bad � byte"]);
 });
 
+// Postgres refuses U+0000 in text and jsonb (§11).
+it.each([
+  ["an escape", String.raw`A = "a\0b"`],
+  ["a decimal escape", String.raw`A = "a\000b"`],
+  ["a raw byte", 'A = "a\u0000b"'],
+  ["a long string", "A = [==[a\u0000b]==]"],
+])("maps U+0000 from %s to U+FFFD", (_, text) => {
+  expect(read(text)["A"]).toBe("a�b");
+});
+
+it("maps U+0000 in a key to U+FFFD", () => {
+  expect(read(String.raw`A = { ["k\0"] = 1 }`)["A"]).toEqual({ "k�": 1 });
+});
+
 it("keeps a __proto__ key as data", () => {
   const value = read('A = { ["__proto__"] = { x = 1 } }')["A"];
   expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
