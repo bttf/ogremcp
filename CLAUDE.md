@@ -65,7 +65,8 @@ testing OpenGamerMCP, because both register `/transmit`.
 ## Commits
 
 Every commit is signed off for the DCO: use `git commit -s`. CI fails a PR if
-any of its commits lacks a `Signed-off-by:` trailer.
+any of its commits lacks a `Signed-off-by:` trailer that matches the commit
+author's name and email.
 
 ## Security
 
