@@ -32,7 +32,7 @@ cannot see this one.
 |---|---|---|
 | `packages/sdk/` | `@ogmcp/sdk`. Manifest schema, `Interpreter` interface, shared types. Depends on nothing. | MIT |
 | `kits/wow/` | `@ogmcp/kit-wow`. `adapter/` (Lua addon), `interpreter/` (TS), `manifest.json`, `fixtures/`. Depends on `@ogmcp/sdk` only. | MIT |
-| `platform/` | `@ogmcp/platform`. Node service: web UI, MCP server, bridge API, OAuth server. Depends on `@ogmcp/sdk`, and on kits only through the `Interpreter` interface. | AGPL-3.0-only |
+| `platform/` | `@ogmcp/platform`. Node service: web UI, MCP server, bridge API, OAuth server. Depends on `@ogmcp/sdk`, and on kits only through the `Interpreter` interface. | AGPL-3.0-or-later |
 | `bridge/` | Go module `github.com/bttf/ogmcp/bridge`. Knows only manifest JSON and the HTTP API. | MIT |
 | `docs/` | `architecture.md` and process docs. | MIT |
 

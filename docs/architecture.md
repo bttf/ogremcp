@@ -121,7 +121,7 @@ ogmcp/
 |---|---|---|---|
 | `packages/sdk` | Manifest JSON Schema + TS types, `Interpreter` interface, shared types. **Small**: only what WoW uses. | Nothing | MIT |
 | `kits/wow` | Adapter, manifest, interpreter, fixtures | `@ogmcp/sdk` only | MIT |
-| `platform` | Node service: web UI, MCP server, bridge API, OAuth server | `@ogmcp/sdk`, plus kits through the `Interpreter` interface only | AGPL-3.0 |
+| `platform` | Node service: web UI, MCP server, bridge API, OAuth server | `@ogmcp/sdk`, plus kits through the `Interpreter` interface only | AGPL-3.0-or-later |
 | `bridge` | Go tray app: device login, locate, watch, upload, self-update, adapter install/update | Nothing in the repo. It knows only manifest JSON and the HTTP API. | MIT |
 
 - **Seams are enforced, not just documented.** Each package declares only its allowed workspace dependencies, and a lint rule in CI (e.g. dependency-cruiser) fails any other cross-package import. In `platform`, one kit-registry module is the only file that may import `@ogmcp/kit-*`, and it types each kit as an `Interpreter`.
@@ -132,7 +132,7 @@ ogmcp/
 - Create the repo under the personal account (`bttf`) until the org exists (§19.1 D4). Repo transfers keep redirects. What happens to the prototype repo: D2.
 - `[later]`: community kits live in their own repos and depend on `@ogmcp/sdk` from npm. Extract `ogmcp-kit-template` from the WoW kit when a second kit exists.
 
-\*Decided (§19.1 D11): AGPL on the platform so nobody can run a closed hosted clone; MIT elsewhere to maximize contributors. Each path has its own `LICENSE` file, and a root note says which license covers which path. Files outside these paths are MIT. Contributions use a DCO (`Signed-off-by`), not a CLA, and CI checks every commit for the sign-off.
+\*Decided (§19.1 D11): AGPL-3.0-or-later on the platform so nobody can run a closed hosted clone; MIT elsewhere to maximize contributors. Each path has its own `LICENSE` file, and a root note says which license covers which path. Files outside these paths are MIT. Contributions use a DCO (`Signed-off-by`), not a CLA, and CI checks every commit for the sign-off.
 
 ## 6. Kits
 
@@ -183,7 +183,7 @@ ogmcp/
 - `sources[].type`: only `file` is implemented. It's an enum, so `log_tail` (§15), `http_listen`, and `http_poll` are additive later. `format`: only `text`.
 - `trigger: on_change`: upload after writes settle (§7).
 - `flavors` is the **single registry of per-flavor config**. Adding a flavor starts here (§6.4).
-  - `status`: `supported` (play-tested) or `experimental` (the agent caveats its answers because sources may be thin). What "opt-in" means: §19.1 D8.
+  - `status`: `supported` (play-tested) or `experimental` (the agent caveats its answers because sources may be thin). Experimental flavors have no gate in v1: ingest accepts them, and the agent caveats its answers (§19.1 D8).
   - `search`: the flavor's search scope. Entries are **URL prefixes, not bare domains**, because some hosts serve several flavors. An empty list means no vetted sources yet (§12). Forever's sources are TBD (§19.2).
   - Which payload maps to which flavor is defined in §6.3.1. A payload whose flavor isn't in the registry is rejected at ingest (§8.3).
 
@@ -400,7 +400,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 ## 9. Agent ↔ MCP server `[v1]`
 
-- **Transport:** MCP Streamable HTTP at `/mcp`, stateless or stateful per §19.1 D12 (proposed: stateless). Stateful sessions (MCP session IDs, a stream for `list_changed`) would have to survive deploys and multiple replicas.
+- **Transport:** MCP Streamable HTTP at `/mcp`, stateless (§19.1 D12). There are no MCP session IDs and no `list_changed` stream, so nothing has to survive deploys or span replicas.
 - **Host and Origin checks:** validate both on `/mcp` and reject unexpected values, to block DNS rebinding. The prototype has these; keep them.
 - **Auth: OAuth 2.1 + PKCE only.** No secret-URL fallback.
 - **Scopes:** agents get `read`, which covers every v1 MCP tool (including `report_issue`, which never touches the game). Bridges get `ingest` (§8.1). Tokens are audience-bound (RFC 8707 resource indicators), so neither works at the other's endpoints.
@@ -430,7 +430,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - Tool-selection quality and context cost degrade as the tool list grows, so **consolidate**: a few tools with `sections` params beat many narrow tools.
 - **≤8 tools per kit; aim for 2–3.**
-- **Only tools for the user's enabled games are exposed**, computed per request. A change shows up the next time the client lists tools, which for some clients means a new chat. `notifications/tools/list_changed` needs a stateful transport (D12).
+- **Only tools for the user's enabled games are exposed**, computed per request. A change shows up the next time the client lists tools, which for some clients means a new chat. The stateless transport sends no `notifications/tools/list_changed` (D12).
 - **Paid-only tools are still exposed to free users** and return an upgrade message, so the tool list doesn't change on upgrade.
 - **Rejected:** a meta-dispatcher (`describe_tools` + `call_tool`). It loses typed args, adds a round trip, and makes every call look the same in approval UIs.
 
@@ -493,7 +493,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Parse on ingest.** Store the typed state in `snapshots` and return parse errors to the bridge. Failed uploads are kept with their error so they can be re-parsed.
 - **Keep raw bytes** with the kit version and adapter schema, so old uploads can be re-parsed when an interpreter improves.
 - **Order by `snapshot_at`**, not insert time, because offline uploads arrive late. Indexes: `(user_id, kit, snapshot_at DESC)` and `(user_id, kit, flavor, character_key, snapshot_at DESC)`.
-- **Retention by tier:** free keeps 30 days of uploads and snapshots; paid keeps them forever. A daily job deletes expired rows. Downgrade handling: §19.1 D9.
+- **Retention by tier:** free keeps 30 days of uploads and snapshots; paid keeps them forever. A daily job deletes expired rows. After a paid-to-free downgrade, history older than 30 days is kept for a 30-day grace period, then deleted (§19.1 D9).
 - **Stints** (§3) are derived from gaps between snapshots (proposed: more than 30 minutes). There is no separate tracking.
 - **Delete my data** hard-deletes the user's uploads, snapshots, events, and issues. **Delete account** also removes devices, agent grants, identities, and the user. `search_cache` isn't user-linked and stays.
 - Rough volume: ~8 KB compressed × 30 uploads/day × 1,000 users ≈ 240 MB/day. Free-tier retention bounds most of it; paid grows forever. Monitor it.
@@ -597,7 +597,7 @@ We never see the agent's answers, only its tool calls. Efficacy is inferred from
 
 - **Minimum stack:** the `events` table plus structured JSON logs. No new vendors. `/admin` runs a handful of SQL queries.
 - **Event row:** timestamp, user `uuid`, device, agent client (OAuth client ID), tool, args summary (sections, flavor, query), latency, ok/error, snapshot age, cache hit, and search cost.
-- **Visits** (§3): tool calls grouped by MCP session ID if the transport is stateful (D12), otherwise by gap, like stints (§11).
+- **Visits** (§3): tool calls grouped by gap, like stints (§11). The transport is stateless, so there are no MCP session IDs (D12).
 
 ### 16.1 Metrics by hop
 
@@ -692,16 +692,16 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 |---|---|---|---|
 | D1 | Platform stack: HTTP framework, DB access + migrations, UI rendering; JS workspace tool | P0 | **Decided 2026-09-24 (RED-274):** keep the prototype's stack: Express 5, raw `pg`, in-repo SQL migrations, a Vite + React single-page app, pnpm (§13.1). It hosts `oidc-provider` (Koa-based; mountable in Express) and lets the most prototype code be copied. |
 | D2 | Existing prototype (the current WoW Guide MCP): evolve it into this repo, or rewrite and salvage? | P0 | **Decided 2026-09-24 (RED-275):** rewrite and salvage in a new monorepo, `bttf/ogmcp`. Its cutover items (data, connectors, the prototype repo) come after G1. Also covers: moving prototype users and snapshots before the prototype on Railway + Supabase shuts down; the existing claude.ai and Claude Code connectors that point at it; and what happens to `bttf/wow-guide`. Keep §20.1's lessons either way. |
-| D3 | Screenshots: the prototype's `/transmit` takes one and exposes `get_screenshot`; this doc drops them. Keep (as a second `file` source) or drop? | P1, P6 | Keeping adds a binary source, bigger uploads, and image tool results |
+| D3 | Screenshots: the prototype's `/transmit` takes one and exposes `get_screenshot`; this doc drops them. Keep (as a second `file` source) or drop? | P1, P6 | **Decided 2026-09-24 (RED-288):** drop for v1. `/transmit` only reloads, and there is no `get_screenshot`. A screenshot source can be added later as a new `sources[].type` (§6.1). |
 | D4 | Domain and GitHub org | G2 | Check availability of `ogmcp` and `opengamermcp` (domains and GitHub org). Google's production consent screen likely needs a domain we own. |
 | D5 | Billing provider, and whether billing ships at beta or after | P10 | |
 | D6 | Code signing: Azure Trusted Signing eligibility (or an alternative) for Windows; Apple Developer Program enrollment plus Developer ID and notarization secrets in CI for macOS | P9 | §7 |
 | D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | Spike S2 |
-| D8 | Experimental flavors: what does "opt-in" mean? | P4 | Proposed: no gate in v1; `experimental` only adds caveats |
-| D9 | Paid → free downgrade: grace period before history older than 30 days is deleted | P10 | Proposed: 30 days |
+| D8 | Experimental flavors: what does "opt-in" mean? | P4 | **Decided 2026-09-24 (RED-310):** no gate in v1; `experimental` only adds caveats (§6.1). |
+| D9 | Paid → free downgrade: grace period before history older than 30 days is deleted | P10 | **Decided 2026-09-24 (RED-349):** 30 days (§11). |
 | D10 | Review Blizzard's UI Add-On Development Policy against a paid hosted tier fed by a free addon | P9 | The addon is listed and the repo goes public at P9 (§5). Non-code, but still a decision issue (§18.4). |
-| D11 | License layout: a `LICENSE` per directory (AGPL `platform/`, MIT elsewhere) plus a root note, or one license for the repo; confirm the DCO | P0 | **Decided 2026-09-24 (RED-280):** a `LICENSE` per directory (AGPL-3.0 `platform/`, MIT elsewhere) plus a root note, with a DCO (§5). Community kits build on an MIT SDK. |
-| D12 | MCP transport: stateless or stateful (§9) | P6 | Proposed: stateless. It survives deploys and multiple replicas with nothing extra, and §10.2 already assumes a new chat for tool-list changes. Cost: no `list_changed` and no MCP session IDs, so visits group by gap (§16). Stateful needs session state outside the process and a reconnect story. |
+| D11 | License layout: a `LICENSE` per directory (AGPL `platform/`, MIT elsewhere) plus a root note, or one license for the repo; confirm the DCO | P0 | **Decided 2026-09-24 (RED-280):** a `LICENSE` per directory (AGPL-3.0-or-later `platform/`, MIT elsewhere) plus a root note, with a DCO (§5). Community kits build on an MIT SDK. |
+| D12 | MCP transport: stateless or stateful (§9) | P6 | **Decided 2026-09-24 (RED-324):** stateless (§9). It survives deploys and multiple replicas with nothing extra, and §10.2 already assumes a new chat for tool-list changes. Cost: no `list_changed` and no MCP session IDs, so visits group by gap (§16). Stateful needs session state outside the process and a reconnect story. |
 
 ### 19.2 Parked (non-blocking)
 
@@ -728,7 +728,7 @@ For moving from the Linear project "WoW Guide" (Red Pine workspace: milestones M
 | iOS app | Dropped (§17) |
 | Installer installs bridge + addon | Installer installs the bridge; the bridge installs and updates the addon (§7) |
 | Prototype tools `get_player_state`, `get_location`, `get_quests`, `get_inventory`, `get_skills`, `get_recent_path` | `wow_get_state` sections (§10.4) |
-| Prototype `get_screenshot` | D3 |
+| Prototype `get_screenshot` and the screenshot in `/transmit` | Dropped (D3) |
 | Prototype `search_game_info` | Same name, now takes `game` and `flavor` (§10.3) |
 | Prototype `/wgmark` map pin | Dropped (§1) |
 | Prototype spoiler detail levels | Dropped (§10.5) |
