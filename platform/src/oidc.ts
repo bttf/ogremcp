@@ -4,6 +4,7 @@ import express, { type Express, type Request, type Response, type Router } from 
 import Provider, { type Account, type Configuration, errors, type Interaction, interactionPolicy } from "oidc-provider";
 import type { Pool } from "pg";
 
+import { type CimdFetchLimits, clientIdMetadataDocument, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
@@ -27,12 +28,12 @@ import { currentUser } from "./web-sessions.js";
  * and completes the login prompt with the signed-in user's uuid as the
  * account id.
  *
- * Off here, each for its own issue: dynamic client registration (RED-304),
- * static clients (RED-305), client ID metadata documents (RED-306), the
- * device flow (RED-307), loopback redirects (RED-308). oidc-provider's
- * defaults stand for scopes, resource indicators, and token lifetimes
- * (RED-302). The consent page is RED-303. The MCP endpoint's resource
- * metadata is `mcp.ts`.
+ * Client ID metadata documents are on (`cimd.ts`, RED-306). Off here, each
+ * for its own issue: dynamic client registration (RED-304), static clients
+ * (RED-305), the device flow (RED-307), loopback redirects (RED-308).
+ * oidc-provider's defaults stand for scopes, resource indicators, and token
+ * lifetimes (RED-302). The consent page is RED-303. The MCP endpoint's
+ * resource metadata is `mcp.ts`.
  */
 
 /**
@@ -94,12 +95,33 @@ export interface OidcOptions {
    * the issuer. So behind Railway's edge they are https.
    */
   trustProxyHops: number;
-  /** Receives one line per server error. Default: `console.error`. */
+  /**
+   * Receives one line per server error, and one per minute in which client ID
+   * metadata document fetches go over their limit. Default: `console.error`.
+   */
   log?: (line: string) => void;
+  /** `CIMD_FETCHES_PER_MINUTE` and `CIMD_FETCHES_PER_HOST_PER_MINUTE`. Default: `DEFAULT_CIMD_FETCH_LIMITS`. */
+  cimdFetchLimits?: CimdFetchLimits;
+  /**
+   * Tests only; `index.ts` never sets it. It replaces oidc-provider's
+   * `fetch`, which fetches client ID metadata documents. oidc-provider passes
+   * it `init.dispatcher`, its agent that refuses private, loopback, and
+   * link-local addresses (SSRF). A test that serves a document from a local
+   * server fetches it without that agent.
+   */
+  testOnlyFetch?: Configuration["fetch"];
 }
 
 /** The provider, configured. `mountOidc` serves it. */
-export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = console.error }: OidcOptions): Provider {
+export function createOidcProvider({
+  pool,
+  issuer,
+  keys,
+  trustProxyHops,
+  log = console.error,
+  cimdFetchLimits = DEFAULT_CIMD_FETCH_LIMITS,
+  testOnlyFetch,
+}: OidcOptions): Provider {
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -115,7 +137,10 @@ export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = c
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
+      // §9, D7: URL-based client IDs.
+      clientIdMetadataDocument: clientIdMetadataDocument(cimdFetchLimits, log),
     },
+    ...(testOnlyFetch === undefined ? {} : { fetch: testOnlyFetch }),
   };
   let provider: Provider;
   try {

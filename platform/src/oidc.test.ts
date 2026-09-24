@@ -79,10 +79,12 @@ describe("OAuth server", () => {
       jwks_uri: `${ISSUER}/oauth/jwks`,
       code_challenge_methods_supported: ["S256"],
     });
+    // Claude uses CIMD only with both of these advertised (§9).
+    expect(metadata["client_id_metadata_document_supported"]).toBe(true);
+    expect(metadata["token_endpoint_auth_methods_supported"]).toContain("none");
     // Off until their own issues.
     expect(metadata["registration_endpoint"]).toBeUndefined();
     expect(metadata["device_authorization_endpoint"]).toBeUndefined();
-    expect(metadata["client_id_metadata_document_supported"]).toBeUndefined();
 
     // The public halves only.
     const jwks = JSON.parse((await get(port, "/oauth/jwks")).body) as { keys: Record<string, unknown>[] };

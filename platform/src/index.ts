@@ -102,7 +102,13 @@ const sessions = new WebSessions({
 // The issuer is PUBLIC_BASE_URL (§9). oidc-provider checks the keys here.
 let oidc: ReturnType<typeof createOidcProvider>;
 try {
-  oidc = createOidcProvider({ pool, issuer: config.publicBaseUrl, keys: oidcKeys, trustProxyHops: config.trustProxyHops });
+  oidc = createOidcProvider({
+    pool,
+    issuer: config.publicBaseUrl,
+    keys: oidcKeys,
+    trustProxyHops: config.trustProxyHops,
+    cimdFetchLimits: config.cimdFetchLimits,
+  });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);

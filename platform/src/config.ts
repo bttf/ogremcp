@@ -1,3 +1,4 @@
+import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 
@@ -35,6 +36,12 @@ export interface Config {
    * null when both are unset. Never logged or repeated.
    */
   oidcKeys: OidcKeys | null;
+  /**
+   * `CIMD_FETCHES_PER_MINUTE` and `CIMD_FETCHES_PER_HOST_PER_MINUTE`: how
+   * many client ID metadata documents the OAuth server fetches per minute
+   * (§9), in all and per host. Unset, `DEFAULT_CIMD_FETCH_LIMITS`.
+   */
+  cimdFetchLimits: CimdFetchLimits;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -210,6 +217,14 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     google,
     discord,
     oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),
+    cimdFetchLimits: {
+      perMinute: positiveInt("CIMD_FETCHES_PER_MINUTE", env["CIMD_FETCHES_PER_MINUTE"], DEFAULT_CIMD_FETCH_LIMITS.perMinute),
+      perHostPerMinute: positiveInt(
+        "CIMD_FETCHES_PER_HOST_PER_MINUTE",
+        env["CIMD_FETCHES_PER_HOST_PER_MINUTE"],
+        DEFAULT_CIMD_FETCH_LIMITS.perHostPerMinute,
+      ),
+    },
     production: env["NODE_ENV"] === "production",
   };
 }
