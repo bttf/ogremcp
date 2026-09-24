@@ -43,9 +43,10 @@ export interface Config {
    */
   tokenLifetimes: TokenLifetimes;
   /**
-   * `CIMD_FETCHES_PER_MINUTE` and `CIMD_FETCHES_PER_HOST_PER_MINUTE`: how
-   * many client ID metadata documents the OAuth server fetches per minute
-   * (§9), in all and per host. Unset, `DEFAULT_CIMD_FETCH_LIMITS`.
+   * `CIMD_FETCHES_PER_MINUTE`, `CIMD_FETCHES_PER_HOST_PER_MINUTE`,
+   * `CIMD_FETCHES_PER_IP_PER_MINUTE`, and `CIMD_TRUSTED_HOSTS`: the limits on
+   * the OAuth server's fetches of client ID metadata documents and client
+   * JWKS (§9, `cimd.ts`). Each one unset is `DEFAULT_CIMD_FETCH_LIMITS`'s.
    */
   cimdFetchLimits: CimdFetchLimits;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
@@ -207,6 +208,26 @@ function mcpAllowedOrigins(value: string | undefined, fallback: string[]): strin
 }
 
 /**
+ * `CIMD_TRUSTED_HOSTS`, comma-separated. Each entry must be a host name as a
+ * URL has it, such as `claude.ai`: lowercase, no scheme, port, or path. A set
+ * value replaces the default list.
+ */
+function cimdTrustedHosts(value: string | undefined): readonly string[] {
+  const raw = (value ?? "").trim();
+  if (raw === "") return DEFAULT_CIMD_FETCH_LIMITS.trustedHosts;
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .map((entry) => {
+      if (URL.parse(`https://${entry}/`)?.hostname !== entry) {
+        throw new Error("CIMD_TRUSTED_HOSTS must list host names only, such as claude.ai");
+      }
+      return entry;
+    });
+}
+
+/**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
  * only store (§11). The sign-in providers are optional: without one, its
@@ -249,6 +270,12 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
         env["CIMD_FETCHES_PER_HOST_PER_MINUTE"],
         DEFAULT_CIMD_FETCH_LIMITS.perHostPerMinute,
       ),
+      perIpPerMinute: positiveInt(
+        "CIMD_FETCHES_PER_IP_PER_MINUTE",
+        env["CIMD_FETCHES_PER_IP_PER_MINUTE"],
+        DEFAULT_CIMD_FETCH_LIMITS.perIpPerMinute,
+      ),
+      trustedHosts: cimdTrustedHosts(env["CIMD_TRUSTED_HOSTS"]),
     },
     production: env["NODE_ENV"] === "production",
   };

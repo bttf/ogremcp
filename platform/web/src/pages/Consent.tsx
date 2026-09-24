@@ -5,6 +5,8 @@ import { useLocation, useParams } from "react-router";
 export interface ConsentDetails {
   prompt: { name: string };
   client_name: string | null;
+  /** The host of a CIMD client's `client_id` URL, which published its name; null for another client. */
+  client_host: string | null;
   redirect_host: string | null;
   /** The requested scopes that approval grants. */
   scopes: string[];
@@ -148,7 +150,7 @@ export function Consent() {
     );
   }
 
-  const { client_name, redirect_host, scopes } = loaded.details;
+  const { client_name, client_host, redirect_host, scopes } = loaded.details;
   return (
     <div className="og-consent">
       <h1>Approve an agent</h1>
@@ -158,6 +160,11 @@ export function Consent() {
         </strong>{" "}
         asks to connect to your Open Gamer MCP account.
       </p>
+      {client_host !== null && (
+        <p>
+          Its name comes from <strong>{client_host}</strong>.
+        </p>
+      )}
       {scopes.length === 0 ? (
         <p>It asks for no access to your data.</p>
       ) : (

@@ -84,6 +84,8 @@ describe("OAuth server", () => {
     expect(metadata["token_endpoint_auth_methods_supported"]).toContain("none");
     // Off until their own issues.
     expect(metadata["registration_endpoint"]).toBeUndefined();
+    // Off: a client's post_logout_redirect_uri would redirect without a click.
+    expect(metadata["end_session_endpoint"]).toBeUndefined();
     expect(metadata["device_authorization_endpoint"]).toBeUndefined();
 
     // The public halves only.
@@ -306,7 +308,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     await signIn(browser);
     const path = await reachConsent(browser);
     const details = await browser.get(`${path}/details`, "application/json");
-    expect(await details.json()).toMatchObject({ client_name: "Test Agent", redirect_host: "agent.example", scopes: ["openid", "read"] });
+    expect(await details.json()).toMatchObject({ client_name: "Test Agent", client_host: null, redirect_host: "agent.example", scopes: ["openid", "read"] });
     // Another site cannot answer for the user.
     expect((await browser.post(`${path}/approve`, "https://evil.example")).status).toBe(403);
 

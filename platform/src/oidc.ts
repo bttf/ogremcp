@@ -4,7 +4,7 @@ import express, { type Express, type Request, type Response, type Router } from 
 import Provider, { type Account, type Configuration, errors, type Grant, type Interaction, interactionPolicy } from "oidc-provider";
 import type { Pool } from "pg";
 
-import { type CimdFetchLimits, clientIdMetadataDocument, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
+import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
@@ -34,8 +34,10 @@ import { currentUser } from "./web-sessions.js";
  * Client ID metadata documents are on (`cimd.ts`, RED-306). Off here, each
  * for its own issue: dynamic client registration (RED-304), static clients
  * (RED-305), the device flow (RED-307), loopback redirects (RED-308).
- * Scopes, resource indicators, token lifetimes, revocation, and DPoP are
- * `oidc-tokens.ts`. The MCP endpoint's resource metadata is `mcp.ts`.
+ * RP-initiated logout is off: no target agent uses it, and signing out of
+ * the web UI is `/auth/signout`. Scopes, resource indicators, token
+ * lifetimes, revocation, and DPoP are `oidc-tokens.ts`. The MCP endpoint's
+ * resource metadata is `mcp.ts`.
  */
 
 /**
@@ -69,8 +71,8 @@ export const CONSENT_PATH = "/consent";
  * `/auth/:uid` (resume) with sign-in's `/auth/google`, so every endpoint
  * moves under `/oauth/`. The device flow's page stays at `/device`, the
  * web UI's device approval page (§8.1, §13.2); the device flow is off, and
- * RED-307 decides how that page is served. The last three belong to
- * features that are off.
+ * RED-307 decides how that page is served. `end_session` and the last three
+ * belong to features that are off.
  */
 const ROUTES = {
   authorization: "/oauth/authorize",
@@ -106,18 +108,19 @@ export interface OidcOptions {
   /** Default: `DEFAULT_TOKEN_LIFETIMES`. */
   tokenLifetimes?: TokenLifetimes;
   /**
-   * Receives one line per server error, and one per minute in which client ID
-   * metadata document fetches go over their limit. Default: `console.error`.
+   * Receives one line per server error, and one per minute in which
+   * outgoing fetches go over their limits (`cimd.ts`). Default:
+   * `console.error`.
    */
   log?: (line: string) => void;
-  /** `CIMD_FETCHES_PER_MINUTE` and `CIMD_FETCHES_PER_HOST_PER_MINUTE`. Default: `DEFAULT_CIMD_FETCH_LIMITS`. */
+  /** The `CIMD_` settings of `config.ts`. Default: `DEFAULT_CIMD_FETCH_LIMITS`. */
   cimdFetchLimits?: CimdFetchLimits;
   /**
-   * Tests only; `index.ts` never sets it. It replaces oidc-provider's
-   * `fetch`, which fetches client ID metadata documents. oidc-provider passes
-   * it `init.dispatcher`, its agent that refuses private, loopback, and
-   * link-local addresses (SSRF). A test that serves a document from a local
-   * server fetches it without that agent.
+   * Tests only; `index.ts` never sets it. It does each outgoing fetch in
+   * place of the global `fetch`, after `cimd.ts` has counted it.
+   * oidc-provider passes it `init.dispatcher`, its agent that refuses
+   * private, loopback, and link-local addresses (SSRF). A test that serves a
+   * document from a local server fetches it without that agent.
    */
   testOnlyFetch?: Configuration["fetch"];
 }
@@ -134,6 +137,7 @@ export function createOidcProvider({
   testOnlyFetch,
 }: OidcOptions): Provider {
   const tokens = tokenConfiguration(issuer, tokenLifetimes);
+  const cimd = cimdConfiguration(cimdFetchLimits, log, testOnlyFetch);
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -147,14 +151,16 @@ export function createOidcProvider({
     // §9: OAuth 2.1 with PKCE only, for every client.
     pkce: { required: () => true },
     ...tokens.settings,
+    ...cimd.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
       ...tokens.features,
       // §9, D7: URL-based client IDs.
-      clientIdMetadataDocument: clientIdMetadataDocument(cimdFetchLimits, log),
+      ...cimd.features,
+      // Its post_logout_redirect_uri would redirect without a click, to any URI a client names.
+      rpInitiatedLogout: { enabled: false },
     },
-    ...(testOnlyFetch === undefined ? {} : { fetch: testOnlyFetch }),
   };
   let provider: Provider;
   try {
@@ -324,6 +330,16 @@ function redirectHost(redirectUri: unknown): string | null {
 }
 
 /**
+ * The host of a CIMD client's `client_id` URL, the host that published the
+ * client's name, or null for another client: a DCR or static client ID is
+ * not a URL. The consent page shows it (draft-02 §8.5).
+ */
+function clientIdHost(clientId: string): string | null {
+  const url = URL.parse(clientId);
+  return url?.protocol === "https:" ? url.host : null;
+}
+
+/**
  * The interaction of a request under `/interaction/:uid/`, when it is this
  * browser's (`findInteraction`) and the signed-in user's. Otherwise a JSON
  * error is sent, and the answer is null.
@@ -359,7 +375,8 @@ async function ownInteraction(
  *   browser goes through sign-in again first. The consent prompt goes to the
  *   Agent consent page, `/consent/:uid`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
- *   client, the host of its redirect URI, and the scopes approval grants.
+ *   client, the host of its `client_id` URL for a CIMD client, the host of
+ *   its redirect URI, and the scopes approval grants.
  * - `POST /interaction/:uid/approve`: at the consent prompt, saves the grant
  *   (`consentGrant`) and answers `{ location }`, where the browser goes on to
  *   oidc-provider, which sends the code to the client.
@@ -411,6 +428,7 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       prompt: interaction.prompt,
       client_id: clientId,
       client_name: client?.metadata().client_name ?? null,
+      client_host: clientIdHost(clientId),
       redirect_uri: interaction.params["redirect_uri"] ?? null,
       redirect_host: redirectHost(interaction.params["redirect_uri"]),
       scopes: grantedScopes(interaction, await consentGrant(provider, interaction, accountId)),
