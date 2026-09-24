@@ -10,8 +10,8 @@
 // The package rules match both forms. Any other import that does not resolve
 // fails, so that no import goes unchecked.
 
-// The one platform module that may import kits (§5). RED-311 creates it.
-// scripts/lint-seams.mjs names it too.
+// The one platform module that may import kits (§5). scripts/lint-seams.mjs
+// names it too.
 const KIT_REGISTRY = "^platform/src/kits/registry\\.ts$";
 
 // A workspace package directory. $1 in a `to` pattern is the importer's own.
