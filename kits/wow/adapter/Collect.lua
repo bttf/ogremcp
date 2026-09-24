@@ -7,7 +7,6 @@
 
 local _, ns = ...
 
-local SafeMessage = ns.SafeMessage
 local COLLECT_INTERVAL = ns.COLLECT_INTERVAL
 local COLLECT_DEBOUNCE = ns.COLLECT_DEBOUNCE
 local QUEST_EVENT_GRACE = ns.QUEST_EVENT_GRACE
@@ -37,22 +36,21 @@ local latest = {}
 
 -- Collect reads every part. Each part runs in its own protected call, so one
 -- failure leaves the others intact, and a part that fails keeps the value of
--- its last successful collection. It returns the status of the run, whose
--- errors field maps each failed part to its message. It returns nil if called
--- while a collection is already running, which can only happen if an API it
--- calls re-enters it through an event.
+-- its last successful collection. A call while a collection is already
+-- running does nothing; that can only happen if an API it calls re-enters it
+-- through an event.
 local function Collect()
 	if collecting then
-		return nil
+		return
 	end
 	collecting = true
-	local status = { errors = {} }
+	-- The quests collector sets selectionChanged when it changed the quest
+	-- log selection.
+	local status = {}
 	for _, part in ipairs(COLLECT_PARTS) do
 		local ok, result = pcall(part.fn, status)
 		if ok then
 			latest[part] = result
-		else
-			status.errors[(part.top and "" or "state.") .. part.key] = SafeMessage(result)
 		end
 	end
 	collecting = false
@@ -60,7 +58,6 @@ local function Collect()
 	if status.selectionChanged then
 		questEventsIgnoredUntil = Now() + QUEST_EVENT_GRACE
 	end
-	return status
 end
 
 -- At PLAYER_LOGOUT every part is collected again, so the state and

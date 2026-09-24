@@ -43,8 +43,8 @@ local NameFromLink = ns.NameFromLink
 local InCombat = ns.InCombat
 
 -- The item APIs, each list in order of preference. The first form the client
--- has is used. Adjust these lists when a probe shows another form (the
--- prototype's docs/api-probe.md, "Probe version 5").
+-- has is used. Adjust these lists when a probe shows another form
+-- (bttf/wow-guide@df80260:docs/api-probe.md, "Probe version 5").
 --
 -- Classic Era 1.15.9 (probe version 5, 2026-09-19): both item info forms
 -- exist with identical returns, so C_Item.GetItemInfo is used. Only the
@@ -70,7 +70,7 @@ end
 -- so a link the client never resolves cannot cause endless calls.
 local ITEM_DETAIL_MAX_ATTEMPTS = 5
 
--- The bounds of the prototype's snapshot schema (shared/src/snapshot.ts).
+-- The bounds of bttf/wow-guide@df80260:shared/src/snapshot.ts.
 local ITEM_TEXT_MAX_LENGTH = 60
 local ITEM_STATS_MAX_KEYS = 24
 local ITEM_STATS_KEY_MAX_LENGTH = 40

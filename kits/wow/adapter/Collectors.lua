@@ -1,22 +1,22 @@
 -- Collectors -----------------------------------------------------------------
 --
 -- Each collector returns one section of OpenGamerMCPDB.state
--- (docs/architecture.md §6.3). The sections carry the fields of the WoW Guide
--- prototype's snapshot, named in snake_case like the rest of OpenGamerMCPDB.
--- The interpreter parses them (§6.2); keep the two in step.
+-- (docs/architecture.md §6.3). The sections carry the fields of the snapshot
+-- in bttf/wow-guide@df80260:shared/src/snapshot.ts, named in snake_case like
+-- the rest of OpenGamerMCPDB. The interpreter parses them (§6.2); keep the two
+-- in step.
 --
--- API choices follow the prototype's docs/api-probe.md. Every value is read
--- through the Read* helpers below, which turn a secret value into nil, so a
--- secret never reaches OpenGamerMCPDB. Out-of-range values also become nil.
+-- API choices follow bttf/wow-guide@df80260:docs/api-probe.md. Every value is
+-- read through the Read* helpers below, which turn a secret value into nil, so
+-- a secret never reaches OpenGamerMCPDB. Out-of-range values also become nil.
 --
--- The collectors reuse IsSecret, IsSecretTable, PlainField, Lookup, and
--- SafeMessage from OpenGamerMCP.lua.
+-- The collectors reuse IsSecret, IsSecretTable, PlainField, and Lookup from
+-- OpenGamerMCP.lua.
 
 local _, ns = ...
 
 local IsSecret = ns.IsSecret
 local IsSecretTable = ns.IsSecretTable
-local SafeMessage = ns.SafeMessage
 local Lookup = ns.Lookup
 local PlainField = ns.PlainField
 
@@ -35,9 +35,6 @@ local QUEST_EVENT_GRACE = 0.5
 local QUEST_TEXT_MAX_ATTEMPTS = 10
 local QUEST_TEXT_RETRY_BASE = 5
 local QUEST_TEXT_RETRY_MAX = 60
--- The Classic Era level cap. A level above it is read as nil. The cap of other
--- flavors is not checked yet.
-local MAX_LEVEL = 60
 -- Backpack is bag 0; bags 1 to 4 are the equipped bags.
 local LAST_BAG = 4
 
@@ -167,9 +164,9 @@ end
 
 -- ApiEither calls the C_ form when the client has it and the global form
 -- otherwise. WoW Forever ships only the C_ quest APIs and Classic Era ships
--- only the globals (docs/api-probe.md). The choice is made by function
--- existence, never by a client check. It is for pairs with the same arguments
--- and returns.
+-- only the globals (bttf/wow-guide@df80260:docs/api-probe.md). The choice is
+-- made by function existence, never by a client check. It is for pairs with
+-- the same arguments and returns.
 local function ApiEither(cPath, globalPath, ...)
 	if type(Lookup(cPath)) == "function" then
 		return Api(cPath, ...)
@@ -209,7 +206,8 @@ local function CollectCharacter()
 	char.class = ReadName((Api("UnitClass", "player")))
 	char.race = ReadName((Api("UnitRace", "player")))
 	char.faction = ReadName((Api("UnitFactionGroup", "player")))
-	char.level = ReadInteger(Api("UnitLevel", "player"), 1, MAX_LEVEL)
+	-- The level the client reports, with no cap: the cap differs by flavor.
+	char.level = ReadInteger(Api("UnitLevel", "player"), 1)
 	char.xp = ReadInteger(Api("UnitXP", "player"), 0)
 	char.xp_max = ReadInteger(Api("UnitXPMax", "player"), 0)
 	if char.xp and char.xp_max and char.xp_max > 0 then
@@ -270,8 +268,9 @@ end
 -- selection. The Classic Era UI only ever calls it with no argument, after
 -- SelectQuestLogEntry (QuestLogFrame.lua in Ketho/wow-ui-source-vanilla,
 -- branch classic_era). Probe version 2 saw Era honour the index as well
--- (docs/api-probe.md), but the source does not confirm it, so on Era the
--- collector still selects each quest and restores the previous selection.
+-- (bttf/wow-guide@df80260:docs/api-probe.md), but the source does not confirm
+-- it, so on Era the collector still selects each quest and restores the
+-- previous selection.
 
 -- [questID] = { description = string?, objectivesText = string?, attempts = n }
 local questTextCache = {}
@@ -332,9 +331,6 @@ local function QuestSelection()
 				selectEntry(entry.logIndex)
 			end,
 			restore = selectEntry,
-			-- 0 means no entry is selected. Restoring to 0 has not been
-			-- probed, so a failure there is noted, not reported as an error.
-			restoreToZeroUntested = true,
 		}
 	end
 	return nil
@@ -365,8 +361,9 @@ end
 -- FetchQuestTexts reads the text of each pending quest. On Era it selects
 -- each quest and restores the previous selection on every path, and it
 -- changes the selection only when the previous one can be read back, the
--- quest log is closed, and the player is out of combat. Failures leave texts
--- unset and are recorded in status rather than failing the quests section.
+-- quest log is closed, and the player is out of combat. A quest whose text
+-- was not read has no description; it never fails the quests section. It
+-- sets status.selectionChanged when it changed the selection.
 local function FetchQuestTexts(pending, status, now)
 	if #pending == 0 then
 		return
@@ -374,43 +371,24 @@ local function FetchQuestTexts(pending, status, now)
 	local selection = QuestSelection()
 	local getText = Lookup("GetQuestLogQuestText")
 	if not selection or type(getText) ~= "function" then
-		status.questTextSkipped = "quest text API missing"
 		return
 	end
 	if selection.byIndex then
-		local ok, err = pcall(ReadQuestTexts, pending, getText, now)
-		if not ok then
-			status.questTextError = SafeMessage(err)
-		end
+		pcall(ReadQuestTexts, pending, getText, now)
 		return
 	end
-	if QuestLogVisible() then
-		status.questTextSkipped = "quest log open"
-		return
-	end
-	if InCombat() then
-		status.questTextSkipped = "in combat"
+	if QuestLogVisible() or InCombat() then
 		return
 	end
 	local readOk, previous = pcall(selection.read)
 	previous = readOk and ReadInteger(previous, 0) or nil
 	if not previous then
-		status.questTextSkipped = "previous selection unreadable"
 		return
 	end
 
 	status.selectionChanged = true
-	local ok, err = pcall(ReadQuestTexts, pending, getText, now, selection.select)
-	local restored, restoreErr = pcall(selection.restore, previous)
-	if not ok then
-		status.questTextError = SafeMessage(err)
-	elseif not restored then
-		if previous == 0 and selection.restoreToZeroUntested then
-			status.questTextNote = "no quest was selected before; the selection could not be cleared again"
-		else
-			status.questTextError = "restoring selection: " .. SafeMessage(restoreErr)
-		end
-	end
+	pcall(ReadQuestTexts, pending, getText, now, selection.select)
+	pcall(selection.restore, previous)
 end
 
 -- nil when the API returns nothing readable; an empty table when the quest
@@ -464,11 +442,13 @@ local function QuestLogRow(index)
 	return questID, ReadString(title), ReadInteger(level)
 end
 
+-- CollectQuests returns { entries = the quests in log order, partial = true
+-- when the log was not fully read }.
 local function CollectQuests(status)
 	-- The first return counts log rows including headers; the second counts
 	-- quests. In a Classic-style log the rows may exclude quests under a
 	-- collapsed header, which this collector does not expand because that
-	-- would change the player's UI. A shortfall is reported, not hidden.
+	-- would change the player's UI. A shortfall sets partial.
 	local numEntries, numQuests = ApiEither("C_QuestLog.GetNumQuestLogEntries", "GetNumQuestLogEntries")
 	numEntries = ReadInteger(numEntries, 0)
 	numQuests = ReadInteger(numQuests, 0)
@@ -497,12 +477,6 @@ local function CollectQuests(status)
 
 	-- An unreadable total cannot confirm that every quest was seen.
 	local complete = numQuests ~= nil and #quests == numQuests
-	if numQuests == nil then
-		status.errors.questCount = string.format("collected %d quests; total quest count unreadable", #quests)
-	elseif not complete then
-		status.errors.questCount = string.format("collected %d of %d quests; a collapsed header may hide some",
-			#quests, numQuests)
-	end
 
 	-- A quest missing from the rows may only be hidden under a collapsed
 	-- header. Its text is dropped only when every quest was seen, or when the
@@ -528,7 +502,7 @@ local function CollectQuests(status)
 			quest.objectives_text = cached.objectivesText
 		end
 	end
-	return quests
+	return { entries = quests, partial = not complete }
 end
 
 -- Section: skills ------------------------------------------------------------
@@ -548,7 +522,8 @@ end
 -- collapsed header, so a collapsed header makes the list partial.
 
 local SKILLS = {
-	-- The bounds of the prototype's skillsSchema (shared/src/snapshot.ts).
+	-- The bounds of skillsSchema in
+	-- bttf/wow-guide@df80260:shared/src/snapshot.ts.
 	MAX = 100,
 	NAME_MAX = 60,
 	RANK_MAX = 1000,

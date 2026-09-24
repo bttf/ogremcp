@@ -506,7 +506,8 @@ local function InstallStubs()
 					quests = quests + 1
 				end
 			end
-			return #w.questLog, quests
+			-- Quests under a collapsed header count as quests but not as rows.
+			return #w.questLog, quests + (w.collapsedQuests or 0)
 		end,
 		IsOnQuest = function(questID)
 			for _, row in ipairs(w.questLog) do
@@ -881,13 +882,14 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(loc.in_instance, false, "in_instance")
 		eq(loc.hearth, "Test Village", "hearth")
 
-		eq(#state.quests, 2, "quests, without the header")
-		local quest = state.quests[1]
+		eq(#state.quests.entries, 2, "quests, without the header")
+		eq(state.quests.partial, false, "quests.partial")
+		local quest = state.quests.entries[1]
 		eq(quest.id, 100, "quest id")
 		eq(quest.description, "Bring the parcel to the smith.", "quest text")
 		eq(quest.objectives_text, "Deliver the parcel.", "objectives text")
 		eq(quest.objectives[1].num_required, 1, "objective num_required")
-		eq(state.quests[2].complete, true, "complete")
+		eq(state.quests.entries[2].complete, true, "complete")
 
 		local inventory = state.inventory
 		eq(#inventory.items, 2, "bag items, stacks summed")
@@ -919,11 +921,23 @@ test("a part that fails at logout keeps its last polled value", function()
 	world.char.name = nil
 	world.loc.x = 0.25
 	local db = Logout()
-	eq(#db.state.quests, 2, "quests from the last poll")
+	eq(#db.state.quests.entries, 2, "quests from the last poll")
 	eq(db.state.character.name, "Grimble", "character section from the last poll")
 	eq(db.character.name, "Grimble", "character key from the last poll")
 	eq(db.state.location.x, 0.25, "location read at logout")
 	eq(db.client.season_id, 3, "season_id")
+end)
+
+test("raw values: a collapsed quest header sets quests.partial, and a level above 60 is kept", function()
+	Start(Era(function(w)
+		w.collapsedQuests = 1
+		w.char.level = 70
+	end))
+	EnterWorld()
+	local db = Logout()
+	eq(#db.state.quests.entries, 2, "the quests the log shows")
+	eq(db.state.quests.partial, true, "quests.partial")
+	eq(db.state.character.level, 70, "level")
 end)
 
 test("/transmit reloads the UI and is the only command", function()
@@ -965,8 +979,8 @@ test("values the client marks secret are left out of the file", function()
 		eq(db.state.location.zone, nil, "secret zone")
 		eq(db.state.location.subzone, "Test Village", "subzone kept")
 		eq(db.character.guid, nil, "secret guid")
-		eq(db.state.quests[1].objectives[1].text, nil, "secret objective text")
-		eq(db.state.quests[1].objectives[1].num_required, 1, "objective count kept")
+		eq(db.state.quests.entries[1].objectives[1].text, nil, "secret objective text")
+		eq(db.state.quests.entries[1].objectives[1].num_required, 1, "objective count kept")
 		eq(Equipped(db, "HeadSlot").stats.agility, nil, "secret stat")
 		eq(Equipped(db, "HeadSlot").stats.armor, 41, "armor kept")
 		eq(db.state.skills.lines[1].rank, nil, "secret skill rank")
