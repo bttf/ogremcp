@@ -42,8 +42,11 @@ universal_binaries:
             "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.app.zip"
           output: true
 
+# Windows only: the bare macOS binary would reach checksums.txt and a release
+# without the .app's signature.
 archives:
-  - formats: [binary]
+  - ids: [bridge-windows]
+    formats: [binary]
     name_template: "{{ .Binary }}_{{ .Env.BRIDGE_VERSION }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

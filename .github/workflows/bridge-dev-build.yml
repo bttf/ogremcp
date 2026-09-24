@@ -34,6 +34,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The version comes from git describe over the bridge-v tags.
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:

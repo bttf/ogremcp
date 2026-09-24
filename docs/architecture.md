@@ -323,6 +323,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 
 - **Language:** Go, as a single binary. GoReleaser builds; GitHub Releases hosts.
 - **Platforms:** Windows and macOS. macOS ships as a universal binary (Apple Silicon + Intel). Both are v1; who tests Windows: §18.2.
+  - **Minimum OS:** macOS 13 (Go 1.27) and Windows 10 (Go 1.21+).
 - **Generic:** no game logic. Everything game-specific arrives as manifests and adapters from the platform, for the user's enabled kits (§8.2).
 - **Tray UI:** status (last upload, latest error message), device-code login, folder picker for `prompt`, start-at-login.
 - **Credentials:** the refresh token lives in the OS keychain (Windows Credential Manager, macOS Keychain), never in a plain file.

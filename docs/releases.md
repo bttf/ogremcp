@@ -32,10 +32,14 @@ export BRIDGE_VERSION=${TAG#bridge-v}
 goreleaser release --clean --skip=validate
 ```
 
-A local build stamps the version from the nearest `bridge-v` tag:
+A local build (`make -C bridge dist`) stamps the version from the nearest
+`bridge-v` tag without its prefix. With no `bridge-v` tag it stamps
+`0.0.0-<short hash>`, because a bare hash can be all digits and read as a
+large version:
 
 ```sh
-BRIDGE_VERSION=$(git describe --tags --match 'bridge-v*' --always --dirty | sed 's/^bridge-v//') \
+BRIDGE_VERSION=$(git describe --tags --match 'bridge-v*' --dirty 2>/dev/null | sed 's/^bridge-v//' | grep . \
+  || echo "0.0.0-$(git describe --always --dirty --exclude '*')") \
   goreleaser release --snapshot --clean
 ```
 

@@ -15,10 +15,11 @@
 
 GORELEASER ?= goreleaser
 
-# The nearest bridge-v tag without its prefix, for example 1.2.3-4-gabc1234,
-# or the short commit hash when there is no bridge-v tag. GoReleaser's own
-# version would keep the prefix (docs/releases.md).
-BRIDGE_VERSION ?= $(shell git describe --tags --match 'bridge-v*' --always --dirty | sed 's/^bridge-v//')
+# The nearest bridge-v tag without its prefix, for example 1.2.3-4-gabc1234.
+# With no bridge-v tag, 0.0.0-<short hash>: a bare hash can be all digits,
+# which a lenient semver parser reads as a version newer than every release.
+# GoReleaser's own version would keep the prefix (docs/releases.md).
+BRIDGE_VERSION ?= $(shell git describe --tags --match 'bridge-v*' --dirty 2>/dev/null | sed 's/^bridge-v//' | grep . || echo "0.0.0-$$(git describe --always --dirty --exclude '*')")
 export BRIDGE_VERSION
 
 .PHONY: dist clean
