@@ -39,8 +39,9 @@ jobs:
       - run: pnpm test
 
   # Package seams (§5): each package declares and imports only the workspace
-  # packages it may depend on. Rules: .dependency-cruiser.cjs and
-  # scripts/check-workspace-deps.mjs. No build needed.
+  # packages it may depend on. Rules: scripts/lint-seams.mjs and
+  # .dependency-cruiser.cjs. The build comes first so that every import,
+  # including an alias to another package's dist/, resolves to where it points.
   seams:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -55,6 +56,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
 
       - run: pnpm lint:seams
 
