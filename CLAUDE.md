@@ -116,6 +116,9 @@ unreachable.
 - `pnpm install`
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
+- `make -C bridge dist`: unsigned dev builds of the bridge in `bridge/dist/`:
+  the Windows binary and the macOS universal binary as a zipped `.app`. Needs
+  GoReleaser v2 and macOS (`docs/releases.md`).
 - `pnpm lint:seams`: the package seam checks (§5).
 - `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.

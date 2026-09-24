@@ -117,19 +117,25 @@ OSS binary v2.18.2.
 
 ## How P5.7 (RED-323) uses it
 
-- Add `bridge/.goreleaser.yaml` with the keys above. `make -C bridge dist`
-  runs the local build command. It is the one local command that builds both
-  platforms, and it needs GoReleaser v2 installed.
-- The `.app` is not an OSS feature. A `universal_binaries` post hook runs a
-  script adapted from the prototype's `tray-app` target
-  (`bttf/wow-guide@df80260`, `bridge/Makefile`), without its `lipo` step. Add
-  the zipped `.app` to `checksum.extra_files` and `release.extra_files`.
+- `bridge/.goreleaser.yaml` has the keys above. `make -C bridge dist` runs the
+  local build command. It is the one local command that builds both
+  platforms. It needs GoReleaser v2 and a Mac with Xcode's command line tools.
+- The `.app` is not an OSS feature. The `universal_binaries` post hook runs
+  `bridge/scripts/macos-app.sh`, adapted from the prototype's `tray-app`
+  target (`bttf/wow-guide@df80260`, `bridge/Makefile`) without its `lipo`
+  step. The script builds `Open Gamer MCP.app` from `bridge/macos/Info.plist`,
+  gives it an ad hoc signature, and zips it. The zip is in
+  `checksum.extra_files` and `release.extra_files`.
 - Build on macOS: the prototype's tray app needs cgo on macOS. The
-  `bridge-darwin` build sets `CGO_ENABLED=1` for both architectures. The
-  `bridge-windows` build sets `CGO_ENABLED=0` and adds `-H windowsgui` to its
-  ldflags.
-- Unsigned dev builds are either CI artifacts from `--snapshot` or releases
-  with `release.prerelease: true` fixed in the config.
+  `bridge-darwin` build sets `CGO_ENABLED=1` for both architectures and
+  passes `-mmacosx-version-min=13.0` to clang in `CGO_CFLAGS` and
+  `CGO_LDFLAGS`. Without that flag, a build with cgo code targets the build
+  machine's macOS version. The `bridge-windows` build sets `CGO_ENABLED=0` and
+  adds `-H windowsgui` to its ldflags.
+- Unsigned dev builds are CI artifacts from `--snapshot`. The `Bridge dev
+  build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on PRs that
+  touch `bridge/` and on `workflow_dispatch`. It uploads the Windows binary
+  and the zipped `.app` and publishes no release.
 
 ## How P9.3 (RED-344) uses it
 

@@ -2,4 +2,8 @@
 // It is a placeholder until P5.
 package main
 
+// version is set by the build's ldflags: the bridge-v tag without its prefix,
+// or a commit hash for a dev build (docs/releases.md).
+var version = "dev"
+
 func main() {}
