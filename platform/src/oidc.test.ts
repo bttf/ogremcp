@@ -227,6 +227,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
   const issuer = "http://localhost:4790";
   const redirectUri = "https://agent.example/callback";
+  /** An authorization request's client and redirect URI. */
+  const agent = { clientId: "agent", redirectUri };
   const verifier = randomBytes(32).toString("base64url");
   let admin: Pool;
   let pool: Pool;
@@ -285,11 +287,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
   }
 
   /** Starts an authorization request and answers the `/interaction/:uid` path it sends the browser to. */
-  async function authorize(browser: Browser, extra = ""): Promise<string> {
+  async function authorize(browser: Browser, extra = "", request = agent): Promise<string> {
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     const query = new URLSearchParams({
-      client_id: "agent",
-      redirect_uri: redirectUri,
+      client_id: request.clientId,
+      redirect_uri: request.redirectUri,
       response_type: "code",
       // An agent's scope. The request gets the MCP resource (oidc-tokens.ts).
       scope: "openid read",
@@ -304,8 +306,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
   }
 
   /** Starts an authorization request in a signed-in browser and follows it to the consent page. Answers the interaction's path. */
-  async function reachConsent(browser: Browser): Promise<string> {
-    const resume = (await browser.get(await authorize(browser))).headers.get("location") ?? "";
+  async function reachConsent(browser: Browser, request = agent): Promise<string> {
+    const resume = (await browser.get(await authorize(browser, "", request))).headers.get("location") ?? "";
     const path = (await browser.get(resume)).headers.get("location") ?? "";
     const page = await browser.get(path);
     expect(page.status).toBe(303);
@@ -314,14 +316,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
   }
 
   /** Follows the `location` an answer on the consent page gives, back through oidc-provider to the client. */
-  async function answer(browser: Browser, path: string, choice: "approve" | "deny"): Promise<URL> {
+  async function answer(browser: Browser, path: string, choice: "approve" | "deny", request = agent): Promise<URL> {
     const res = await browser.post(`${path}/${choice}`, issuer);
     expect(res.status).toBe(200);
     const { location } = (await res.json()) as { location: string };
     const callback = await browser.get(location);
     expect(callback.status).toBe(303);
     const url = new URL(callback.headers.get("location") ?? "");
-    expect(`${url.origin}${url.pathname}`).toBe(redirectUri);
+    expect(`${url.origin}${url.pathname}`).toBe(request.redirectUri);
     return url;
   }
 
@@ -382,7 +384,13 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     await signIn(browser);
     const path = await reachConsent(browser);
     const details = await browser.get(`${path}/details`, "application/json");
-    expect(await details.json()).toMatchObject({ client_name: "Test Agent", client_host: null, redirect_host: "agent.example", scopes: ["openid", "read"] });
+    expect(await details.json()).toMatchObject({
+      client_name: "Test Agent",
+      client_host: null,
+      redirect_host: "agent.example",
+      redirect_loopback: false,
+      scopes: ["openid", "read"],
+    });
     // Another site cannot answer for the user.
     expect((await browser.post(`${path}/approve`, "https://evil.example")).status).toBe(403);
 
@@ -396,6 +404,32 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect(token.status).toBe(200);
     // A token for the MCP resource carries only its scope.
     expect(await token.json()).toMatchObject({ access_token: expect.any(String), token_type: "Bearer", scope: "read" });
+  });
+
+  it("signs in a client with Claude Code's metadata at a loopback redirect URI on a port it did not register", async () => {
+    // Stored, it is built without a ctx, as a CIMD client is (cimd.test.ts).
+    await new PostgresAdapter(pool, "Client").upsert("claude-code", {
+      client_id: "claude-code",
+      client_name: "Claude Code",
+      client_uri: "https://claude.ai",
+      redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const request = { clientId: "claude-code", redirectUri: "http://localhost:53682/callback" };
+    const browser = new Browser(base);
+    await signIn(browser);
+    const path = await reachConsent(browser, request);
+    const details = await browser.get(`${path}/details`, "application/json");
+    expect(await details.json()).toMatchObject({ client_name: "Claude Code", redirect_host: "localhost:53682", redirect_loopback: true });
+
+    const code = (await answer(browser, path, "approve", request)).searchParams.get("code") ?? "";
+    const token = await fetch(`${base}/oauth/token`, {
+      method: "POST",
+      body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: request.redirectUri, client_id: "claude-code", code_verifier: verifier }),
+    });
+    expect(token.status).toBe(200);
   });
 
   it("denies at the consent page: the client gets access_denied", async () => {
@@ -443,6 +477,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect(client).not.toHaveProperty("registration_access_token");
     expect(client).not.toHaveProperty("scope");
     expect(client).not.toHaveProperty("post_logout_redirect_uris");
+    // Its loopback redirect URI makes it native: that URI matches on any port.
+    expect(client).toMatchObject({ application_type: "native" });
     const stored = await pool.query("select 1 from oidc_models where model = 'Client' and oidc_id = $1 and not payload ? 'client_secret'", [client.client_id]);
     expect(stored.rowCount).toBe(1);
 
@@ -458,6 +494,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     const res = await new Browser(base).get(`/oauth/authorize?${query}`);
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toMatch(/^\/interaction\//);
+    query.set("redirect_uri", "http://127.0.0.1:53682/callback");
+    expect((await new Browser(base).get(`/oauth/authorize?${query}`)).status).toBe(303);
   });
 
   it("records a client's last token, deletes clients unused past the threshold, and then answers invalid_client", async () => {

@@ -62,10 +62,10 @@ interface Answer {
 }
 
 /** An authorization request with PKCE, from `address`. A valid client gets 303 to its interaction; an invalid one, 400. */
-async function authorize(base: string, clientId: string, address = "192.0.2.1"): Promise<Answer> {
+async function authorize(base: string, clientId: string, address = "192.0.2.1", redirectUri = REDIRECT_URI): Promise<Answer> {
   const query = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: "openid",
     code_challenge: createHash("sha256").update(randomBytes(32)).digest("base64url"),
@@ -159,6 +159,46 @@ describe("client ID metadata documents", () => {
     expect((await authorize(base, publish("/first.json"))).status).toBe(303);
     const second = await authorize(base, publish("/second.json"));
     expect(second).toMatchObject({ status: 400, body: expect.stringContaining("client_id metadata document fetch not allowed") });
+  });
+
+  /** Claude Code's document as https://claude.ai/oauth/claude-code-client-metadata served it on 2026-09-24, but for its `client_id`. */
+  const claudeCode = {
+    client_name: "Claude Code",
+    client_uri: "https://claude.ai",
+    redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  };
+
+  it("matches Claude Code's loopback redirect URIs whatever their port, and nothing else", async () => {
+    const base = await serveOidc(unguarded);
+    const clientId = publish("/claude-code.json", claudeCode);
+    for (const uri of ["http://localhost:53682/callback", "http://127.0.0.1:1/callback", "http://localhost/callback"]) {
+      expect((await authorize(base, clientId, undefined, uri)).status, uri).toBe(303);
+    }
+    for (const uri of [
+      "http://localhost.evil.example:53682/callback",
+      "http://127.0.0.2:53682/callback",
+      "http://[::1]:53682/callback",
+      "https://localhost:53682/callback",
+      "http://localhost:53682/other",
+      "http://localhost:53682/callback?next=1",
+      "http://user@localhost:53682/callback",
+    ]) {
+      expect(await authorize(base, clientId, undefined, uri), uri).toMatchObject({ status: 400, body: expect.stringContaining("invalid_redirect_uri") });
+    }
+  });
+
+  it("keeps every redirect URI but http loopback ones exact", async () => {
+    const base = await serveOidc(unguarded);
+    const mixed = publish("/mixed.json", { redirect_uris: [REDIRECT_URI, "http://[::1]/callback"] });
+    expect((await authorize(base, mixed, undefined, "http://[::1]:53682/callback")).status).toBe(303);
+    expect((await authorize(base, mixed, undefined, "https://agent.example:8443/callback")).status).toBe(400);
+    // oidc-provider refuses https on a loopback host from a native client, so this client stays a web one, with exact matching.
+    const httpsLoopback = publish("/https-loopback.json", { redirect_uris: ["https://localhost/callback", "http://localhost/callback"] });
+    expect((await authorize(base, httpsLoopback, undefined, "http://localhost/callback")).status).toBe(303);
+    expect((await authorize(base, httpsLoopback, undefined, "http://localhost:53682/callback")).status).toBe(400);
   });
 
   const failed = { status: 400, body: expect.stringContaining("client_id metadata document fetch failed") };

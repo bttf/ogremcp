@@ -4,7 +4,7 @@ import type Provider from "oidc-provider";
 import { type ClientMetadata, type Configuration, errors, type KoaContextWithOIDC } from "oidc-provider";
 import type { Pool } from "pg";
 
-import { addressKey, httpsOrLoopback } from "./cimd.js";
+import { addressKey, httpsOrLoopback, nativeLoopbackRedirects } from "./cimd.js";
 import { failureCode } from "./db.js";
 
 /**
@@ -21,7 +21,7 @@ import { failureCode } from "./db.js";
  * - `grant_types` may hold only `authorization_code` and `refresh_token`, and
  *   `response_types` only `code`.
  * - Each redirect URI is https, or http on a loopback host: `localhost`,
- *   `127.0.0.1`, or `[::1]`. The port must match exactly (RED-308).
+ *   `127.0.0.1`, or `[::1]`.
  * - `scope` may not name `ingest`, the bridge scope (§8.1). Other values are
  *   accepted and not stored: oidc-provider checks a client's `scope` against
  *   its own scopes only, and `read` is the MCP server's resource scope, not
@@ -36,6 +36,16 @@ import { failureCode } from "./db.js";
  *
  * No registration access token is issued, and registration management
  * (RFC 7592) is off: a client cannot read, change, or delete its registration.
+ *
+ * Loopback redirects (§9, RFC 8252 §7.3) apply to every client oidc-provider
+ * builds: registered, CIMD, and static. A client whose redirect URIs pass
+ * `nativeLoopbackRedirects` (`cimd.ts`) gets `application_type` `native`,
+ * whatever it sent. Claude Code's CIMD document, with
+ * `http://localhost/callback`, sets none. For a native client, oidc-provider
+ * matches an http redirect URI on a loopback host with the port left out of
+ * both sides. The scheme, host, path, and query still match exactly, and
+ * every other redirect URI matches exactly. A native client also gets the
+ * consent prompt at every authorization request, as RFC 8252 §8.6 asks.
  *
  * The endpoint is rate-limited with token buckets (`RegistrationLimiter`):
  * one per client address, one shared by the addresses in the trusted ranges,
@@ -135,15 +145,18 @@ function refuse(description: string): never {
 
 /**
  * Runs once per property below, before oidc-provider's own checks, on every
- * client oidc-provider builds. `DROPPED` goes from every client. The rest is
- * checked on a registration request only: a stored client loads without a
- * `ctx`, and a CIMD client is checked by `cimd.ts`'s `allowClient`.
+ * client oidc-provider builds. Two rules apply to every client: `DROPPED`
+ * goes, and a client with a loopback redirect URI is native (see the module
+ * comment). The rest is checked on a registration request only: a stored or
+ * CIMD client is built without a `ctx`, and a CIMD client is checked by
+ * `cimd.ts`'s `allowClient`.
  */
 function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, value: unknown, metadata: ClientMetadata): void {
   if (DROPPED.has(key)) {
     delete metadata[key];
     return;
   }
+  if (key === "redirect_uris" && Array.isArray(value) && nativeLoopbackRedirects(value)) metadata.application_type = "native";
   if (ctx?.oidc.route !== "registration") return;
   if (NOT_ACCEPTED.has(key)) {
     if (value !== undefined) refuse(`${key} is not accepted: registered clients are public and have no keys`);

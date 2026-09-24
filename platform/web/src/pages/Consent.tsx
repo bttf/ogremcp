@@ -8,6 +8,8 @@ export interface ConsentDetails {
   /** The host of a CIMD client's `client_id` URL, which published its name; null for another client. */
   client_host: string | null;
   redirect_host: string | null;
+  /** Whether the redirect URI is http on a loopback host, so the code goes to an app on this computer. */
+  redirect_loopback: boolean;
   /** The requested scopes that approval grants. */
   scopes: string[];
 }
@@ -106,7 +108,8 @@ function useSteadyFocus(delayMs: number, active: boolean): boolean {
  * The Agent consent page (§9, §13.2), at `/consent/:uid`. The service sends
  * an agent's authorization request here once the user is signed in. The page
  * names the agent and the host its redirect URI points to, because a
- * registered or CIMD client chooses its own name. It lists the scopes in
+ * registered or CIMD client chooses its own name, and says when that host is
+ * this computer, where any app could be listening. It lists the scopes in
  * plain words. Approve and Deny go to the service, which answers where the
  * browser goes next: back through the OAuth server to the agent, with a code
  * or with `access_denied`.
@@ -150,7 +153,7 @@ export function Consent() {
     );
   }
 
-  const { client_name, client_host, redirect_host, scopes } = loaded.details;
+  const { client_name, client_host, redirect_host, redirect_loopback, scopes } = loaded.details;
   return (
     <div className="og-consent">
       <h1>Approve an agent</h1>
@@ -182,6 +185,7 @@ export function Consent() {
           Approving sends access to <strong>{redirect_host}</strong>.
         </p>
       )}
+      {redirect_loopback && <p>That address is on this computer, so an app running on it receives the access.</p>}
       <p>Approve only if you started this from your agent.</p>
       {answer === "failed" && <p role="alert">Your answer was not sent. Try again.</p>}
       {answer === "signed-out" && (

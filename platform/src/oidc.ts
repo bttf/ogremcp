@@ -4,7 +4,7 @@ import express, { type Express, type Request, type Response, type Router } from 
 import Provider, { type Account, type Configuration, errors, type Grant, type Interaction, interactionPolicy } from "oidc-provider";
 import type { Pool } from "pg";
 
-import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
+import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS, loopbackRedirect } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
@@ -33,12 +33,12 @@ import { currentUser } from "./web-sessions.js";
  * `/consent/:uid`, where the user approves or denies the agent (§9, §13.2).
  *
  * Client ID metadata documents are on (`cimd.ts`, RED-306), and dynamic
- * client registration is `oidc-registration.ts` (RED-304). Off here, each for
- * its own issue: static clients (RED-305), the device flow (RED-307),
- * loopback redirects (RED-308). RP-initiated logout is off: no target agent
- * uses it, and signing out of the web UI is `/auth/signout`. Scopes, resource
- * indicators, token lifetimes, revocation, and DPoP are `oidc-tokens.ts`. The
- * MCP endpoint's resource metadata is `mcp.ts`.
+ * client registration and loopback redirects are `oidc-registration.ts`
+ * (RED-304, RED-308). Off here, each for its own issue: static clients
+ * (RED-305), the device flow (RED-307). RP-initiated logout is off: no
+ * target agent uses it, and signing out of the web UI is `/auth/signout`.
+ * Scopes, resource indicators, token lifetimes, revocation, and DPoP are
+ * `oidc-tokens.ts`. The MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
@@ -385,7 +385,9 @@ async function ownInteraction(
  *   Agent consent page, `/consent/:uid`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
  *   client, the host of its `client_id` URL for a CIMD client, the host of
- *   its redirect URI, and the scopes approval grants.
+ *   its redirect URI and whether that URI is loopback, and the scopes
+ *   approval grants. A loopback redirect URI sends the code to an app on the
+ *   user's computer, so the page says so (MCP 2025-11-25 authorization spec).
  * - `POST /interaction/:uid/approve`: at the consent prompt, saves the grant
  *   (`consentGrant`) and answers `{ location }`, where the browser goes on to
  *   oidc-provider, which sends the code to the client.
@@ -440,6 +442,7 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       client_host: clientIdHost(clientId),
       redirect_uri: interaction.params["redirect_uri"] ?? null,
       redirect_host: redirectHost(interaction.params["redirect_uri"]),
+      redirect_loopback: typeof interaction.params["redirect_uri"] === "string" && loopbackRedirect(interaction.params["redirect_uri"]),
       scopes: grantedScopes(interaction, await consentGrant(provider, interaction, accountId)),
     });
   });
