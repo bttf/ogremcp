@@ -77,17 +77,19 @@ console.log(
   `public base URL ${config.publicBaseUrl}; sign-in providers: ${signIn.length === 0 ? "none (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or the DISCORD_ pair)" : signIn.join(", ")}`,
 );
 
+const https = new URL(config.publicBaseUrl).protocol === "https:";
 const sessions = new WebSessions({
   pool,
   lifetimeMs: config.webSessionLifetimeMs,
   renewWithinMs: config.webSessionRenewWithinMs,
-  secure: new URL(config.publicBaseUrl).protocol === "https:",
+  secure: https,
 });
 
 const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
   webRoot,
+  https,
   trustProxyHops: config.trustProxyHops,
 });
 

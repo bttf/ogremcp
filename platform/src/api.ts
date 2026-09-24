@@ -20,7 +20,7 @@ export interface Me {
 
 /**
  * The JSON API of the web UI (§13.2). The web session middleware must run
- * before this router. Every answer is `no-store` and `nosniff`.
+ * before this router. Every answer is `no-store`.
  *
  * - `GET /api/v1/me`: the signed-in user, or 401 `signed_out`.
  * - `GET /api/v1/sign-in-providers`: the providers this server has
@@ -33,7 +33,7 @@ export function apiRouter({ pool, providers }: ApiOptions): Router {
   const router = express.Router();
 
   router.use("/api", (_req, res, next) => {
-    res.set({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+    res.set("Cache-Control", "no-store");
     next();
   });
 

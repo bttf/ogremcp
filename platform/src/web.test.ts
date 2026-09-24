@@ -9,6 +9,7 @@ import type { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
+import { HSTS } from "./security-headers.js";
 import { WEB_HEADERS } from "./web.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -47,7 +48,8 @@ describe("the web UI", () => {
       expect(res.status).toBe(200);
       expect(await res.text()).toBe(PAGE);
       for (const [name, value] of Object.entries(WEB_HEADERS)) expect(res.headers.get(name)).toBe(value);
-      expect(res.headers.get("cache-control")).toBe("no-cache");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("cache-control")).toBe("private, no-cache");
     }
     expect(WEB_HEADERS["Content-Security-Policy"]).not.toContain("unsafe-inline");
 
@@ -59,6 +61,7 @@ describe("the web UI", () => {
     // A page load of a service path goes to its route, not to the web app.
     const signIn = await fetch(`${base}/auth/google`, { headers: HTML, redirect: "manual" });
     expect(signIn.status).toBe(503);
+    expect((await fetch(`${base}/oauth/auth`, { headers: HTML })).status).toBe(404);
     const unknownApi = await fetch(`${base}/api/v1/nothing`, { headers: HTML });
     expect(unknownApi.status).toBe(404);
     expect(await unknownApi.json()).toEqual({ error: "not_found" });
@@ -67,5 +70,16 @@ describe("the web UI", () => {
     // A request that is not a page load gets no page.
     expect((await fetch(`${base}/signin`)).status).toBe(404);
     expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
+    // Plain http: no HSTS.
+    expect((await fetch(`${base}/`, { headers: HTML })).headers.get("strict-transport-security")).toBeNull();
+  });
+
+  it("sends HSTS on every response when PUBLIC_BASE_URL is https", async () => {
+    server = createServer(createApp({ health: { checkDatabase: () => Promise.resolve() }, webRoot, https: true })).listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    for (const [path, headers] of [["/health/live", {}], ["/", HTML], ["/assets/index-abc123.js", {}], ["/no/such/file.txt", {}]] as const) {
+      expect((await fetch(`${base}${path}`, { headers })).headers.get("strict-transport-security")).toBe(HSTS);
+    }
   });
 });

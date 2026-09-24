@@ -4,6 +4,7 @@ import { apiRouter } from "./api.js";
 import { type AuthOptions, authRouter } from "./auth.js";
 import { failureCode } from "./db.js";
 import { type HealthOptions, healthRouter } from "./health.js";
+import { securityHeaders } from "./security-headers.js";
 import { webFiles, webPages } from "./web.js";
 
 export interface AppOptions {
@@ -12,6 +13,8 @@ export interface AppOptions {
   auth?: AuthOptions;
   /** Where the web UI's build is (`platform/dist/web`). Left out, no web UI is served. */
   webRoot?: string;
+  /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
+  https?: boolean;
   /**
    * `TRUST_PROXY_HOPS`. Railway's edge terminates TLS and adds
    * `X-Forwarded-For` and `X-Forwarded-Proto`; trusting that one hop makes
@@ -23,11 +26,12 @@ export interface AppOptions {
 }
 
 /** The Express app. `index.ts` gives it the database and serves it. */
-export function createApp({ health, auth, webRoot, trustProxyHops = 0, log = console.error }: AppOptions): Express {
+export function createApp({ health, auth, webRoot, https = false, trustProxyHops = 0, log = console.error }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxyHops);
-  // First, so that /health/live never reaches the web session lookup.
+  app.use(securityHeaders({ https }));
+  // Before the web session lookup, so that /health/live never reaches it.
   app.use(healthRouter(health));
   if (webRoot !== undefined) app.use(webFiles(webRoot));
   if (auth !== undefined) {
