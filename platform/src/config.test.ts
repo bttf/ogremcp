@@ -108,6 +108,17 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads DCR_TRUSTED_RANGES as CIDR ranges that replace the default", () => {
+    const config = loadConfig({ DATABASE_URL: url, DCR_TRUSTED_RANGES: " 160.79.104.0/21, 2001:db8::/32 " });
+    expect(config.registration.trustedRanges).toEqual([
+      { address: "160.79.104.0", prefix: 21, family: "ipv4" },
+      { address: "2001:db8::", prefix: 32, family: "ipv6" },
+    ]);
+    for (const bad of ["160.79.104.0", "160.79.104.0/33", "claude.ai/21", "160.79.104.0/21/1"]) {
+      expect(() => loadConfig({ DATABASE_URL: url, DCR_TRUSTED_RANGES: bad })).toThrow("DCR_TRUSTED_RANGES must list address ranges only");
+    }
+  });
+
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {
     const generated = generateOidcKeys();
     const lines = Object.fromEntries(

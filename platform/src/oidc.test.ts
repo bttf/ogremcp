@@ -12,7 +12,14 @@ import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
-import { DEFAULT_REGISTRATION, deleteUnusedClients, type RegistrationSettings } from "./oidc-registration.js";
+import {
+  DEFAULT_REGISTRATION,
+  deleteUnusedClients,
+  MAX_TRACKED_ADDRESSES,
+  parseAddressRanges,
+  RegistrationLimiter,
+  type RegistrationSettings,
+} from "./oidc-registration.js";
 import { WebSessions } from "./web-sessions.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -145,6 +152,31 @@ describe("OAuth server", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(3000);
     expect(((await limited.json()) as { error: string }).error).toBe("too_many_requests");
     expect((await register(base, {})).status).toBe(429);
+  });
+
+  it("gives the trusted ranges one shared bucket, caps all registrations together, and keeps a bounded number of addresses", () => {
+    let now = 0;
+    const settings: RegistrationSettings = {
+      ...DEFAULT_REGISTRATION,
+      trustedRanges: parseAddressRanges("DCR_TRUSTED_RANGES", "160.79.104.0/21"),
+      trustedBurst: 60,
+      globalBurst: 70,
+    };
+    const limiter = new RegistrationLimiter(settings, () => now);
+    // Claude's users through one egress address, and through its neighbours, share the trusted bucket.
+    for (let i = 0; i < 60; i++) expect(limiter.take(i % 2 === 0 ? "160.79.104.7" : "::ffff:160.79.111.200")).toBe(0);
+    expect(limiter.take("160.79.104.8")).toBeGreaterThan(0);
+    // Other addresses keep their own buckets, until the global one is empty.
+    for (let i = 0; i < 10; i++) expect(limiter.take(`198.51.100.${i}`)).toBe(0);
+    expect(limiter.take("198.51.100.99")).toBeGreaterThan(0);
+
+    const wide = new RegistrationLimiter({ ...DEFAULT_REGISTRATION, globalBurst: 1_000_000, globalRatePerHour: 1_000_000 }, () => now);
+    for (let i = 0; i <= MAX_TRACKED_ADDRESSES; i++) wide.take(`10.${i >> 16}.${(i >> 8) & 255}.${i & 255}`);
+    expect(wide.tracked).toBe(MAX_TRACKED_ADDRESSES);
+    now += 60 * 60 * 1000;
+    wide.take("192.0.2.1");
+    // The sweep drops every bucket that has refilled.
+    expect(wide.tracked).toBe(1);
   });
 
   it("builds http endpoint URLs when no proxy is trusted, whatever X-Forwarded-Proto says", async () => {
@@ -381,7 +413,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect((await other.get(`${path}/details`, "application/json")).status).toBe(400);
   });
 
-  /** A client as Claude registers it, but without `token_endpoint_auth_method`, and with the MCP scope. */
+  /**
+   * A client as Claude registers it, but without `token_endpoint_auth_method`,
+   * with the MCP scope, and with metadata that is dropped: logout redirects,
+   * and an HMAC algorithm that oidc-provider makes a secret for.
+   */
   async function registerAgent(): Promise<{ client_id: string } & Record<string, unknown>> {
     const res = await register(base, {
       client_name: "Agent",
@@ -389,6 +425,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       scope: "read",
+      post_logout_redirect_uris: ["https://agent.example/signed-out"],
+      request_object_signing_alg: "HS256",
     });
     expect(res.status).toBe(201);
     return (await res.json()) as { client_id: string } & Record<string, unknown>;
@@ -400,6 +438,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect(client).not.toHaveProperty("client_secret");
     expect(client).not.toHaveProperty("registration_access_token");
     expect(client).not.toHaveProperty("scope");
+    // oidc-provider's default, an empty list, stands while RP-initiated logout is on.
+    expect(client["post_logout_redirect_uris"] ?? []).toEqual([]);
+    const stored = await pool.query("select 1 from oidc_models where model = 'Client' and oidc_id = $1 and not payload ? 'client_secret'", [client.client_id]);
+    expect(stored.rowCount).toBe(1);
 
     const challenge = createHash("sha256").update(randomBytes(32).toString("base64url")).digest("base64url");
     const query = new URLSearchParams({
@@ -443,7 +485,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     ]);
     expect(lastUsed.rowCount).toBe(1);
 
+    const unusedGrant = new oidc.Grant({ accountId, clientId: unused.client_id });
+    unusedGrant.addOIDCScope("openid");
+    const unusedGrantId = await unusedGrant.save();
+
     expect(await deleteUnusedClients(pool, 90)).toBe(1);
+    // With its grants and tokens; the used client keeps its own.
+    expect(await oidc.Grant.find(unusedGrantId)).toBeUndefined();
+    expect(await oidc.Grant.find(grantId)).toBeDefined();
     const left = await pool.query<{ oidc_id: string }>("select oidc_id from oidc_models where model = 'Client'");
     expect(left.rows.map((row) => row.oidc_id)).toEqual(expect.arrayContaining(["agent", used.client_id]));
     expect(left.rows.map((row) => row.oidc_id)).not.toContain(unused.client_id);

@@ -1,6 +1,6 @@
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
-import { DEFAULT_REGISTRATION, type RegistrationSettings } from "./oidc-registration.js";
+import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
@@ -28,10 +28,7 @@ export interface Config {
   webSessionLifetimeMs: number;
   /** `WEB_SESSION_RENEW_WITHIN_DAYS`, in milliseconds: a web session used with less than this left is renewed. */
   webSessionRenewWithinMs: number;
-  /**
-   * `OAUTH_REGISTRATION_RATE_PER_HOUR`, `OAUTH_REGISTRATION_BURST`, and
-   * `OAUTH_CLIENT_UNUSED_DAYS`: dynamic client registration's limits (§9).
-   */
+  /** The `DCR_` names and `OAUTH_CLIENT_UNUSED_DAYS`: dynamic client registration's limits (§9). */
   registration: RegistrationSettings;
   /** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, or null when both are unset. */
   google: ProviderCredentials | null;
@@ -205,6 +202,22 @@ function mcpAllowedOrigins(value: string | undefined, fallback: string[]): strin
     });
 }
 
+/** The registration limits. `DCR_TRUSTED_RANGES` is a comma-separated list of CIDR ranges. */
+function registrationSettings(env: Record<string, string | undefined>): RegistrationSettings {
+  const d = DEFAULT_REGISTRATION;
+  const ranges = (env["DCR_TRUSTED_RANGES"] ?? "").trim();
+  return {
+    ratePerHour: positiveInt("DCR_RATE_PER_HOUR", env["DCR_RATE_PER_HOUR"], d.ratePerHour),
+    burst: positiveInt("DCR_BURST", env["DCR_BURST"], d.burst),
+    trustedRanges: ranges === "" ? d.trustedRanges : parseAddressRanges("DCR_TRUSTED_RANGES", ranges),
+    trustedRatePerHour: positiveInt("DCR_TRUSTED_RATE_PER_HOUR", env["DCR_TRUSTED_RATE_PER_HOUR"], d.trustedRatePerHour),
+    trustedBurst: positiveInt("DCR_TRUSTED_BURST", env["DCR_TRUSTED_BURST"], d.trustedBurst),
+    globalRatePerHour: positiveInt("DCR_GLOBAL_RATE_PER_HOUR", env["DCR_GLOBAL_RATE_PER_HOUR"], d.globalRatePerHour),
+    globalBurst: positiveInt("DCR_GLOBAL_BURST", env["DCR_GLOBAL_BURST"], d.globalBurst),
+    unusedClientDays: positiveInt("OAUTH_CLIENT_UNUSED_DAYS", env["OAUTH_CLIENT_UNUSED_DAYS"], d.unusedClientDays),
+  };
+}
+
 /**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
@@ -237,11 +250,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     mcpAllowedOrigins: mcpAllowedOrigins(env["MCP_ALLOWED_ORIGINS"], defaultMcpAllowedOrigins(baseUrl)),
     webSessionLifetimeMs: lifetimeDays * DAY_MS,
     webSessionRenewWithinMs: renewWithinDays * DAY_MS,
-    registration: {
-      ratePerHour: positiveInt("OAUTH_REGISTRATION_RATE_PER_HOUR", env["OAUTH_REGISTRATION_RATE_PER_HOUR"], DEFAULT_REGISTRATION.ratePerHour),
-      burst: positiveInt("OAUTH_REGISTRATION_BURST", env["OAUTH_REGISTRATION_BURST"], DEFAULT_REGISTRATION.burst),
-      unusedClientDays: positiveInt("OAUTH_CLIENT_UNUSED_DAYS", env["OAUTH_CLIENT_UNUSED_DAYS"], DEFAULT_REGISTRATION.unusedClientDays),
-    },
+    registration: registrationSettings(env),
     google,
     discord,
     oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),
