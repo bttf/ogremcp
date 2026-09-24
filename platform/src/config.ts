@@ -1,3 +1,5 @@
+import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
+
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
   port: number;
@@ -22,6 +24,13 @@ export interface Config {
   google: ProviderCredentials | null;
   /** `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`, or null when both are unset. */
   discord: ProviderCredentials | null;
+  /**
+   * `OIDC_JWKS` and `OIDC_COOKIE_KEYS`, the OAuth server's keys (§13.1), or
+   * null when both are unset. Never logged or repeated.
+   */
+  oidcKeys: OidcKeys | null;
+  /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
+  production: boolean;
 }
 
 export interface ProviderCredentials {
@@ -139,7 +148,8 @@ function publicBaseUrl(value: string | undefined, localPort: number, providerSet
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
  * only store (§11). The sign-in providers are optional: without one, its
- * routes answer 503.
+ * routes answer 503. The OAuth server's keys may be unset here; `index.ts`
+ * decides whether the service may start without them.
  */
 export function loadConfig(env: Record<string, string | undefined>): Config {
   const listenPort = port(env["PORT"]);
@@ -166,5 +176,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     webSessionRenewWithinMs: renewWithinDays * DAY_MS,
     google,
     discord,
+    oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),
+    production: env["NODE_ENV"] === "production",
   };
 }

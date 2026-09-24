@@ -1,13 +1,17 @@
 import express, { type ErrorRequestHandler, type Express } from "express";
+import type Provider from "oidc-provider";
 
 import { type AuthOptions, authRouter } from "./auth.js";
 import { failureCode } from "./db.js";
 import { type HealthOptions, healthRouter } from "./health.js";
+import { mountOidc } from "./oidc.js";
 
 export interface AppOptions {
   health: HealthOptions;
   /** Sign-in and web sessions. Left out by tests of the health endpoints alone. */
   auth?: AuthOptions;
+  /** The OAuth server (§9), from `createOidcProvider`. Needs `auth`: its interactions read the web session. */
+  oidc?: Provider;
   /**
    * `TRUST_PROXY_HOPS`. Railway's edge terminates TLS and adds
    * `X-Forwarded-For` and `X-Forwarded-Proto`; trusting that one hop makes
@@ -19,7 +23,8 @@ export interface AppOptions {
 }
 
 /** The Express app. `index.ts` gives it the database and serves it. */
-export function createApp({ health, auth, trustProxyHops = 0, log = console.error }: AppOptions): Express {
+export function createApp({ health, auth, oidc, trustProxyHops = 0, log = console.error }: AppOptions): Express {
+  if (oidc !== undefined && auth === undefined) throw new Error("the OAuth server needs the web sessions of `auth`");
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxyHops);
@@ -27,6 +32,7 @@ export function createApp({ health, auth, trustProxyHops = 0, log = console.erro
   app.use(healthRouter(health));
   if (auth !== undefined) {
     app.use(auth.sessions.middleware());
+    if (oidc !== undefined) mountOidc(app, oidc, auth.pool);
     app.use(authRouter(auth));
   }
   app.use(errorHandler(log));

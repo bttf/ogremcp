@@ -1,6 +1,7 @@
 // The platform service: web UI, MCP server, bridge API, and OAuth server
-// (docs/architecture.md §5, §13). For now it serves the health endpoints and
-// Google and Discord sign-in with web sessions (§13.1).
+// (docs/architecture.md §5, §13). For now it serves the health endpoints,
+// Google and Discord sign-in with web sessions (§13.1), and the OAuth server
+// (§9).
 import { createServer } from "node:http";
 
 import { createApp } from "./app.js";
@@ -8,14 +9,26 @@ import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
 import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
+import { createOidcProvider } from "./oidc.js";
+import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
 
 // A missing or malformed DATABASE_URL, or another bad value, ends the process
 // before it listens. No message repeats the URL or a client secret.
 let config: Config;
+let oidcKeys: OidcKeys;
 try {
   config = loadConfig(process.env);
+  // Without OIDC_JWKS and OIDC_COOKIE_KEYS, only a local run starts, on keys
+  // made now. No message repeats a key.
+  const resolved = resolveOidcKeys(config.oidcKeys, config.publicBaseUrl, config.production);
+  oidcKeys = resolved.keys;
+  if (resolved.ephemeral) {
+    console.warn(
+      "OIDC_JWKS and OIDC_COOKIE_KEYS are not set: the OAuth server uses keys made at start, so its tokens and cookies stop working when the process restarts",
+    );
+  }
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);
@@ -72,9 +85,19 @@ const sessions = new WebSessions({
   secure: new URL(config.publicBaseUrl).protocol === "https:",
 });
 
+// The issuer is PUBLIC_BASE_URL (§9). oidc-provider checks the keys here.
+let oidc: ReturnType<typeof createOidcProvider>;
+try {
+  oidc = createOidcProvider({ pool, issuer: config.publicBaseUrl, keys: oidcKeys, trustProxyHops: config.trustProxyHops });
+} catch (err) {
+  console.error(`configuration error: ${(err as Error).message}`);
+  process.exit(1);
+}
+
 const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
+  oidc,
   trustProxyHops: config.trustProxyHops,
 });
 

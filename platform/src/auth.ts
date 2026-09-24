@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 
 import { readCookie } from "./cookies.js";
 import { linkIdentity, type ProviderName, signInWithIdentity } from "./identities.js";
+import { safeReturnPath } from "./return-path.js";
 import { requireSameOrigin } from "./same-origin.js";
 import { SignInFailure, type SignInProviders } from "./sign-in-providers.js";
 import { currentUser, type WebSessions } from "./web-sessions.js";
@@ -16,10 +17,12 @@ import { currentUser, type WebSessions } from "./web-sessions.js";
  * - `GET /auth/{google,discord}` sends the browser to the provider. With
  *   `?link=1`, from a signed-in browser, it connects the provider's account
  *   to the signed-in user instead of signing in. That is the only way a
- *   second provider joins a user.
+ *   second provider joins a user. With `?return_to=<path>`, a path on this
+ *   service (`safeReturnPath`), the flow ends there instead of at `/`: an
+ *   OAuth interaction sends a signed-out browser here and gets it back (§9).
  * - `GET /auth/{google,discord}/callback` finishes either flow and redirects
- *   to `/`. A sign-in whose identity is new creates a user; a sign-in replaces
- *   any web session the browser had.
+ *   to the return path or `/`. A sign-in whose identity is new creates a
+ *   user; a sign-in replaces any web session the browser had.
  * - `POST /auth/signout` ends the web session and redirects to `/`. It needs
  *   this site's `Origin`.
  *
@@ -38,9 +41,10 @@ export interface AuthOptions {
 
 /**
  * The sign-in cookie of a provider, one per provider. It holds `state`, the
- * PKCE code verifier (empty for Discord), and, for a link, the uuid of the web
- * session that started it, joined by dots. Every part is base64url or a uuid,
- * so none holds a dot.
+ * PKCE code verifier (empty for Discord), for a link the uuid of the web
+ * session that started it, and the return path in base64url, joined by dots.
+ * Every part is base64url or a uuid, so none holds a dot. The last two are
+ * empty when unused.
  *
  * Over https it is `__Host-`, so that no other host, such as a sibling
  * subdomain of a self-hoster's domain, can plant one (login CSRF). That
@@ -86,6 +90,7 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
         if (user === null) return sendText(res, 401, `Sign in first, then connect your ${provider.label} account.`);
         linkSession = user.sessionUuid;
       }
+      const returnTo = safeReturnPath(req.query["return_to"], publicBaseUrl) ?? "";
       let flow: Awaited<ReturnType<typeof provider.begin>>;
       try {
         flow = await provider.begin();
@@ -94,7 +99,8 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
         log(`sign-in with ${name} could not start: ${err.kind}: ${err.reason}`);
         return sendText(res, 502, `Could not reach ${provider.label} to start signing in. Try again.`);
       }
-      res.cookie(signInCookieName(name, sessions.secure), [flow.state, flow.codeVerifier ?? "", linkSession].join("."), {
+      const cookieValue = [flow.state, flow.codeVerifier ?? "", linkSession, Buffer.from(returnTo).toString("base64url")].join(".");
+      res.cookie(signInCookieName(name, sessions.secure), cookieValue, {
         ...signInCookie,
         maxAge: SIGN_IN_TTL_MS,
       });
@@ -116,7 +122,7 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
       }
       const code = query.get("code");
       const state = query.get("state");
-      const [storedState, storedVerifier, linkSession] = stored?.length === 3 ? stored : [];
+      const [storedState, storedVerifier, linkSession, storedReturnTo] = stored?.length === 4 ? stored : [];
       if (
         code === null ||
         state === null ||
@@ -127,6 +133,8 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
       ) {
         return sendText(res, 400, `Sign-in with ${provider.label} could not be verified. Start again from the sign-in page.`);
       }
+      // Checked again: the cookie came back from the browser.
+      const returnTo = safeReturnPath(Buffer.from(storedReturnTo ?? "", "base64url").toString(), publicBaseUrl) ?? "/";
 
       let providerUserId: string;
       try {
@@ -155,14 +163,14 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
             `This ${provider.label} account is already linked to another Open Gamer MCP account, so it was not connected to yours. Accounts are never merged.`,
           );
         }
-        return res.redirect("/");
+        return res.redirect(returnTo);
       }
 
       const userId = await signInWithIdentity(pool, name, providerUserId);
       if (user !== null) await sessions.invalidate(user.sessionUuid);
       const { token, expiresAt } = await sessions.create(userId);
       sessions.setCookie(res, token, expiresAt);
-      res.redirect("/");
+      res.redirect(returnTo);
     });
   }
 
