@@ -200,6 +200,7 @@ interface Interpreter<State> {
 interface Parsed<State> {
   flavor: string;                 // mapped from the adapter's detection facts (§6.3.1)
   rules: string[];                // e.g. ["hardcore"]; [] on normal realms
+  unknownFlavor?: { reason: string; facts: Record<string, unknown> | null }; // only when flavor is "unknown"; raw facts for the platform to log (§6.3.1)
   character: { key: string; name: string; realm: string } | null;
   capturedAt: Date | null;        // adapter stamp; server falls back to bridge mtime, then receipt time
   adapterSchema: number;
