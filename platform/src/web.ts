@@ -3,6 +3,8 @@ import express, { type Request, type Response, type Router } from "express";
 /**
  * Paths the service owns. A page load of one, or of a path under one, never
  * gets the web app: it goes on to the route that owns it, or to the 404.
+ * `/device` is not one: a page load of it is the web app's Device approval
+ * page, and `mountOidc` takes the page's calls and `/device/:uid` first.
  */
 const SERVICE_PATHS = ["/api", "/auth", "/health", "/mcp", "/oauth", "/.well-known"];
 

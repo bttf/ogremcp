@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { ADAPTER_SHA256_HEADER, type KitList } from "./bridge-api.js";
 import { createPool } from "./db.js";
+import { BRIDGE_CLIENT_ID } from "./devices.js";
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -54,7 +55,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
     url.pathname = `/${name}`;
     pool = createPool({ url: url.toString(), queryTimeoutMs: 10_000, max: 4 });
     await migrate(pool);
-    // The device flow is RED-307: the client and grant below stand in for a bridge's.
+    // An agent's client. A bridge's tokens are the bridge client's (`devices.ts`).
     await new PostgresAdapter(pool, "Client").upsert(CLIENT_ID, {
       client_id: CLIENT_ID,
       redirect_uris: ["https://agent.example/callback"],
@@ -86,20 +87,26 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
     }
   });
 
-  /** A new user's access token for `resource` with `scope`, as oidc-tokens.test.ts mints them. */
+  /**
+   * A new user's access token for `resource` with `scope`, as oidc-tokens.test.ts mints them: the agent's for
+   * the MCP server, and the bridge client's for the bridge API.
+   */
   async function token(resource: string, scope: Scope): Promise<{ userId: string; accessToken: string }> {
     const { rows } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
     const user = rows[0];
     if (user === undefined) throw new Error("no user row");
-    const client = await provider.Client.find(CLIENT_ID);
+    const bridge = resource === RESOURCES.bridge;
+    const clientId = bridge ? BRIDGE_CLIENT_ID : CLIENT_ID;
+    const client = await provider.Client.find(clientId);
     if (client === undefined) throw new Error("the test client is missing");
-    const grant = new provider.Grant({ accountId: user.uuid, clientId: CLIENT_ID });
+    const grant = new provider.Grant({ accountId: user.uuid, clientId });
     grant.addResourceScope(resource, scope);
     const grantId = await grant.save();
-    const refreshToken = await new provider.RefreshToken({ accountId: user.uuid, client, grantId, gty: "authorization_code", scope, resource }).save();
+    const gty = bridge ? "device_code" : "authorization_code";
+    const refreshToken = await new provider.RefreshToken({ accountId: user.uuid, client, grantId, gty, scope, resource }).save();
     const res = await fetch(`${base}/oauth/token`, {
       method: "POST",
-      body: new URLSearchParams({ client_id: CLIENT_ID, grant_type: "refresh_token", refresh_token: refreshToken }),
+      body: new URLSearchParams({ client_id: clientId, grant_type: "refresh_token", refresh_token: refreshToken }),
     });
     const body = (await res.json()) as { access_token?: string; scope?: string };
     expect(body.scope).toBe(scope);

@@ -80,7 +80,7 @@ async function sendAnswer(uid: string, answer: "approve" | "deny"): Promise<{ to
  * break, while `active`. Losing focus or visibility sets it back to false,
  * and the wait starts again when the page has both again.
  */
-function useSteadyFocus(delayMs: number, active: boolean): boolean {
+export function useSteadyFocus(delayMs: number, active: boolean): boolean {
   const [steady, setSteady] = useState(false);
   useEffect(() => {
     if (!active) return;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
+import { DEFAULT_MISSES } from "./devices.js";
 import {
   DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
   DEFAULT_PORT,
@@ -35,6 +36,7 @@ describe("loadConfig", () => {
       oidcKeys: null,
       tokenLifetimes: DEFAULT_TOKEN_LIFETIMES,
       cimdFetchLimits: DEFAULT_CIMD_FETCH_LIMITS,
+      deviceCodeMisses: DEFAULT_MISSES,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });

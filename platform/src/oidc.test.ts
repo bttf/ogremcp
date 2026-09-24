@@ -98,8 +98,8 @@ describe("OAuth server", () => {
     expect(metadata["token_endpoint_auth_methods_supported"]).toContain("none");
     // Off: a client's post_logout_redirect_uri would redirect without a click.
     expect(metadata["end_session_endpoint"]).toBeUndefined();
-    // Off until their own issues.
-    expect(metadata["device_authorization_endpoint"]).toBeUndefined();
+    // The bridge's device flow (§8.1).
+    expect(metadata["device_authorization_endpoint"]).toBe(`${ISSUER}/oauth/device/auth`);
 
     // The public halves only.
     const jwks = JSON.parse((await get(port, "/oauth/jwks")).body) as { keys: Record<string, unknown>[] };
