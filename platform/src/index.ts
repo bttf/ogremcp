@@ -20,13 +20,28 @@ try {
 // The pool opens no connection until the first query. This query runs now, so
 // a database that cannot be reached ends the process at start and fails the
 // deploy, not the first request. The output is a code, never the URL.
-const pool = createPool({ url: config.databaseUrl });
+const pool = createPool({ url: config.databaseUrl, queryTimeoutMs: config.databaseQueryTimeoutMs });
+let tls: boolean;
 try {
-  await pool.query("select 1");
+  const client = await pool.connect();
+  try {
+    await client.query("select 1");
+    // pg asks for TLS when the URL's sslmode (or PGSSLMODE) says so, and a
+    // connection that asked for it fails when the server has none. So a
+    // connection that is up uses TLS exactly when it asked for it.
+    tls = Boolean(client.ssl);
+  } finally {
+    client.release();
+  }
 } catch (err) {
   console.error(`database is not reachable: code=${failureCode(err)}`);
   process.exit(1);
 }
+console.log(
+  tls
+    ? "database connection uses TLS"
+    : "database connection does not use TLS: a database reached over the internet needs sslmode=verify-full in DATABASE_URL",
+);
 
 const app = createApp({ checkDatabase: () => pool.query("select 1") });
 

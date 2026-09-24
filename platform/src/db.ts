@@ -11,16 +11,19 @@ export interface PoolOptions {
   url: string;
   /** Receives one line per error of an idle connection. Default: `console.error`. */
   log?: (line: string) => void;
+  /** Most time a query waits for the database's answer. A query over it fails and its connection is dropped. */
+  queryTimeoutMs: number;
   /** Most open connections. Default 5. */
   max?: number;
 }
 
-export function createPool({ url, log = console.error, max = 5 }: PoolOptions): Pool {
+export function createPool({ url, queryTimeoutMs, log = console.error, max = 5 }: PoolOptions): Pool {
   const pool = new Pool({
     connectionString: url,
     max,
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
+    query_timeout: queryTimeoutMs,
   });
   // An idle connection that fails emits here. Without a listener the process
   // would exit, and the default listener would print the message.

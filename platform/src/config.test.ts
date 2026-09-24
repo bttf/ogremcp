@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_PORT, loadConfig } from "./config.js";
+import { DEFAULT_DATABASE_QUERY_TIMEOUT_MS, DEFAULT_PORT, loadConfig } from "./config.js";
 
 const url = "postgresql://ogmcp:secret-password@localhost:5432/ogmcp";
 
 describe("loadConfig", () => {
-  it("reads PORT and DATABASE_URL, with a default port", () => {
-    expect(loadConfig({ DATABASE_URL: url })).toEqual({ port: DEFAULT_PORT, databaseUrl: url });
-    expect(loadConfig({ DATABASE_URL: url, PORT: "8080" }).port).toBe(8080);
+  it("reads PORT, DATABASE_URL, and DATABASE_QUERY_TIMEOUT_MS, with defaults", () => {
+    expect(loadConfig({ DATABASE_URL: url })).toEqual({
+      port: DEFAULT_PORT,
+      databaseUrl: url,
+      databaseQueryTimeoutMs: DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
+    });
+    const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
+    expect(config.port).toBe(8080);
+    expect(config.databaseQueryTimeoutMs).toBe(2500);
   });
 
   it("refuses to start without DATABASE_URL", () => {
@@ -27,7 +33,8 @@ describe("loadConfig", () => {
     }
   });
 
-  it("refuses a PORT that is not a port", () => {
+  it("refuses a PORT that is not a port and a query timeout that is not positive", () => {
     expect(() => loadConfig({ DATABASE_URL: url, PORT: "http" })).toThrow("PORT must be");
+    expect(() => loadConfig({ DATABASE_URL: url, DATABASE_QUERY_TIMEOUT_MS: "0" })).toThrow("DATABASE_QUERY_TIMEOUT_MS must be");
   });
 });
