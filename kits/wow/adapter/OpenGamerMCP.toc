@@ -1,0 +1,17 @@
+# Interface numbers are major * 10000 + minor * 100 + patch. 11509 is client
+# 1.15.9 (Classic Era) and 16001 is client 1.60.1 (WoW Forever beta). One build
+# loads in both. Confirm in game with /dump select(4, GetBuildInfo()).
+## Interface: 11509, 16001
+## Title: Open Gamer MCP
+## Notes: Saves your character's state so your AI agent can give spoiler-free guidance.
+## Author: red pine software
+## Version: 0.1.0
+## SavedVariables: OpenGamerMCPDB
+
+# Load order matters: a file reads what earlier files put in the addon table.
+OpenGamerMCP.lua
+Collectors.lua
+Items.lua
+Storage.lua
+Collect.lua
+Transmit.lua

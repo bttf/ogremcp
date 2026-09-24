@@ -7,10 +7,18 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  },
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.6",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
