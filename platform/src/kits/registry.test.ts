@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { writeAdapterZips, zipAdapter } from "./adapter.js";
+import { readAdapterVersion, writeAdapterZips, zipAdapter } from "./adapter.js";
 import { KIT_SOURCES, loadKitRegistry } from "./registry.js";
 import { checkKits, type KitSource } from "./validate.js";
 
@@ -48,8 +48,10 @@ describe("loadKitRegistry", () => {
     expect(kit?.adapter).toMatchObject({
       folder: "OpenGamerMCP",
       sha256: createHash("sha256").update(zip).digest("hex"),
+      version: expect.stringMatching(/^\d+\.\d+\.\d+/),
       size: zip.length,
     });
+    expect(kit?.adapter?.data.equals(zip)).toBe(true);
     // A local .DS_Store stays out of the zip.
     const files = readdirSync(wow.adapterDir).filter((file) => !file.startsWith(".")).sort();
     expect(readZipNames(zip)).toEqual(files.map((file) => `OpenGamerMCP/${file}`));
@@ -78,6 +80,23 @@ describe("loadKitRegistry", () => {
     expect(() => loadKitRegistry({ sources: [wow, other], adaptersDir })).toThrow(
       '@ogmcp/kit-wow and @ogmcp/kit-other both have tool_prefix "wow"',
     );
+  });
+});
+
+describe("readAdapterVersion", () => {
+  // kits/wow/test/adapter_test.lua checks that the adapter stamps this version as addon_version (§6.3).
+  it("reads the TOC's ## Version, which every TOC must name the same (§8.2)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ogmcp-toc-"));
+    try {
+      writeFileSync(join(dir, "Addon.toc"), "\uFEFF## Interface: 11509\r\n## Title: Addon\r\n## Version: 1.2.3-beta.1\r\nAddon.lua\r\n");
+      expect(readAdapterVersion(dir)).toBe("1.2.3-beta.1");
+      writeFileSync(join(dir, "Addon_Mists.toc"), "## Version: 1.2.4\n");
+      expect(() => readAdapterVersion(dir)).toThrow(/name different versions/);
+      writeFileSync(join(dir, "Addon_Mists.toc"), "## Version: 1.2\n");
+      expect(() => readAdapterVersion(dir)).toThrow(/must have one "## Version:" line with a semver version/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
