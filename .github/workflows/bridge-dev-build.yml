@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: bridge/go.mod
-          cache-dependency-path: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
 
       - name: Install GoReleaser
         run: |
