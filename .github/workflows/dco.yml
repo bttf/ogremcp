@@ -29,7 +29,9 @@ jobs:
           fetch-depth: 0
 
       # Read the base branch from the API, not the event payload, so a re-run
-      # of an older event still checks against the PR's current base.
+      # of an older event still checks against the PR's current base. The API
+      # can return 404 for a few seconds after a PR is opened, so the lookup
+      # tries 3 times, 5 seconds apart, before it fails.
       - name: Resolve the PR's current base
         id: base
         env:
@@ -37,7 +39,17 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          base_ref=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .base.ref)
+          for attempt in 1 2 3; do
+            if base_ref=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .base.ref); then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Could not read PR #${PR_NUMBER} from the GitHub API after 3 tries."
+              exit 1
+            fi
+            echo "PR lookup failed on try ${attempt} of 3. Retrying in 5 seconds."
+            sleep 5
+          done
           git fetch --no-tags origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
           echo "Base: ${base_ref}"
           echo "ref=origin/${base_ref}" >> "$GITHUB_OUTPUT"
