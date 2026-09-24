@@ -1,7 +1,9 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "rootDir": "interpreter",
     "noEmit": false
   },
+  "include": ["interpreter/**/*.ts"],
   "exclude": ["interpreter/**/*.test.ts"]
 }
