@@ -123,6 +123,8 @@ unreachable.
   the Windows binary and the macOS universal binary as a zipped `.app`. Needs
   GoReleaser v2 and macOS (`docs/releases.md`).
 - `pnpm lint:seams`: the package seam checks (§5).
+- `pnpm --filter @ogmcp/platform dev:web`: Vite dev server for the web UI.
+  The service serves `platform/dist/web`, which the platform build produces.
 - `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.
 - `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
