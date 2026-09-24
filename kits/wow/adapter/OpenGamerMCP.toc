@@ -12,6 +12,7 @@
 OpenGamerMCP.lua
 Collectors.lua
 Items.lua
+RecentPath.lua
 Storage.lua
 Collect.lua
 Transmit.lua

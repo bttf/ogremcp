@@ -862,7 +862,13 @@ for _, client in ipairs({ "forever", "era" }) do
 
 		local state = db.state
 		eq(Keys(state), "character,inventory,location,quests,recent_path,skills", "sections")
-		eq(next(state.recent_path), nil, "recent_path is empty")
+		eq(#state.recent_path, 1, "recent_path: the place of the first collection")
+		local place = state.recent_path[1]
+		eq(Keys(place), "captured_at,in_instance,map_id,subzone,x,y,zone", "recent_path entry")
+		eq(place.captured_at, world.serverTime + 1, "entry time")
+		eq(place.map_id, 1429, "entry map_id")
+		eq(place.subzone, "Test Village", "entry subzone")
+		eq(place.x, 0.4312, "entry x, from the first collection")
 
 		local char = state.character
 		eq(char.name, db.character.name, "character name")
@@ -939,6 +945,68 @@ test("raw values: a collapsed quest header sets quests.partial, and a level abov
 	eq(db.state.quests.partial, true, "quests.partial")
 	eq(db.state.character.level, 70, "level")
 end)
+
+for _, client in ipairs({ "forever", "era" }) do
+	local function Setup(fn)
+		if client == "era" then
+			return Era(fn)
+		end
+		return fn
+	end
+
+	test(client .. ": recent_path appends each place change, keeps the last N, and carries over a reload", function()
+		local ns = Start(Setup())
+		local max = ns.RECENT_PATH_MAX
+		EnterWorld()
+		world.loc.subzone = "Test Mill"
+		Advance(5)
+		for i = 1, max do
+			world.loc.mapID, world.loc.zone = 2000 + i, "Zone " .. i
+			Advance(5)
+		end
+		local db = Logout()
+		local path = db.state.recent_path
+		eq(#path, max, "entries")
+		eq(path[1].zone, "Zone 1", "the oldest entries are dropped")
+		eq(path[1].captured_at, world.serverTime + 15, "entry time")
+		eq(path[max].map_id, 2000 + max, "newest last")
+
+		-- The client loads the file back. The same character keeps the path;
+		-- another character starts a new one.
+		local saved = WriteSavedVariables()
+		Start(Setup(), saved)
+		EnterWorld()
+		path = Logout().state.recent_path
+		eq(#path, max, "entries after the reload")
+		eq(path[max - 1].zone, "Zone " .. max, "carried entry")
+		eq(path[max].zone, "Test Forest", "the place after the reload")
+
+		Start(Setup(function(w)
+			w.char.guid = "Player-0000-00000002"
+		end), saved)
+		EnterWorld()
+		eq(#Logout().state.recent_path, 1, "another character's path is not carried")
+	end)
+
+	test(client .. ": recent_path adds no entry for a zone name that flickers on one map", function()
+		Start(Setup())
+		EnterWorld()
+		world.loc.zone = "Test Inn"
+		Advance(5)
+		world.loc.zone = "Test Forest"
+		Advance(5)
+		-- Just after a loading screen the zone text is empty.
+		world.loc.mapID, world.loc.zone = nil, ""
+		Advance(5)
+		-- Without a map ID, as in an instance, the zone text decides.
+		world.loc.zone = "Test Cave"
+		Advance(5)
+		local path = Logout().state.recent_path
+		eq(#path, 2, "entries")
+		eq(path[1].zone, "Test Forest", "the first place")
+		eq(path[2].zone, "Test Cave", "the instance")
+	end)
+end
 
 test("/transmit reloads the UI and is the only command", function()
 	Start()

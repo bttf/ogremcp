@@ -24,6 +24,7 @@ local COLLECT_PARTS = {
 	{ key = "character", fn = ns.CollectCharacterKey, top = true },
 	{ key = "character", fn = ns.CollectCharacter },
 	{ key = "location", fn = ns.CollectLocation },
+	{ key = "recent_path", fn = ns.CollectRecentPath },
 	{ key = "quests", fn = ns.CollectQuests },
 	{ key = "inventory", fn = ns.CollectInventory },
 	{ key = "skills", fn = ns.CollectSkills },
