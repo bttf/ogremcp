@@ -351,7 +351,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/v1/kits` | The user's enabled kits, with manifest and adapter versions |
+| `GET` | `/api/v1/kits` | The user's enabled kits, with manifest and adapter versions. The adapter version is the addon TOC's `## Version` (semver); it equals the `addon_version` the adapter stamps (§6.3) and the `addon-v` tag (§5). |
 | `GET` | `/api/v1/kits/{kit}/manifest` | The pinned manifest |
 | `GET` | `/api/v1/kits/{kit}/adapter` | The adapter zip, built from `kits/{kit}/adapter` at platform build time (sha256 in a response header) |
 | `POST` | `/api/v1/ingest` | Upload one source instance |
