@@ -9,6 +9,8 @@
 --   Collectors.lua    value readers and the character, location, quests, and
 --                     skills sections
 --   Items.lua         item details and the inventory section
+--   RecentPath.lua    the recent_path section, the one section carried across
+--                     reloads
 --   Storage.lua       the client facts, the secret-value guard, and the
 --                     OpenGamerMCPDB write
 --   Collect.lua       collection, its scheduling, and the write at PLAYER_LOGOUT
