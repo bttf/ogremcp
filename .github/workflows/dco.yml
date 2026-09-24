@@ -1,0 +1,72 @@
+# DCO: every non-merge commit in a PR needs a Signed-off-by trailer that
+# matches the commit's author (`git commit -s`). Merge commits carry no new
+# authorship and are skipped.
+#
+# `edited` re-runs the check when the PR's base branch changes. The check has
+# its own workflow so that title and body edits do not re-run the CI jobs.
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # Read the base branch from the API, not the event payload, so a re-run
+      # of an older event still checks against the PR's current base.
+      - name: Resolve the PR's current base
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          base_ref=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .base.ref)
+          git fetch --no-tags origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
+          echo "Base: ${base_ref}"
+          echo "ref=origin/${base_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE: ${{ steps.base.outputs.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! commits=$(git rev-list --no-merges "${BASE}..${HEAD_SHA}"); then
+            echo "::error::git rev-list failed for ${BASE}..${HEAD_SHA}"
+            exit 1
+          fi
+          if [ -z "$commits" ]; then
+            echo "No non-merge commits between ${BASE} and ${HEAD_SHA}."
+            exit 0
+          fi
+          failed=0
+          for sha in $commits; do
+            author=$(git show -s --format='%an <%ae>' "$sha")
+            # One Signed-off-by value must equal "Author Name <author@email>",
+            # compared without regard to case.
+            if ! git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha" | grep -qixF -- "$author"; then
+              echo "::error::Commit $sha has no Signed-off-by trailer matching its author, ${author}: $(git show -s --format=%s "$sha")"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "Sign off each commit with 'git commit -s', using the same name and email as the commit author."
+            exit 1
+          fi
+          echo "Every commit is signed off by its author."
