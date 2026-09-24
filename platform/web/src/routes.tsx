@@ -1,5 +1,6 @@
 import { type RouteObject, useRoutes } from "react-router";
 
+import { Games } from "./pages/Games.js";
 import { Home } from "./pages/Home.js";
 import { NotFound } from "./pages/NotFound.js";
 import { SignIn } from "./pages/SignIn.js";
@@ -17,7 +18,10 @@ export const routes: RouteObject[] = [
       { path: "/signin", element: <SignIn /> },
       {
         element: <RequireSession />,
-        children: [{ path: "/", element: <Home /> }],
+        children: [
+          { path: "/", element: <Home /> },
+          { path: "/games", element: <Games /> },
+        ],
       },
       { path: "*", element: <NotFound /> },
     ],
