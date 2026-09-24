@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "description": "A kit manifest. It tells the generic bridge what to read and where to find it (docs/architecture.md §6.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kit", "version", "sdk", "tool_prefix", "root", "sources", "flavors"],
+  "properties": {
+    "kit": {
+      "description": "The kit's ID, e.g. `wow`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "The kit's version.",
+      "type": "string",
+      "minLength": 1
+    },
+    "sdk": {
+      "description": "The compatible `@ogmcp/sdk` version range, e.g. `^0.1.0`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_prefix": {
+      "description": "Prefix for this kit's MCP tools, which are named `{tool_prefix}_{verb}_{noun}` (§10.1). Lowercase snake_case, `[a-z0-9_]` only. At most 60 characters, so that a tool name fits in 64.",
+      "type": "string",
+      "maxLength": 60,
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "root": { "$ref": "#/$defs/root" },
+    "adapter": { "$ref": "#/$defs/adapter" },
+    "sources": {
+      "description": "What the bridge reads.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "flavors": {
+      "description": "The single registry of per-flavor config, keyed by flavor (§6.4). Ingest rejects a payload whose flavor is not a key here (§8.3).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/flavor" }
+    }
+  },
+  "$defs": {
+    "root": {
+      "title": "Root",
+      "description": "How the bridge finds the game's install folder.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locate", "verify"],
+      "properties": {
+        "locate": {
+          "description": "An ordered chain. The bridge tries each entry in turn; if none resolves, it prompts the user.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/locateEntry" }
+        },
+        "verify": {
+          "description": "A glob, relative to root, that must match under a candidate root for it to count. No variables.",
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "locateEntry": {
+      "title": "LocateEntry",
+      "oneOf": [{ "$ref": "#/$defs/locatePath" }, { "$ref": "#/$defs/locatePrompt" }]
+    },
+    "locatePath": {
+      "title": "LocatePath",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "A candidate install folder. Globs allowed. The only variables are `{PROGRAM_FILES_X86}` and `{HOME}`; no other `{` or `}` is allowed.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^([^{}]|\\{PROGRAM_FILES_X86\\}|\\{HOME\\})*$"
+        }
+      }
+    },
+    "locatePrompt": {
+      "title": "LocatePrompt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt"],
+      "properties": {
+        "prompt": {
+          "description": "The title of the folder picker the bridge shows the user.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "adapter": {
+      "title": "Adapter",
+      "description": "The in-game adapter. Omit it for adapter-less kits.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install", "process"],
+      "properties": {
+        "install": {
+          "description": "Where the bridge installs the adapter, relative to root. Globs expand to each existing match. No variables.",
+          "$ref": "#/$defs/relativePath"
+        },
+        "process": {
+          "description": "Globs for the game's process names. The bridge applies adapter updates only while none is running (§7).",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "source": {
+      "title": "Source",
+      "description": "One kind of thing the bridge reads. Each file its path matches is a source instance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "format", "path", "trigger"],
+      "properties": {
+        "id": {
+          "description": "The source's ID, sent as `source_id` at ingest (§8.3).",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Only `file` is implemented. New types are added to this enum.",
+          "type": "string",
+          "enum": ["file"]
+        },
+        "format": {
+          "description": "Only `text` is implemented.",
+          "type": "string",
+          "enum": ["text"]
+        },
+        "path": {
+          "description": "Relative to root. Globs allowed; the bridge watches every match. No variables.",
+          "$ref": "#/$defs/relativePath"
+        },
+        "trigger": {
+          "description": "`on_change`: upload after writes settle (§7).",
+          "type": "string",
+          "enum": ["on_change"]
+        }
+      }
+    },
+    "flavor": {
+      "title": "Flavor",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "search"],
+      "properties": {
+        "status": {
+          "description": "`supported` (play-tested) or `experimental` (the agent caveats its answers).",
+          "type": "string",
+          "enum": ["supported", "experimental"]
+        },
+        "search": {
+          "description": "The flavor's search scope (§12). Each entry is a URL prefix with a scheme, a host, and a path that starts with `/`, not a bare domain. Empty means no vetted sources yet.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https?://[^/?#\\s]+/\\S*$"
+          }
+        }
+      }
+    },
+    "relativePath": {
+      "description": "A path relative to root. Globs allowed. No variables, so no `{` or `}`.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^{}]*$"
+    }
+  }
+}
