@@ -108,6 +108,7 @@ try {
     keys: oidcKeys,
     trustProxyHops: config.trustProxyHops,
     tokenLifetimes: config.tokenLifetimes,
+    cimdFetchLimits: config.cimdFetchLimits,
   });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);

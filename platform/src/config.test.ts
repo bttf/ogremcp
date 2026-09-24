@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import {
   DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
   DEFAULT_PORT,
@@ -31,6 +32,7 @@ describe("loadConfig", () => {
       discord: null,
       oidcKeys: null,
       tokenLifetimes: DEFAULT_TOKEN_LIFETIMES,
+      cimdFetchLimits: DEFAULT_CIMD_FETCH_LIMITS,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
@@ -104,6 +106,15 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ DATABASE_URL: url, OAUTH_GRANT_LIFETIME_DAYS: "20" })).toThrow(
       "OAUTH_REFRESH_TOKEN_LIFETIME_DAYS must not be more than OAUTH_GRANT_LIFETIME_DAYS",
     );
+  });
+
+  it("reads CIMD_TRUSTED_CLIENT_IDS as exact URLs that replace the default list", () => {
+    const ids = "https://claude.ai/oauth/mcp-oauth-client-metadata, https://agent.example/client.json";
+    expect(loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: ids }).cimdFetchLimits.trustedClientIds).toEqual([
+      "https://claude.ai/oauth/mcp-oauth-client-metadata",
+      "https://agent.example/client.json",
+    ]);
+    expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

@@ -1,3 +1,4 @@
+import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
@@ -41,6 +42,13 @@ export interface Config {
    * and `OAUTH_GRANT_LIFETIME_DAYS`, in seconds (§9).
    */
   tokenLifetimes: TokenLifetimes;
+  /**
+   * `CIMD_FETCHES_PER_MINUTE`, `CIMD_FETCHES_PER_HOST_PER_MINUTE`,
+   * `CIMD_FETCHES_PER_IP_PER_MINUTE`, and `CIMD_TRUSTED_CLIENT_IDS`: the limits on
+   * the OAuth server's fetches of client ID metadata documents and client
+   * JWKS (§9, `cimd.ts`). Each one unset is `DEFAULT_CIMD_FETCH_LIMITS`'s.
+   */
+  cimdFetchLimits: CimdFetchLimits;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -200,6 +208,28 @@ function mcpAllowedOrigins(value: string | undefined, fallback: string[]): strin
 }
 
 /**
+ * `CIMD_TRUSTED_CLIENT_IDS`, comma-separated. Each entry must be an https
+ * `client_id` URL exactly as a URL parser writes it, such as
+ * `https://claude.ai/oauth/mcp-oauth-client-metadata`: only a request with
+ * that exact `client_id` is trusted. A set value replaces the default list.
+ */
+function cimdTrustedClientIds(value: string | undefined): readonly string[] {
+  const raw = (value ?? "").trim();
+  if (raw === "") return DEFAULT_CIMD_FETCH_LIMITS.trustedClientIds;
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .map((entry) => {
+      const url = URL.parse(entry);
+      if (url?.protocol !== "https:" || url.href !== entry) {
+        throw new Error("CIMD_TRUSTED_CLIENT_IDS must list https client_id URLs, such as https://claude.ai/oauth/mcp-oauth-client-metadata");
+      }
+      return entry;
+    });
+}
+
+/**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
  * only store (§11). The sign-in providers are optional: without one, its
@@ -235,6 +265,20 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     discord,
     oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),
     tokenLifetimes: tokenLifetimes(env),
+    cimdFetchLimits: {
+      perMinute: positiveInt("CIMD_FETCHES_PER_MINUTE", env["CIMD_FETCHES_PER_MINUTE"], DEFAULT_CIMD_FETCH_LIMITS.perMinute),
+      perHostPerMinute: positiveInt(
+        "CIMD_FETCHES_PER_HOST_PER_MINUTE",
+        env["CIMD_FETCHES_PER_HOST_PER_MINUTE"],
+        DEFAULT_CIMD_FETCH_LIMITS.perHostPerMinute,
+      ),
+      perIpPerMinute: positiveInt(
+        "CIMD_FETCHES_PER_IP_PER_MINUTE",
+        env["CIMD_FETCHES_PER_IP_PER_MINUTE"],
+        DEFAULT_CIMD_FETCH_LIMITS.perIpPerMinute,
+      ),
+      trustedClientIds: cimdTrustedClientIds(env["CIMD_TRUSTED_CLIENT_IDS"]),
+    },
     production: env["NODE_ENV"] === "production",
   };
 }
