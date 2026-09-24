@@ -73,13 +73,21 @@ if (!failed) console.log(`Workspace dependencies follow §5 in ${packages.length
 
 // 2. The registry types each kit as an Interpreter (§5), so it must not pass a
 // kit on whole: no `export ... from "@ogmcp/kit-*"`, and no `export { name }`
-// or `export default name` of a name imported from a kit.
+// or `export default name` of a name imported from a kit. It imports a kit's
+// exports by name: no `import * as`, and a default import only of a kit's
+// JSON file, which has no named exports.
 if (existsSync(KIT_REGISTRY)) {
   const source = ts.createSourceFile(KIT_REGISTRY, readFileSync(KIT_REGISTRY, "utf8"), ts.ScriptTarget.Latest);
+  const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
   const kitNames = new Set();
   for (const node of source.statements) {
     if (ts.isImportDeclaration(node) && KIT.test(node.moduleSpecifier.text) && node.importClause) {
       const { name, namedBindings } = node.importClause;
+      const whole =
+        (namedBindings && ts.isNamespaceImport(namedBindings)) || (name && !node.moduleSpecifier.text.endsWith(".json"));
+      if (whole) {
+        fail(`${KIT_REGISTRY}:${lineOf(node)}: imports a kit module whole. Import the kit's exports by name (§5).`);
+      }
       if (name) kitNames.add(name.text);
       if (namedBindings && ts.isNamespaceImport(namedBindings)) kitNames.add(namedBindings.name.text);
       if (namedBindings && ts.isNamedImports(namedBindings)) {
@@ -97,8 +105,7 @@ if (existsSync(KIT_REGISTRY)) {
           node.exportClause.elements.some((element) => kitNames.has((element.propertyName ?? element.name).text)));
     const defaultExport = ts.isExportAssignment(node) && ts.isIdentifier(node.expression) && kitNames.has(node.expression.text);
     if (reExport || defaultExport) {
-      const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-      fail(`${KIT_REGISTRY}:${line}: re-exports a kit. The registry exports each kit as an Interpreter (§5).`);
+      fail(`${KIT_REGISTRY}:${lineOf(node)}: re-exports a kit. The registry exports each kit as an Interpreter (§5).`);
     }
   }
 }

@@ -10,10 +10,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./manifest.json": "./manifest.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "manifest.json",
+    "adapter"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

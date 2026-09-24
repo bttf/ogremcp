@@ -6,13 +6,16 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node dist/kits/build.js",
     "start": "node --env-file-if-exists=.env dist/index.js",
     "migrate": "node --env-file-if-exists=.env dist/migrate.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@ogmcp/kit-wow": "workspace:*",
+    "@ogmcp/sdk": "workspace:*",
+    "ajv": "^8.20.0",
     "express": "^5.2.1",
     "pg": "^8.23.0"
   },
