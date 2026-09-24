@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 
 /** What `GET /interaction/:uid/details` answers (`platform/src/oidc.ts`), in the fields this page reads. */
 export interface ConsentDetails {
@@ -24,6 +24,13 @@ const SCOPE_WORDS: Readonly<Record<string, string>> = {
 };
 
 const EXPIRED = "This authorization request has expired or is not valid. Start again from your agent.";
+
+/**
+ * How long the page must be visible and focused before Approve is enabled.
+ * A page that opens under the user's cursor, such as a second click of a
+ * double click, cannot approve.
+ */
+export const APPROVE_DELAY_MS = 1000;
 
 type Loaded =
   | { status: "ready"; details: ConsentDetails }
@@ -52,15 +59,45 @@ async function loadDetails(uid: string): Promise<Loaded> {
 }
 
 /** Sends the user's answer. Answers where the browser goes next, or why it stays. */
-async function sendAnswer(uid: string, answer: "approve" | "deny"): Promise<{ to: string } | "expired" | "failed"> {
+async function sendAnswer(uid: string, answer: "approve" | "deny"): Promise<{ to: string } | "expired" | "signed-out" | "failed"> {
   try {
     const res = await fetch(`${interactionPath(uid)}/${answer}`, { method: "POST", headers: { Accept: "application/json" } });
     if (res.status === 400) return "expired";
+    if (res.status === 401 || res.status === 403) return "signed-out";
     if (!res.ok) return "failed";
     return { to: ((await res.json()) as { location: string }).location };
   } catch {
     return "failed";
   }
+}
+
+/**
+ * True once the page has been visible and focused for `delayMs` without a
+ * break, while `active`. Losing focus or visibility sets it back to false,
+ * and the wait starts again when the page has both again.
+ */
+function useSteadyFocus(delayMs: number, active: boolean): boolean {
+  const [steady, setSteady] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function restart() {
+      clearTimeout(timer);
+      setSteady(false);
+      if (document.visibilityState === "visible" && document.hasFocus()) timer = setTimeout(() => setSteady(true), delayMs);
+    }
+    restart();
+    window.addEventListener("focus", restart);
+    window.addEventListener("blur", restart);
+    document.addEventListener("visibilitychange", restart);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", restart);
+      window.removeEventListener("blur", restart);
+      document.removeEventListener("visibilitychange", restart);
+    };
+  }, [delayMs, active]);
+  return steady;
 }
 
 /**
@@ -74,9 +111,12 @@ async function sendAnswer(uid: string, answer: "approve" | "deny"): Promise<{ to
  */
 export function Consent() {
   const uid = useParams()["uid"] ?? "";
+  const { pathname } = useLocation();
   // Null while loading, and while the browser leaves.
   const [loaded, setLoaded] = useState<Exclude<Loaded, { status: "leaving" }> | null>(null);
-  const [answer, setAnswer] = useState<"idle" | "sending" | "failed">("idle");
+  const [answer, setAnswer] = useState<"idle" | "sending" | "signed-out" | "failed">("idle");
+  // The wait starts when the buttons appear.
+  const approvable = useSteadyFocus(APPROVE_DELAY_MS, loaded?.status === "ready");
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +134,7 @@ export function Consent() {
     setAnswer("sending");
     const next = await sendAnswer(uid, choice);
     if (next === "expired") setLoaded({ status: "expired" });
-    else if (next === "failed") setAnswer("failed");
+    else if (next === "signed-out" || next === "failed") setAnswer(next);
     else window.location.replace(next.to);
   }
 
@@ -113,7 +153,10 @@ export function Consent() {
     <div className="og-consent">
       <h1>Approve an agent</h1>
       <p>
-        <strong>{client_name ?? "An agent with no name"}</strong> asks to connect to your Open Gamer MCP account.
+        <strong>
+          <bdi>{client_name ?? "An agent with no name"}</bdi>
+        </strong>{" "}
+        asks to connect to your Open Gamer MCP account.
       </p>
       {scopes.length === 0 ? (
         <p>It asks for no access to your data.</p>
@@ -134,11 +177,26 @@ export function Consent() {
       )}
       <p>Approve only if you started this from your agent.</p>
       {answer === "failed" && <p role="alert">Your answer was not sent. Try again.</p>}
+      {answer === "signed-out" && (
+        <p role="alert">
+          Your session ended. <a href={`/signin?return_to=${encodeURIComponent(pathname)}`}>Sign in again.</a>
+        </p>
+      )}
       <div className="og-consent__actions">
-        <button type="button" className="og-button" disabled={answer === "sending"} onClick={() => void send("approve")}>
+        <button
+          type="button"
+          className="og-button"
+          disabled={!approvable || answer === "sending" || answer === "signed-out"}
+          onClick={() => void send("approve")}
+        >
           Approve
         </button>
-        <button type="button" className="og-button og-button--secondary" disabled={answer === "sending"} onClick={() => void send("deny")}>
+        <button
+          type="button"
+          className="og-button og-button--secondary"
+          disabled={answer === "sending" || answer === "signed-out"}
+          onClick={() => void send("deny")}
+        >
           Deny
         </button>
       </div>
