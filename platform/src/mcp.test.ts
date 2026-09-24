@@ -111,7 +111,7 @@ describe("MCP discovery", () => {
 describe("/mcp", () => {
   it("answers a request without a bearer token with 401 and the challenge, and one with a token with 501", async () => {
     const port = await serve();
-    for (const method of ["POST", "GET"]) {
+    for (const method of ["POST", "GET", "DELETE"]) {
       const res = await send(port, method, "/mcp", { "content-type": "application/json" });
       expect(res.status).toBe(401);
       expect(res.headers["www-authenticate"]).toBe(CHALLENGE);
@@ -136,11 +136,14 @@ describe("/mcp", () => {
     expect((await send(port, "POST", "/mcp", { host: "ogmcp.example:443" })).status).toBe(401);
   });
 
-  it("refuses an Origin that is not PUBLIC_BASE_URL's", async () => {
+  it("refuses an Origin not in MCP_ALLOWED_ORIGINS, matching exact origins only", async () => {
     const port = await serve();
-    for (const origin of ["https://evil.example", "http://ogmcp.example", "null"]) {
+    for (const origin of ["https://evil.example", "http://ogmcp.example", "http://claude.ai", "https://evil.claude.ai", "https://claude.ai.evil.example", "null"]) {
       expect((await send(port, "POST", "/mcp", { origin })).status).toBe(403);
     }
-    expect((await send(port, "POST", "/mcp", { origin: ISSUER })).status).toBe(401);
+    // The default list: PUBLIC_BASE_URL and the target clients' web origins.
+    for (const origin of [ISSUER, "https://claude.ai"]) {
+      expect((await send(port, "POST", "/mcp", { origin })).status).toBe(401);
+    }
   });
 });

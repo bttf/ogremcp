@@ -112,6 +112,7 @@ const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
   oidc,
+  mcpAllowedOrigins: config.mcpAllowedOrigins,
   webRoot,
   kits,
   https,

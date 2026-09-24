@@ -11,9 +11,9 @@ import express, { type RequestHandler, type Response, type Router } from "expres
  *   MCP clients that probe fall back to the second. Both are public and sent
  *   with CORS, so that a browser-based client can read them.
  * - `/mcp`: the `Host` must name `PUBLIC_BASE_URL`'s host, and an `Origin`,
- *   when sent, must be `PUBLIC_BASE_URL`, which blocks DNS rebinding. Then a
- *   request without a bearer token gets 401 with the challenge of RFC 9728
- *   §5.1, which points at the metadata.
+ *   when sent, must be one of `MCP_ALLOWED_ORIGINS`, which blocks DNS
+ *   rebinding. Then a request without a bearer token gets 401 with the
+ *   challenge of RFC 9728 §5.1, which points at the metadata.
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
@@ -37,11 +37,34 @@ export const MCP_RESOURCE_METADATA_PATH = `${RESOURCE_METADATA_PATH}${MCP_PATH}`
 /** Agents get `read`, which covers every v1 MCP tool (§9). */
 export const MCP_SCOPES = ["read"] as const;
 
+/**
+ * The web origins of the §9 target clients. Their requests to `/mcp` can
+ * carry them as `Origin`: the claude.ai connector sends
+ * `Origin: https://claude.ai`, and ChatGPT's web app sends its own.
+ */
+export const MCP_CLIENT_ORIGINS: readonly string[] = [
+  "https://claude.ai",
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  "https://www.perplexity.ai",
+  "https://perplexity.ai",
+];
+
+/** `MCP_ALLOWED_ORIGINS` when it is unset: `PUBLIC_BASE_URL` and `MCP_CLIENT_ORIGINS`. */
+export function defaultMcpAllowedOrigins(publicBaseUrl: string): string[] {
+  return [new URL(publicBaseUrl).origin, ...MCP_CLIENT_ORIGINS];
+}
+
 export interface McpOptions {
-  /** `PUBLIC_BASE_URL`. The resource is `<it>/mcp`, and the Host and Origin checks compare against it. */
+  /** `PUBLIC_BASE_URL`. The resource is `<it>/mcp`, and the Host check compares against it. */
   publicBaseUrl: string;
   /** The OAuth server's issuer, the one authorization server of the resource. */
   issuer: string;
+  /**
+   * `MCP_ALLOWED_ORIGINS`: the values `Origin` may have on `/mcp`, each an
+   * exact origin. Default: `defaultMcpAllowedOrigins(publicBaseUrl)`.
+   */
+  allowedOrigins?: readonly string[];
 }
 
 /** The resource identifier of the MCP endpoint (RFC 8707, RFC 9728): what tokens for it are asked for. */
@@ -50,7 +73,7 @@ export function mcpResource(publicBaseUrl: string): string {
 }
 
 /** The Protected Resource Metadata document of the MCP endpoint (RFC 9728 §2). */
-function resourceMetadata({ publicBaseUrl, issuer }: McpOptions) {
+function resourceMetadata({ publicBaseUrl, issuer }: Pick<McpOptions, "publicBaseUrl" | "issuer">) {
   return {
     resource: mcpResource(publicBaseUrl),
     authorization_servers: [issuer],
@@ -75,6 +98,7 @@ export function mcpRouter(options: McpOptions): Router {
   const base = new URL(options.publicBaseUrl);
   const metadataUrl = `${base.origin}${MCP_RESOURCE_METADATA_PATH}`;
   const metadata = resourceMetadata(options);
+  const allowedOrigins = new Set(options.allowedOrigins ?? defaultMcpAllowedOrigins(options.publicBaseUrl));
 
   // The metadata holds no secret. `*` lets any page read it.
   const sendMetadata: RequestHandler = (_req, res) => {
@@ -109,13 +133,13 @@ export function mcpRouter(options: McpOptions): Router {
     sendRpcError(res, 403, -32000, "Invalid Host header");
   };
 
-  // A page on another origin cannot call the endpoint, whatever host name it
-  // used to reach it. A request without `Origin` passes: only browsers send
-  // it, and MCP clients such as Claude are not browsers. No CORS header is
-  // sent, so a preflight from another origin gets this 403 too.
+  // A page on an origin not in the list cannot call the endpoint, whatever
+  // host name it used to reach it. The match is exact: scheme, host, and
+  // port. A request without `Origin` passes: browsers send it, and most MCP
+  // clients are not browsers. No CORS header is sent.
   const checkOrigin: RequestHandler = (req, res, next) => {
     const origin = req.get("origin");
-    if (origin === undefined || origin === base.origin) return next();
+    if (origin === undefined || allowedOrigins.has(origin)) return next();
     sendRpcError(res, 403, -32000, "Origin not allowed");
   };
 
