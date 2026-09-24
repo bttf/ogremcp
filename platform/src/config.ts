@@ -1,6 +1,7 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
+import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
@@ -36,6 +37,11 @@ export interface Config {
    * null when both are unset. Never logged or repeated.
    */
   oidcKeys: OidcKeys | null;
+  /**
+   * `OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES`, `OAUTH_REFRESH_TOKEN_LIFETIME_DAYS`,
+   * and `OAUTH_GRANT_LIFETIME_DAYS`, in seconds (§9).
+   */
+  tokenLifetimes: TokenLifetimes;
   /**
    * `CIMD_FETCHES_PER_MINUTE` and `CIMD_FETCHES_PER_HOST_PER_MINUTE`: how
    * many client ID metadata documents the OAuth server fetches per minute
@@ -77,6 +83,7 @@ export const DEFAULT_WEB_SESSION_LIFETIME_DAYS = 30;
 export const DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS = 15;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_SECONDS = 24 * 60 * 60;
 
 function positiveInt(name: string, value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;
@@ -157,6 +164,23 @@ function publicBaseUrl(value: string | undefined, localPort: number, providerSet
   return url.origin;
 }
 
+/** The OAuth token lifetimes. A refresh token may not outlast its grant. */
+function tokenLifetimes(env: Record<string, string | undefined>): TokenLifetimes {
+  const accessMinutes = positiveInt(
+    "OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES",
+    env["OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES"],
+    DEFAULT_TOKEN_LIFETIMES.accessTokenSeconds / 60,
+  );
+  const refreshDays = positiveInt(
+    "OAUTH_REFRESH_TOKEN_LIFETIME_DAYS",
+    env["OAUTH_REFRESH_TOKEN_LIFETIME_DAYS"],
+    DEFAULT_TOKEN_LIFETIMES.refreshTokenSeconds / DAY_SECONDS,
+  );
+  const grantDays = positiveInt("OAUTH_GRANT_LIFETIME_DAYS", env["OAUTH_GRANT_LIFETIME_DAYS"], DEFAULT_TOKEN_LIFETIMES.grantSeconds / DAY_SECONDS);
+  if (refreshDays > grantDays) throw new Error("OAUTH_REFRESH_TOKEN_LIFETIME_DAYS must not be more than OAUTH_GRANT_LIFETIME_DAYS");
+  return { accessTokenSeconds: accessMinutes * 60, refreshTokenSeconds: refreshDays * DAY_SECONDS, grantSeconds: grantDays * DAY_SECONDS };
+}
+
 /**
  * `MCP_ALLOWED_ORIGINS`, comma-separated. Each entry must be an origin exactly
  * as a browser sends it, such as `https://claude.ai`: lowercase, no path, no
@@ -217,6 +241,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     google,
     discord,
     oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),
+    tokenLifetimes: tokenLifetimes(env),
     cimdFetchLimits: {
       perMinute: positiveInt("CIMD_FETCHES_PER_MINUTE", env["CIMD_FETCHES_PER_MINUTE"], DEFAULT_CIMD_FETCH_LIMITS.perMinute),
       perHostPerMinute: positiveInt(

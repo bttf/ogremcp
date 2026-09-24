@@ -8,6 +8,7 @@ import { type CimdFetchLimits, clientIdMetadataDocument, DEFAULT_CIMD_FETCH_LIMI
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
+import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes, tokenConfiguration } from "./oidc-tokens.js";
 import { requireSameOrigin } from "./same-origin.js";
 import { currentUser } from "./web-sessions.js";
 
@@ -33,8 +34,8 @@ import { currentUser } from "./web-sessions.js";
  * Client ID metadata documents are on (`cimd.ts`, RED-306). Off here, each
  * for its own issue: dynamic client registration (RED-304), static clients
  * (RED-305), the device flow (RED-307), loopback redirects (RED-308).
- * oidc-provider's defaults stand for scopes, resource indicators, and token
- * lifetimes (RED-302). The MCP endpoint's resource metadata is `mcp.ts`.
+ * Scopes, resource indicators, token lifetimes, revocation, and DPoP are
+ * `oidc-tokens.ts`. The MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
@@ -102,6 +103,8 @@ export interface OidcOptions {
    * the issuer. So behind Railway's edge they are https.
    */
   trustProxyHops: number;
+  /** Default: `DEFAULT_TOKEN_LIFETIMES`. */
+  tokenLifetimes?: TokenLifetimes;
   /**
    * Receives one line per server error, and one per minute in which client ID
    * metadata document fetches go over their limit. Default: `console.error`.
@@ -125,10 +128,12 @@ export function createOidcProvider({
   issuer,
   keys,
   trustProxyHops,
+  tokenLifetimes = DEFAULT_TOKEN_LIFETIMES,
   log = console.error,
   cimdFetchLimits = DEFAULT_CIMD_FETCH_LIMITS,
   testOnlyFetch,
 }: OidcOptions): Provider {
+  const tokens = tokenConfiguration(issuer, tokenLifetimes);
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -141,9 +146,11 @@ export function createOidcProvider({
     routes: ROUTES,
     // §9: OAuth 2.1 with PKCE only, for every client.
     pkce: { required: () => true },
+    ...tokens.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
+      ...tokens.features,
       // §9, D7: URL-based client IDs.
       clientIdMetadataDocument: clientIdMetadataDocument(cimdFetchLimits, log),
     },

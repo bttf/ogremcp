@@ -107,6 +107,7 @@ try {
     issuer: config.publicBaseUrl,
     keys: oidcKeys,
     trustProxyHops: config.trustProxyHops,
+    tokenLifetimes: config.tokenLifetimes,
     cimdFetchLimits: config.cimdFetchLimits,
   });
 } catch (err) {

@@ -215,7 +215,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
       client_id: "agent",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "openid",
+      // An agent's scope. The request gets the MCP resource (oidc-tokens.ts).
+      scope: "openid read",
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
@@ -305,7 +306,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     await signIn(browser);
     const path = await reachConsent(browser);
     const details = await browser.get(`${path}/details`, "application/json");
-    expect(await details.json()).toMatchObject({ client_name: "Test Agent", redirect_host: "agent.example", scopes: ["openid"] });
+    expect(await details.json()).toMatchObject({ client_name: "Test Agent", redirect_host: "agent.example", scopes: ["openid", "read"] });
     // Another site cannot answer for the user.
     expect((await browser.post(`${path}/approve`, "https://evil.example")).status).toBe(403);
 
@@ -317,7 +318,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
       body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: "agent", code_verifier: verifier }),
     });
     expect(token.status).toBe(200);
-    expect(await token.json()).toMatchObject({ access_token: expect.any(String), token_type: "Bearer", scope: "openid" });
+    // A token for the MCP resource carries only its scope.
+    expect(await token.json()).toMatchObject({ access_token: expect.any(String), token_type: "Bearer", scope: "read" });
   });
 
   it("denies at the consent page: the client gets access_denied", async () => {
