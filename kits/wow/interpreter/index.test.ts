@@ -19,8 +19,8 @@ vi.mock("./detect.js", async (importOriginal) => {
 });
 
 const STUB = {
-  era: { name: "Zoëla", project_id: 2, version: "1.15.9", build: "69722", interface: 11509 },
-  forever: { name: "Grimble", project_id: 1, version: "1.60.1", build: "69893", interface: 16001 },
+  era: { name: "Zoëla", flavor: "classic_era", project_id: 2, version: "1.15.9", build: "69722", interface: 11509 },
+  forever: { name: "Grimble", flavor: "forever", project_id: 1, version: "1.60.1", build: "69893", interface: 16001 },
 };
 
 const files = { era: "", forever: "" };
@@ -48,17 +48,18 @@ function parse(input: string | Uint8Array) {
 describe.each(["era", "forever"] as const)("the %s stub world's file", (client) => {
   it("parses into the §6.2 Parsed shape with the §6.3 sections", () => {
     const text = files[client];
-    const { name, ...facts } = STUB[client];
+    const { name, flavor, ...facts } = STUB[client];
     const parsed = parse(text);
 
     expect(parsed).toMatchObject({
-      flavor: "unknown",
+      flavor,
       rules: [],
       character: { key: "Player-0000-00000001", name, realm: "Testrealm" },
       capturedAt: new Date(Number(/\["captured_at"\] = (\d+)/.exec(text)?.[1]) * 1000),
       adapterSchema: 1,
     });
     expect(detect).toHaveBeenLastCalledWith({ ...facts, season_id: null });
+    expect(parsed).not.toHaveProperty("unknownFlavor");
 
     const { state } = parsed;
     expect(state.character).toMatchObject({ name, level: 12, xp_max: 7600, in_combat: true, resting: true, dead: false });
@@ -78,6 +79,14 @@ describe.each(["era", "forever"] as const)("the %s stub world's file", (client) 
 it.each([0, -1, 9_000_000_000_000, 253_402_300_000])("reads captured_at %d as unknown", (stamp) => {
   const text = files.era.replace(/\["captured_at"\] = \d+/, `["captured_at"] = ${stamp}`);
   expect(parse(text).capturedAt).toBeNull();
+});
+
+it("returns an unknown flavor's raw facts for the platform to log (§6.3.1)", () => {
+  const parsed = parse(files.era.replace('["interface"] = 11509', '["interface"] = 20506'));
+  expect(parsed).toMatchObject({
+    flavor: "unknown",
+    unknownFlavor: { reason: expect.stringContaining("20506"), facts: { project_id: 2, interface: 20506 } },
+  });
 });
 
 describe("malformed input is a ParseError", () => {
