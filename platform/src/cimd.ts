@@ -31,8 +31,8 @@ import type { Configuration } from "oidc-provider";
  *   cached document at each request, so its own JWKS cache does not last
  *   from one token request to the next.
  * - Every redirect URI must be https, or http on a loopback host (§9, and
- *   the MCP 2025-11-25 authorization spec). Matching a loopback redirect URI
- *   whatever its port is RED-308.
+ *   the MCP 2025-11-25 authorization spec). A loopback redirect URI matches
+ *   whatever its port (`oidc-registration.ts`).
  * - A document may not name a `sector_identifier_uri`, and none is fetched:
  *   subjects are never pairwise here.
  *
@@ -81,11 +81,40 @@ const JWKS_CACHE_SIZE = 100;
 /** oidc-provider's loopback hosts: `localhost`, `127.0.0.1`, and `[::1]`, as `URL.hostname` has them. */
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** Whether a redirect URI is https, or http on a loopback host. */
-export function httpsOrLoopback(uri: string): boolean {
+/** Whether a URI is http or https on a loopback host, so that it points at the user's own computer. */
+export function onLoopbackHost(uri: string): boolean {
   const url = URL.parse(uri);
   if (url === null) return false;
-  return url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname));
+  return (url.protocol === "http:" || url.protocol === "https:") && LOOPBACK_HOSTS.has(url.hostname);
+}
+
+/** Whether a redirect URI is http on a loopback host: a native app's loopback redirect (RFC 8252 §7.3). */
+export function loopbackRedirect(uri: string): boolean {
+  return URL.parse(uri)?.protocol === "http:" && onLoopbackHost(uri);
+}
+
+/** Whether a redirect URI is https, or http on a loopback host. */
+export function httpsOrLoopback(uri: string): boolean {
+  return URL.parse(uri)?.protocol === "https:" || loopbackRedirect(uri);
+}
+
+/**
+ * Whether a client's redirect URIs make it a native app with a loopback
+ * redirect (`oidc-registration.ts`): at least one is http on a loopback
+ * host, and each of the others is either that or https on a host that is not
+ * a loopback host. A client with any other redirect URI keeps its
+ * `application_type`: oidc-provider refuses http off a loopback host and
+ * https on one from a native client, and accepts other schemes from a native
+ * client only.
+ */
+export function nativeLoopbackRedirects(uris: readonly unknown[]): boolean {
+  let loopback = false;
+  for (const uri of uris) {
+    if (typeof uri !== "string" || !httpsOrLoopback(uri)) return false;
+    if (loopbackRedirect(uri)) loopback = true;
+    else if (onLoopbackHost(uri)) return false;
+  }
+  return loopback;
 }
 
 /** Counts per key in fixed one-minute windows. */
