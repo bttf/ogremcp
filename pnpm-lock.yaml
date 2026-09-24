@@ -54,6 +54,15 @@ importers:
 
   platform:
     dependencies:
+      '@ogmcp/kit-wow':
+        specifier: workspace:*
+        version: link:../kits/wow
+      '@ogmcp/sdk':
+        specifier: workspace:*
+        version: link:../packages/sdk
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       express:
         specifier: ^5.2.1
         version: 5.2.1
