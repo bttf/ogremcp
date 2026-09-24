@@ -18,7 +18,7 @@ const KIT_REGISTRY = "^platform/src/kits/registry\\.ts$";
 const PACKAGE = "^((packages|kits)/[^/]+|platform)/";
 // Every package in the repo, by directory or by package name.
 const ANY_PACKAGE = ["^(packages|kits)/[^/]+/", "^(platform|bridge)/", "^@ogmcp/"];
-const SDK = ["^packages/sdk/", "^@ogmcp/sdk$"];
+const SDK = ["^packages/sdk/", "^@ogmcp/sdk(/|$)"];
 const KITS = ["^kits/[^/]+/", "^@ogmcp/kit-"];
 
 /** @type {import('dependency-cruiser').IConfiguration} */
