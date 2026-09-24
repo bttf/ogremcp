@@ -18,7 +18,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests && node test/run.mjs",
+    "test:adapter": "node test/run.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
