@@ -8,6 +8,7 @@ import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS } fr
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
+import { DEFAULT_REGISTRATION, type RegistrationSettings, registrationConfiguration, registrationMiddleware } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes, tokenConfiguration } from "./oidc-tokens.js";
 import { requireSameOrigin } from "./same-origin.js";
 import { currentUser } from "./web-sessions.js";
@@ -31,13 +32,13 @@ import { currentUser } from "./web-sessions.js";
  * account id. The consent prompt goes to the web UI's Agent consent page,
  * `/consent/:uid`, where the user approves or denies the agent (§9, §13.2).
  *
- * Client ID metadata documents are on (`cimd.ts`, RED-306). Off here, each
- * for its own issue: dynamic client registration (RED-304), static clients
- * (RED-305), the device flow (RED-307), loopback redirects (RED-308).
- * RP-initiated logout is off: no target agent uses it, and signing out of
- * the web UI is `/auth/signout`. Scopes, resource indicators, token
- * lifetimes, revocation, and DPoP are `oidc-tokens.ts`. The MCP endpoint's
- * resource metadata is `mcp.ts`.
+ * Client ID metadata documents are on (`cimd.ts`, RED-306), and dynamic
+ * client registration is `oidc-registration.ts` (RED-304). Off here, each for
+ * its own issue: static clients (RED-305), the device flow (RED-307),
+ * loopback redirects (RED-308). RP-initiated logout is off: no target agent
+ * uses it, and signing out of the web UI is `/auth/signout`. Scopes, resource
+ * indicators, token lifetimes, revocation, and DPoP are `oidc-tokens.ts`. The
+ * MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
@@ -107,6 +108,8 @@ export interface OidcOptions {
   trustProxyHops: number;
   /** Default: `DEFAULT_TOKEN_LIFETIMES`. */
   tokenLifetimes?: TokenLifetimes;
+  /** Default: `DEFAULT_REGISTRATION`. */
+  registration?: RegistrationSettings;
   /**
    * Receives one line per server error, and one per minute in which
    * outgoing fetches go over their limits (`cimd.ts`). Default:
@@ -132,12 +135,14 @@ export function createOidcProvider({
   keys,
   trustProxyHops,
   tokenLifetimes = DEFAULT_TOKEN_LIFETIMES,
+  registration = DEFAULT_REGISTRATION,
   log = console.error,
   cimdFetchLimits = DEFAULT_CIMD_FETCH_LIMITS,
   testOnlyFetch,
 }: OidcOptions): Provider {
   const tokens = tokenConfiguration(issuer, tokenLifetimes);
   const cimd = cimdConfiguration(cimdFetchLimits, log, testOnlyFetch);
+  const registrationConfig = registrationConfiguration();
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -152,6 +157,7 @@ export function createOidcProvider({
     pkce: { required: () => true },
     ...tokens.settings,
     ...cimd.settings,
+    ...registrationConfig.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
@@ -160,6 +166,7 @@ export function createOidcProvider({
       ...cimd.features,
       // Its post_logout_redirect_uri would redirect without a click, to any URI a client names.
       rpInitiatedLogout: { enabled: false },
+      ...registrationConfig.features,
     },
   };
   let provider: Provider;
@@ -172,6 +179,7 @@ export function createOidcProvider({
   provider.proxy = trustProxyHops > 0;
   provider.maxIpsCount = trustProxyHops;
   provider.use(cimd.middleware);
+  provider.use(registrationMiddleware({ pool, path: ROUTES.registration, settings: registration, log }));
   // A code only: a Postgres message can repeat a row (`failureCode`).
   provider.on("server_error", (ctx: { method: string; path: string }, err: unknown) => {
     log(`oauth server error: ${ctx.method} ${ctx.path} code=${failureCode(err)}`);

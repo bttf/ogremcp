@@ -11,6 +11,7 @@ import {
 } from "./config.js";
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
+import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -28,6 +29,7 @@ describe("loadConfig", () => {
       mcpAllowedOrigins: [`http://localhost:${DEFAULT_PORT}`, ...MCP_CLIENT_ORIGINS],
       webSessionLifetimeMs: DEFAULT_WEB_SESSION_LIFETIME_DAYS * DAY_MS,
       webSessionRenewWithinMs: DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS * DAY_MS,
+      registration: DEFAULT_REGISTRATION,
       google: null,
       discord: null,
       oidcKeys: null,
@@ -106,6 +108,17 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ DATABASE_URL: url, OAUTH_GRANT_LIFETIME_DAYS: "20" })).toThrow(
       "OAUTH_REFRESH_TOKEN_LIFETIME_DAYS must not be more than OAUTH_GRANT_LIFETIME_DAYS",
     );
+  });
+
+  it("reads DCR_TRUSTED_RANGES as CIDR ranges that replace the default", () => {
+    const config = loadConfig({ DATABASE_URL: url, DCR_TRUSTED_RANGES: " 160.79.104.0/21, 2001:db8::/32 " });
+    expect(config.registration.trustedRanges).toEqual([
+      { address: "160.79.104.0", prefix: 21, family: "ipv4" },
+      { address: "2001:db8::", prefix: 32, family: "ipv6" },
+    ]);
+    for (const bad of ["160.79.104.0", "160.79.104.0/33", "claude.ai/21", "160.79.104.0/21/1"]) {
+      expect(() => loadConfig({ DATABASE_URL: url, DCR_TRUSTED_RANGES: bad })).toThrow("DCR_TRUSTED_RANGES must list address ranges only");
+    }
   });
 
   it("reads CIMD_TRUSTED_CLIENT_IDS as exact URLs that replace the default list", () => {

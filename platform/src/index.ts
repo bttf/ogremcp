@@ -15,6 +15,7 @@ import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
 import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
+import { startClientCleanup } from "./oidc-registration.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -108,12 +109,17 @@ try {
     keys: oidcKeys,
     trustProxyHops: config.trustProxyHops,
     tokenLifetimes: config.tokenLifetimes,
+    registration: config.registration,
     cimdFetchLimits: config.cimdFetchLimits,
   });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);
 }
+
+// Deletes the OAuth clients registered by DCR that have gone unused (§9),
+// now and once a day.
+startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
 
 const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },

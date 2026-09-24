@@ -12,6 +12,14 @@ import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
+import {
+  DEFAULT_REGISTRATION,
+  deleteUnusedClients,
+  MAX_TRACKED_ADDRESSES,
+  parseAddressRanges,
+  RegistrationLimiter,
+  type RegistrationSettings,
+} from "./oidc-registration.js";
 import { WebSessions } from "./web-sessions.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -29,9 +37,9 @@ afterEach(() => {
 });
 
 // No request here sends a cookie or reaches a model, so nothing queries the database.
-async function serve(trustProxyHops: number): Promise<number> {
+async function serve(trustProxyHops: number, registration: RegistrationSettings = DEFAULT_REGISTRATION): Promise<number> {
   const noDatabase = {} as Pool;
-  const oidc = createOidcProvider({ pool: noDatabase, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops, log: () => {} });
+  const oidc = createOidcProvider({ pool: noDatabase, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops, registration, log: () => {} });
   const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
   const app = createApp({
     health: { checkDatabase: () => Promise.resolve() },
@@ -42,6 +50,11 @@ async function serve(trustProxyHops: number): Promise<number> {
   server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   return (server.address() as AddressInfo).port;
+}
+
+/** A registration request (RFC 7591) with a JSON body. */
+async function register(base: string, body: unknown, path = "/oauth/register"): Promise<Response> {
+  return fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
 /** A GET as Railway's edge forwards it: the public Host, and the client's protocol in X-Forwarded-Proto. */
@@ -79,13 +92,13 @@ describe("OAuth server", () => {
       jwks_uri: `${ISSUER}/oauth/jwks`,
       code_challenge_methods_supported: ["S256"],
     });
+    expect(metadata["registration_endpoint"]).toBe(`${ISSUER}/oauth/register`);
     // Claude uses CIMD only with both of these advertised (§9).
     expect(metadata["client_id_metadata_document_supported"]).toBe(true);
     expect(metadata["token_endpoint_auth_methods_supported"]).toContain("none");
-    // Off until their own issues.
-    expect(metadata["registration_endpoint"]).toBeUndefined();
     // Off: a client's post_logout_redirect_uri would redirect without a click.
     expect(metadata["end_session_endpoint"]).toBeUndefined();
+    // Off until their own issues.
     expect(metadata["device_authorization_endpoint"]).toBeUndefined();
 
     // The public halves only.
@@ -108,6 +121,66 @@ describe("OAuth server", () => {
     const metadata = JSON.parse(forged.body) as Record<string, unknown>;
     expect(metadata["token_endpoint"]).toBe(`${ISSUER}/oauth/token`);
     expect(metadata["jwks_uri"]).toBe(`${ISSUER}/oauth/jwks`);
+  });
+
+  it("refuses to register a confidential client, a grant or response type other than the code flow's, and other metadata", async () => {
+    const base = `http://127.0.0.1:${await serve(0, { ...DEFAULT_REGISTRATION, burst: 20 })}`;
+    const client = { redirect_uris: ["https://agent.example/callback"], token_endpoint_auth_method: "none" };
+    const refused: [Record<string, unknown>, string, RegExp][] = [
+      [{ token_endpoint_auth_method: "client_secret_basic" }, "invalid_client_metadata", /token_endpoint_auth_method must be none/],
+      [{ jwks_uri: "https://agent.example/jwks" }, "invalid_client_metadata", /jwks_uri is not accepted/],
+      [{ grant_types: ["authorization_code", "client_credentials"] }, "invalid_client_metadata", /grant_types may only hold/],
+      [{ grant_types: ["urn:ietf:params:oauth:grant-type:device_code"] }, "invalid_client_metadata", /grant_types may only hold/],
+      [{ response_types: ["code id_token"] }, "invalid_client_metadata", /response_types may only hold code/],
+      [{ redirect_uris: ["http://agent.example/callback"] }, "invalid_redirect_uri", /redirect_uris must be https/],
+      [{ redirect_uris: ["com.agent.app:/callback"] }, "invalid_redirect_uri", /redirect_uris must be https/],
+      [{ scope: "read ingest" }, "invalid_client_metadata", /scope may not hold ingest/],
+      [{ sector_identifier_uri: "https://internal.example/sector" }, "invalid_client_metadata", /sector_identifier_uri is not accepted/],
+    ];
+    for (const [change, error, description] of refused) {
+      const res = await register(base, { ...client, ...change });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; error_description: string };
+      expect(body.error).toBe(error);
+      expect(body.error_description).toMatch(description);
+    }
+  });
+
+  it("limits registrations per client address, whatever the path's case or trailing slash", async () => {
+    const base = `http://127.0.0.1:${await serve(0, { ...DEFAULT_REGISTRATION, burst: 2, ratePerHour: 1 })}`;
+    // Refused registrations count too, and these never reach the database.
+    expect((await register(base, {})).status).toBe(400);
+    expect((await register(base, {})).status).toBe(400);
+    const limited = await register(base, {}, "/oauth/REGISTER/");
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(3000);
+    expect(((await limited.json()) as { error: string }).error).toBe("too_many_requests");
+    expect((await register(base, {})).status).toBe(429);
+  });
+
+  it("gives the trusted ranges one shared bucket, caps all registrations together, and keeps a bounded number of addresses", () => {
+    let now = 0;
+    const settings: RegistrationSettings = {
+      ...DEFAULT_REGISTRATION,
+      trustedRanges: parseAddressRanges("DCR_TRUSTED_RANGES", "160.79.104.0/21"),
+      trustedBurst: 60,
+      globalBurst: 70,
+    };
+    const limiter = new RegistrationLimiter(settings, () => now);
+    // Claude's users through one egress address, and through its neighbours, share the trusted bucket.
+    for (let i = 0; i < 60; i++) expect(limiter.take(i % 2 === 0 ? "160.79.104.7" : "::ffff:160.79.111.200")).toBe(0);
+    expect(limiter.take("160.79.104.8")).toBeGreaterThan(0);
+    // Other addresses keep their own buckets, until the global one is empty.
+    for (let i = 0; i < 10; i++) expect(limiter.take(`198.51.100.${i}`)).toBe(0);
+    expect(limiter.take("198.51.100.99")).toBeGreaterThan(0);
+
+    const wide = new RegistrationLimiter({ ...DEFAULT_REGISTRATION, globalBurst: 1_000_000, globalRatePerHour: 1_000_000 }, () => now);
+    for (let i = 0; i <= MAX_TRACKED_ADDRESSES; i++) wide.take(`10.${i >> 16}.${(i >> 8) & 255}.${i & 255}`);
+    expect(wide.tracked).toBe(MAX_TRACKED_ADDRESSES);
+    now += 60 * 60 * 1000;
+    wide.take("192.0.2.1");
+    // The sweep drops every bucket that has refilled.
+    expect(wide.tracked).toBe(1);
   });
 
   it("builds http endpoint URLs when no proxy is trusted, whatever X-Forwarded-Proto says", async () => {
@@ -158,6 +231,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
   let admin: Pool;
   let pool: Pool;
   let sessions: WebSessions;
+  let oidc: ReturnType<typeof createOidcProvider>;
   let flowServer: Server | undefined;
   let base: string;
 
@@ -178,7 +252,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
       response_types: ["code"],
     });
     sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
-    const oidc = createOidcProvider({ pool, issuer, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
+    oidc = createOidcProvider({ pool, issuer, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
     const app = createApp({
       health: { checkDatabase: () => Promise.resolve() },
       auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: issuer, log: () => {} },
@@ -341,5 +415,97 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Pos
     expect((await other.post(`${path}/approve`, issuer)).status).toBe(400);
     expect((await other.post(`${path}/deny`, issuer)).status).toBe(400);
     expect((await other.get(`${path}/details`, "application/json")).status).toBe(400);
+  });
+
+  /**
+   * A client as Claude registers it, but without `token_endpoint_auth_method`,
+   * with the MCP scope, and with metadata that is dropped: logout redirects,
+   * and an HMAC algorithm that oidc-provider makes a secret for.
+   */
+  async function registerAgent(): Promise<{ client_id: string } & Record<string, unknown>> {
+    const res = await register(base, {
+      client_name: "Agent",
+      redirect_uris: [redirectUri, "http://127.0.0.1:33418/callback"],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      scope: "read",
+      post_logout_redirect_uris: ["https://agent.example/signed-out"],
+      request_object_signing_alg: "HS256",
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()) as { client_id: string } & Record<string, unknown>;
+  }
+
+  it("registers a public client that can start an authorization request", async () => {
+    const client = await registerAgent();
+    expect(client).toMatchObject({ token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"] });
+    expect(client).not.toHaveProperty("client_secret");
+    expect(client).not.toHaveProperty("registration_access_token");
+    expect(client).not.toHaveProperty("scope");
+    expect(client).not.toHaveProperty("post_logout_redirect_uris");
+    const stored = await pool.query("select 1 from oidc_models where model = 'Client' and oidc_id = $1 and not payload ? 'client_secret'", [client.client_id]);
+    expect(stored.rowCount).toBe(1);
+
+    const challenge = createHash("sha256").update(randomBytes(32).toString("base64url")).digest("base64url");
+    const query = new URLSearchParams({
+      client_id: client.client_id,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid",
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    });
+    const res = await new Browser(base).get(`/oauth/authorize?${query}`);
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toMatch(/^\/interaction\//);
+  });
+
+  it("records a client's last token, deletes clients unused past the threshold, and then answers invalid_client", async () => {
+    const unused = await registerAgent();
+    const used = await registerAgent();
+    const registeredLongAgo = "jsonb_set(payload, '{client_id_issued_at}', to_jsonb(extract(epoch from now() - interval '91 days')::bigint))";
+    await pool.query(`update oidc_models set payload = ${registeredLongAgo} where model = 'Client' and oidc_id = any($1)`, [
+      [unused.client_id, used.client_id],
+    ]);
+
+    // A token for `used`: a refresh token of a grant, as the code flow leaves them.
+    const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
+    const accountId = rows[0]?.uuid ?? "";
+    const grant = new oidc.Grant({ accountId, clientId: used.client_id });
+    grant.addOIDCScope("openid offline_access");
+    const grantId = await grant.save();
+    const client = await oidc.Client.find(used.client_id);
+    if (client === undefined) throw new Error("the registered client is not stored");
+    const refreshToken = await new oidc.RefreshToken({ accountId, client, grantId, scope: "openid offline_access", gty: "authorization_code" }).save();
+    const refreshed = await fetch(`${base}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: used.client_id }),
+    });
+    expect(refreshed.status).toBe(200);
+    const lastUsed = await pool.query("select last_used_at from oidc_models where model = 'Client' and oidc_id = $1 and last_used_at > now() - interval '1 minute'", [
+      used.client_id,
+    ]);
+    expect(lastUsed.rowCount).toBe(1);
+
+    const unusedGrant = new oidc.Grant({ accountId, clientId: unused.client_id });
+    unusedGrant.addOIDCScope("openid");
+    const unusedGrantId = await unusedGrant.save();
+
+    expect(await deleteUnusedClients(pool, 90)).toBe(1);
+    // With its grants and tokens; the used client keeps its own.
+    expect(await oidc.Grant.find(unusedGrantId)).toBeUndefined();
+    expect(await oidc.Grant.find(grantId)).toBeDefined();
+    const left = await pool.query<{ oidc_id: string }>("select oidc_id from oidc_models where model = 'Client'");
+    expect(left.rows.map((row) => row.oidc_id)).toEqual(expect.arrayContaining(["agent", used.client_id]));
+    expect(left.rows.map((row) => row.oidc_id)).not.toContain(unused.client_id);
+
+    const res = await fetch(`${base}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "any", client_id: unused.client_id }),
+    });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_client");
   });
 });
