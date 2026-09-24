@@ -1,7 +1,8 @@
 // The platform service: web UI, MCP server, bridge API, and OAuth server
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
-// its Sign in and Games pages (§13.2), and the OAuth server (§9).
+// its Sign in and Games pages (§13.2), and the OAuth server with the MCP
+// endpoint's discovery (§9).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -111,6 +112,7 @@ const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
   oidc,
+  mcpAllowedOrigins: config.mcpAllowedOrigins,
   webRoot,
   kits,
   https,
