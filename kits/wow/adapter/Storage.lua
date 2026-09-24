@@ -14,9 +14,9 @@
 --   state           the sections: character, location, quests, inventory,
 --                   skills, recent_path
 --
--- Write replaces the whole table. Nothing in it is read back: in WoW Forever
--- the client does not load SavedVariables after a reload (§6.3.1), so every
--- part is rebuilt from live APIs.
+-- Write replaces the whole table. Only recent_path is read back
+-- (RecentPath.lua). Every other part is rebuilt from live APIs, because WoW
+-- Forever does not load SavedVariables after a reload (§6.3.1).
 
 local addonName, ns = ...
 
@@ -134,10 +134,7 @@ local function Write(parts, partList)
 	local db = {
 		schema = SCHEMA,
 		addon_version = AddonVersion(),
-		state = {
-			-- RED-290 records the breadcrumb.
-			recent_path = {},
-		},
+		state = {},
 	}
 	for _, part in ipairs(partList) do
 		local target = part.top and db or db.state

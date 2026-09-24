@@ -12,6 +12,11 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "test:bridge": "cd bridge && go vet ./... && go test ./..."
+    "test:bridge": "cd bridge && go vet ./... && go test ./...",
+    "lint:seams": "node scripts/lint-seams.mjs"
+  },
+  "devDependencies": {
+    "dependency-cruiser": "^18.4.0",
+    "typescript": "^5.9.3"
   }
 }

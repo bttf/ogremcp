@@ -40,6 +40,29 @@ cannot see this one.
 `bridge/` is a standalone Go module. Files outside the four package paths are
 MIT (root `LICENSE`).
 
+## Package seams (§5)
+
+CI enforces the dependency rules in the table above. `pnpm lint:seams` runs the
+TypeScript checks (`scripts/lint-seams.mjs`). Run `pnpm build` first, as CI
+does, so that every import resolves.
+
+- A `package.json` may declare only the workspace dependencies §5 allows, each
+  as `workspace:*`, `workspace:^`, or `workspace:~`. Aliases and `link:` or
+  `file:` specs into the repo fail.
+- dependency-cruiser (`.dependency-cruiser.cjs`, run with each package's
+  tsconfig) fails any other cross-package import. That includes a relative
+  import or an alias (tsconfig `paths`, package.json `imports`) that leaves its
+  own package, and any import that does not resolve.
+- In `platform`, only the kit registry, `platform/src/kits/registry.ts`, may
+  import `@ogmcp/kit-*`, and it may not re-export a kit. RED-311 creates it at
+  that path. If the path changes, change `KIT_REGISTRY` in
+  `.dependency-cruiser.cjs` and `scripts/lint-seams.mjs` too.
+- The CI `bridge` job fails if the bridge builds from Go code in the repo
+  outside `bridge/`.
+- The lint cannot see a specifier built at runtime, such as
+  `` import(`@ogmcp/kit-${name}`) ``, `import(name)`, or a `createRequire`
+  call. Reviewers check for these by hand.
+
 ## Stack decisions (D1, §13.1)
 
 - Node 24, TypeScript, pnpm 10 workspaces, Vitest for tests.
@@ -93,6 +116,7 @@ unreachable.
 - `pnpm install`
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
+- `pnpm lint:seams`: the package seam checks (§5).
 - `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.
 - `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
@@ -109,7 +133,8 @@ testing OpenGamerMCP, because both register `/transmit`.
 ## Commits
 
 Every commit is signed off for the DCO: use `git commit -s`. CI fails a PR if
-any of its commits lacks a `Signed-off-by:` trailer.
+any of its commits lacks a `Signed-off-by:` trailer that matches the commit
+author's name and email.
 
 ## Security
 
