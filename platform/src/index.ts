@@ -1,5 +1,6 @@
 // The platform service: web UI, MCP server, bridge API, and OAuth server
-// (docs/architecture.md §5, §13). For now it serves the health endpoints only.
+// (docs/architecture.md §5, §13). For now it serves the health endpoints and
+// Google and Discord sign-in with web sessions (§13.1).
 import { createServer } from "node:http";
 
 import { createApp } from "./app.js";
@@ -7,9 +8,11 @@ import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
 import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
+import { createSignInProviders } from "./sign-in-providers.js";
+import { WebSessions } from "./web-sessions.js";
 
-// A missing or malformed DATABASE_URL ends the process before it listens.
-// The message never repeats the URL.
+// A missing or malformed DATABASE_URL, or another bad value, ends the process
+// before it listens. No message repeats the URL or a client secret.
 let config: Config;
 try {
   config = loadConfig(process.env);
@@ -55,7 +58,25 @@ console.log(
     : "database connection does not use TLS: a database reached over the internet needs sslmode=verify-full in DATABASE_URL",
 );
 
-const app = createApp({ checkDatabase: () => pool.query("select 1") });
+// Sign-in providers without credentials stay off, and their routes answer 503.
+const providers = createSignInProviders(config);
+const signIn = (["google", "discord"] as const).filter((name) => providers[name] !== null);
+console.log(
+  `public base URL ${config.publicBaseUrl}; sign-in providers: ${signIn.length === 0 ? "none (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or the DISCORD_ pair)" : signIn.join(", ")}`,
+);
+
+const sessions = new WebSessions({
+  pool,
+  lifetimeMs: config.webSessionLifetimeMs,
+  renewWithinMs: config.webSessionRenewWithinMs,
+  secure: new URL(config.publicBaseUrl).protocol === "https:",
+});
+
+const app = createApp({
+  health: { checkDatabase: () => pool.query("select 1") },
+  auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
+  trustProxyHops: config.trustProxyHops,
+});
 
 // The start line and the failed bind are `listen.ts`, which is tested on its own.
 startServer(applyServerLimits(createServer(app)), config.port);

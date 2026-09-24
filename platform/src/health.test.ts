@@ -15,7 +15,7 @@ afterEach(() => {
 
 /** Serves the app on a free port with a mocked database check. */
 async function serve(options: HealthOptions): Promise<string> {
-  server = createServer(createApp(options)).listen(0, "127.0.0.1");
+  server = createServer(createApp({ health: options })).listen(0, "127.0.0.1");
   await once(server, "listening");
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
