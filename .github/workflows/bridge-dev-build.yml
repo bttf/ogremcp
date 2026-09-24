@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # On a PR, build the branch's head commit, not the merge commit, so
+          # the version names a commit on the branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The version comes from git describe over the bridge-v tags.
           fetch-depth: 0
 
