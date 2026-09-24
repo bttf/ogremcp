@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32 } from "node:zlib";
 
+import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
+
 import type { CheckedKit } from "./validate.js";
 
 /** Where the build writes the zips: `platform/dist/adapters`. */
@@ -85,10 +87,10 @@ export function readAdapterZip(dir: string, kit: string, folder: string): Adapte
 }
 
 /**
- * The semver of the manifest's `version` (§6.1): `MAJOR.MINOR.PATCH` with an
- * optional pre-release. The bridge compares adapter versions the same way.
+ * The semver of the manifest's `version` (§6.1), from the SDK's schema, so
+ * adapter and manifest versions accept the same format.
  */
-const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$/;
+const SEMVER = new RegExp(schema.properties.version.pattern);
 
 /** A TOC metadata line `## Version: <value>`, as the adapter's Lua tests read it. */
 const TOC_VERSION = /^##\s*Version:(.*)$/;

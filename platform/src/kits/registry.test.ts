@@ -1,12 +1,11 @@
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { writeAdapterZips, zipAdapter } from "./adapter.js";
+import { readAdapterVersion, writeAdapterZips, zipAdapter } from "./adapter.js";
 import { KIT_SOURCES, loadKitRegistry } from "./registry.js";
 import { checkKits, type KitSource } from "./validate.js";
 
@@ -58,23 +57,6 @@ describe("loadKitRegistry", () => {
     expect(readZipNames(zip)).toEqual(files.map((file) => `OpenGamerMCP/${file}`));
   });
 
-  it("serves as the adapter version the addon_version the adapter stamps (§6.3, §8.2)", () => {
-    // The adapter's Lua tests write the SavedVariables file of each stub
-    // client to `out`. The stubs answer GetAddOnMetadata from the TOC.
-    const out = mkdtempSync(join(tmpdir(), "ogmcp-saved-variables-"));
-    try {
-      const run = spawnSync(process.execPath, [join(dirname(wow.adapterDir), "test", "run.mjs"), out], { encoding: "utf8" });
-      expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-      const files = readdirSync(out);
-      expect(files.length).toBeGreaterThan(0);
-      const stamped = files.map((file) => /\["addon_version"\] = "([^"]*)"/.exec(readFileSync(join(out, file), "utf8"))?.[1]);
-      const version = loadKitRegistry({ adaptersDir }).get("wow")?.adapter?.version;
-      expect(stamped).toEqual(files.map(() => version));
-    } finally {
-      rmSync(out, { recursive: true, force: true });
-    }
-  });
-
   it("refuses to start with an invalid manifest or tool name", () => {
     const badManifest: KitSource = { ...wow, manifest: { ...wowManifest, tool_prefix: "WoW" } };
     expect(() => loadKitRegistry({ sources: [badManifest], adaptersDir })).toThrow(
@@ -98,6 +80,23 @@ describe("loadKitRegistry", () => {
     expect(() => loadKitRegistry({ sources: [wow, other], adaptersDir })).toThrow(
       '@ogmcp/kit-wow and @ogmcp/kit-other both have tool_prefix "wow"',
     );
+  });
+});
+
+describe("readAdapterVersion", () => {
+  // kits/wow/test/adapter_test.lua checks that the adapter stamps this version as addon_version (§6.3).
+  it("reads the TOC's ## Version, which every TOC must name the same (§8.2)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ogmcp-toc-"));
+    try {
+      writeFileSync(join(dir, "Addon.toc"), "\uFEFF## Interface: 11509\r\n## Title: Addon\r\n## Version: 1.2.3-beta.1\r\nAddon.lua\r\n");
+      expect(readAdapterVersion(dir)).toBe("1.2.3-beta.1");
+      writeFileSync(join(dir, "Addon_Mists.toc"), "## Version: 1.2.4\n");
+      expect(() => readAdapterVersion(dir)).toThrow(/name different versions/);
+      writeFileSync(join(dir, "Addon_Mists.toc"), "## Version: 1.2\n");
+      expect(() => readAdapterVersion(dir)).toThrow(/must have one "## Version:" line with a semver version/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
