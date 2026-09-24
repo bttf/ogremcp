@@ -10,6 +10,7 @@ import {
 } from "./config.js";
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
+import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -26,6 +27,7 @@ describe("loadConfig", () => {
       mcpAllowedOrigins: [`http://localhost:${DEFAULT_PORT}`, ...MCP_CLIENT_ORIGINS],
       webSessionLifetimeMs: DEFAULT_WEB_SESSION_LIFETIME_DAYS * DAY_MS,
       webSessionRenewWithinMs: DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS * DAY_MS,
+      registration: DEFAULT_REGISTRATION,
       google: null,
       discord: null,
       oidcKeys: null,

@@ -15,6 +15,7 @@ import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
 import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
+import { startClientCleanup } from "./oidc-registration.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -102,11 +103,21 @@ const sessions = new WebSessions({
 // The issuer is PUBLIC_BASE_URL (§9). oidc-provider checks the keys here.
 let oidc: ReturnType<typeof createOidcProvider>;
 try {
-  oidc = createOidcProvider({ pool, issuer: config.publicBaseUrl, keys: oidcKeys, trustProxyHops: config.trustProxyHops });
+  oidc = createOidcProvider({
+    pool,
+    issuer: config.publicBaseUrl,
+    keys: oidcKeys,
+    trustProxyHops: config.trustProxyHops,
+    registration: config.registration,
+  });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);
 }
+
+// Deletes the OAuth clients registered by DCR that have gone unused (§9),
+// now and once a day.
+startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
 
 const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },

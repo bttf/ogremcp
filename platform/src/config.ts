@@ -1,5 +1,6 @@
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
+import { DEFAULT_REGISTRATION, type RegistrationSettings } from "./oidc-registration.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
@@ -26,6 +27,11 @@ export interface Config {
   webSessionLifetimeMs: number;
   /** `WEB_SESSION_RENEW_WITHIN_DAYS`, in milliseconds: a web session used with less than this left is renewed. */
   webSessionRenewWithinMs: number;
+  /**
+   * `OAUTH_REGISTRATION_RATE_PER_HOUR`, `OAUTH_REGISTRATION_BURST`, and
+   * `OAUTH_CLIENT_UNUSED_DAYS`: dynamic client registration's limits (§9).
+   */
+  registration: RegistrationSettings;
   /** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, or null when both are unset. */
   google: ProviderCredentials | null;
   /** `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`, or null when both are unset. */
@@ -207,6 +213,11 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     mcpAllowedOrigins: mcpAllowedOrigins(env["MCP_ALLOWED_ORIGINS"], defaultMcpAllowedOrigins(baseUrl)),
     webSessionLifetimeMs: lifetimeDays * DAY_MS,
     webSessionRenewWithinMs: renewWithinDays * DAY_MS,
+    registration: {
+      ratePerHour: positiveInt("OAUTH_REGISTRATION_RATE_PER_HOUR", env["OAUTH_REGISTRATION_RATE_PER_HOUR"], DEFAULT_REGISTRATION.ratePerHour),
+      burst: positiveInt("OAUTH_REGISTRATION_BURST", env["OAUTH_REGISTRATION_BURST"], DEFAULT_REGISTRATION.burst),
+      unusedClientDays: positiveInt("OAUTH_CLIENT_UNUSED_DAYS", env["OAUTH_CLIENT_UNUSED_DAYS"], DEFAULT_REGISTRATION.unusedClientDays),
+    },
     google,
     discord,
     oidcKeys: parseOidcKeys(env["OIDC_JWKS"], env["OIDC_COOKIE_KEYS"]),

@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
+import { DEFAULT_REGISTRATION, type RegistrationSettings, registrationConfiguration, registrationMiddleware } from "./oidc-registration.js";
 import { currentUser } from "./web-sessions.js";
 
 /**
@@ -27,12 +28,12 @@ import { currentUser } from "./web-sessions.js";
  * and completes the login prompt with the signed-in user's uuid as the
  * account id.
  *
- * Off here, each for its own issue: dynamic client registration (RED-304),
- * static clients (RED-305), client ID metadata documents (RED-306), the
- * device flow (RED-307), loopback redirects (RED-308). oidc-provider's
- * defaults stand for scopes, resource indicators, and token lifetimes
- * (RED-302). The consent page is RED-303. The MCP endpoint's resource
- * metadata is `mcp.ts`.
+ * Dynamic client registration is `oidc-registration.ts`. Off here, each for
+ * its own issue: static clients (RED-305), client ID metadata documents
+ * (RED-306), the device flow (RED-307), loopback redirects (RED-308).
+ * oidc-provider's defaults stand for scopes, resource indicators, and token
+ * lifetimes (RED-302). The consent page is RED-303. The MCP endpoint's
+ * resource metadata is `mcp.ts`.
  */
 
 /**
@@ -94,12 +95,22 @@ export interface OidcOptions {
    * the issuer. So behind Railway's edge they are https.
    */
   trustProxyHops: number;
+  /** Default: `DEFAULT_REGISTRATION`. */
+  registration?: RegistrationSettings;
   /** Receives one line per server error. Default: `console.error`. */
   log?: (line: string) => void;
 }
 
 /** The provider, configured. `mountOidc` serves it. */
-export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = console.error }: OidcOptions): Provider {
+export function createOidcProvider({
+  pool,
+  issuer,
+  keys,
+  trustProxyHops,
+  registration = DEFAULT_REGISTRATION,
+  log = console.error,
+}: OidcOptions): Provider {
+  const registrationConfig = registrationConfiguration();
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -112,9 +123,11 @@ export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = c
     routes: ROUTES,
     // §9: OAuth 2.1 with PKCE only, for every client.
     pkce: { required: () => true },
+    ...registrationConfig.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
+      ...registrationConfig.features,
     },
   };
   let provider: Provider;
@@ -126,6 +139,7 @@ export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = c
   }
   provider.proxy = trustProxyHops > 0;
   provider.maxIpsCount = trustProxyHops;
+  provider.use(registrationMiddleware({ pool, path: ROUTES.registration, settings: registration, log }));
   // A code only: a Postgres message can repeat a row (`failureCode`).
   provider.on("server_error", (ctx: { method: string; path: string }, err: unknown) => {
     log(`oauth server error: ${ctx.method} ${ctx.path} code=${failureCode(err)}`);
