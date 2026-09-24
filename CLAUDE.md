@@ -130,6 +130,10 @@ unreachable.
 - `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
   pending migrations to `DATABASE_URL`, or only list them. For a local
   database; production migrates on deploy.
+- `pnpm -s --filter @ogmcp/platform gen-oidc-keys`: after a build, print fresh
+  values for `OIDC_JWKS` and `OIDC_COOKIE_KEYS`, the OAuth server's keys, as
+  `KEY=value` lines for Railway or `platform/.env`. They are secrets. `-s`
+  keeps pnpm's own lines out of the output.
 - Platform tests that apply migrations need `TEST_DATABASE_URL`: a Postgres
   server whose user may create databases. Without it they are skipped.
 

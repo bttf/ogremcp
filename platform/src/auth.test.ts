@@ -310,6 +310,25 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(await count("oauth_identities")).toBe(2);
   });
 
+  it("returns to a path on this service after sign-in, and to / for any other return_to", async () => {
+    const { browser } = await start();
+    for (const [returnTo, location] of [
+      ["/interaction/abc?x=1", "/interaction/abc?x=1"],
+      ["https://evil.example/", "/"],
+      ["//evil.example", "/"],
+      ["/.//evil.example", "/"],
+      ["/\\evil.example", "/"],
+      ["/%0d%0aLocation:%20https://evil.example", "/%0d%0aLocation:%20https://evil.example"],
+    ]) {
+      const player = browser();
+      const begin = await player.request(`/auth/google?return_to=${encodeURIComponent(returnTo ?? "")}`);
+      const state = new URL(begin.headers.get("location") ?? "").searchParams.get("state") ?? "";
+      const done = await player.request(`/auth/google/callback?code=sub-1&state=${state}`);
+      expect(done.status).toBe(302);
+      expect(done.headers.get("location")).toBe(location);
+    }
+  });
+
   it("refuses a callback whose state does not match the browser's", async () => {
     const { browser } = await start();
     const player = browser();

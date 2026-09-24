@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useSearchParams } from "react-router";
 
 import { PROVIDER_LABELS, PROVIDERS, type Provider, useSession } from "../session.js";
 
@@ -29,26 +29,38 @@ function useConfiguredProviders(): readonly Provider[] | null {
 /**
  * The Sign in page (§13.2): Google and Discord. Each is a link to the
  * service's `/auth/<provider>`, which sends the browser on to the provider;
- * after sign-in the service sends it back to `/`. A provider without
- * credentials on this server gets a plain sentence instead of a link.
+ * after sign-in the service sends it back to `/`. A `return_to` in the page's
+ * query goes on to `/auth/<provider>`, which sends the browser there instead
+ * when it is a path on this service: an OAuth interaction sends a signed-out
+ * browser here that way (§9), and so does one that must sign in again. A
+ * provider without credentials on this server gets a plain sentence instead
+ * of a link.
  *
  * Adapted from `web/src/pages/Login.tsx` in bttf/wow-guide@df80260.
  */
 export function SignIn() {
   const session = useSession();
   const configured = useConfiguredProviders();
+  const returnTo = useSearchParams()[0].get("return_to");
+  const query = returnTo === null ? "" : `?return_to=${encodeURIComponent(returnTo)}`;
 
-  if (session.status === "signed-in") return <Navigate to="/" replace />;
+  // With a return_to, a signed-in user may be asked to sign in again, as an
+  // agent's `prompt=login` does.
+  if (session.status === "signed-in" && returnTo === null) return <Navigate to="/" replace />;
 
   return (
     <>
       <h1>Sign in</h1>
-      <p>Sign in with your Google or Discord account.</p>
+      <p>
+        {session.status === "signed-in"
+          ? "Sign in again with your Google or Discord account to continue."
+          : "Sign in with your Google or Discord account."}
+      </p>
       <ul className="og-signin">
         {PROVIDERS.map((provider) => (
           <li key={provider}>
             {configured === null || configured.includes(provider) ? (
-              <a className="og-button" href={`/auth/${provider}`}>
+              <a className="og-button" href={`/auth/${provider}${query}`}>
                 Continue with {PROVIDER_LABELS[provider]}
               </a>
             ) : (
