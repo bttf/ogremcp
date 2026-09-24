@@ -34,6 +34,10 @@ importers:
         version: 3.2.7
 
   platform:
+    dependencies:
+      '@ogmcp/kit-wow':
+        specifier: workspace:*
+        version: link:../kits/wow
     devDependencies:
       typescript:
         specifier: ^5.9.3
