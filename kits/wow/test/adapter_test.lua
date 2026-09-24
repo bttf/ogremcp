@@ -958,8 +958,6 @@ for _, client in ipairs({ "forever", "era" }) do
 		local ns = Start(Setup())
 		local max = ns.RECENT_PATH_MAX
 		EnterWorld()
-		world.loc.subzone = "Test Mill"
-		Advance(5)
 		for i = 1, max do
 			world.loc.mapID, world.loc.zone = 2000 + i, "Zone " .. i
 			Advance(5)
@@ -968,7 +966,7 @@ for _, client in ipairs({ "forever", "era" }) do
 		local path = db.state.recent_path
 		eq(#path, max, "entries")
 		eq(path[1].zone, "Zone 1", "the oldest entries are dropped")
-		eq(path[1].captured_at, world.serverTime + 15, "entry time")
+		eq(path[1].captured_at, world.serverTime + 10, "entry time")
 		eq(path[max].map_id, 2000 + max, "newest last")
 
 		-- The client loads the file back. The same character keeps the path;
@@ -1005,6 +1003,44 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(#path, 2, "entries")
 		eq(path[1].zone, "Test Forest", "the first place")
 		eq(path[2].zone, "Test Cave", "the instance")
+	end)
+
+	test(client .. ": recent_path keeps the zone of the entry before on a subzone change", function()
+		local ns = Start(Setup())
+		EnterWorld()
+		Advance(ns.RECENT_PATH_MIN_INTERVAL)
+		-- Entering a building on the same map can name it as zone and subzone.
+		world.loc.zone, world.loc.subzone = "Test Inn", "Test Inn"
+		Advance(5)
+		local path = Logout().state.recent_path
+		eq(#path, 2, "entries")
+		eq(path[2].zone, "Test Forest", "zone")
+		eq(path[2].subzone, "Test Inn", "subzone")
+	end)
+
+	test(client .. ": recent_path replaces the newest entry on a quick subzone change", function()
+		local ns = Start(Setup())
+		EnterWorld()
+		-- Back and forth across a subzone border.
+		for i = 1, 9 do
+			world.loc.subzone = i % 2 == 1 and "Test Mill" or "Test Village"
+			Advance(5)
+		end
+		-- A zone change appends however soon it comes.
+		world.loc.mapID, world.loc.zone = 2001, "Zone 1"
+		Advance(5)
+		-- A short visit to another subzone and back is dropped.
+		Advance(ns.RECENT_PATH_MIN_INTERVAL)
+		world.loc.subzone = "Test Pass"
+		Advance(5)
+		world.loc.subzone = "Test Mill"
+		Advance(5)
+		local path = Logout().state.recent_path
+		eq(#path, 2, "entries")
+		eq(path[1].subzone, "Test Mill", "the last subzone of the border walk")
+		eq(path[1].captured_at, world.serverTime + 50, "the time of the replacement")
+		eq(path[2].zone, "Zone 1", "the zone change")
+		eq(path[2].captured_at, world.serverTime + 55, "the entry the short visit left")
 	end)
 end
 

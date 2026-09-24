@@ -22,6 +22,13 @@
 -- a loading screen, is not recorded, and a value that could not be read is
 -- never a change.
 --
+-- A subzone change keeps the zone of the newest entry, so a building name
+-- read on the same map never becomes the zone. A subzone change less than
+-- RECENT_PATH_MIN_INTERVAL seconds after the newest entry replaces that entry,
+-- so walking back and forth across a subzone border does not fill the path.
+-- When the replacement is the place of the entry before, the short visit is
+-- dropped. A zone change always appends.
+--
 -- recent_path is the one section carried across reloads (§6.3.1). The first
 -- collection of a session takes the entries of the OpenGamerMCPDB the client
 -- loaded, when that table belongs to the same character. A client that does
@@ -35,6 +42,10 @@ local _, ns = ...
 -- most 20 places (bttf/wow-guide@df80260:cloud/src/mcpTools.ts,
 -- MAX_PATH_ENTRIES).
 local RECENT_PATH_MAX = 20
+-- Seconds after the newest entry during which a subzone change replaces it
+-- (proposed). The prototype's PUSH_MIN_INTERVAL
+-- (bttf/wow-guide@df80260:addon/Storage.lua).
+local RECENT_PATH_MIN_INTERVAL = 30
 
 local PlainField = ns.PlainField
 local ReadString = ns.ReadString
@@ -68,16 +79,21 @@ local function ReadEntry(t)
 	}
 end
 
--- Changed is true when place is somewhere other than last, by the rules above.
-local function Changed(last, place)
+-- Change returns "zone" when place is in another zone than last, "subzone"
+-- when only its subzone differs, and nil when it is the same place, by the
+-- rules above.
+local function Change(last, place)
 	if last.map_id and place.map_id then
 		if last.map_id ~= place.map_id then
-			return true
+			return "zone"
 		end
 	elseif last.zone ~= place.zone then
-		return true
+		return "zone"
 	end
-	return place.subzone ~= nil and place.subzone ~= last.subzone
+	if place.subzone ~= nil and place.subzone ~= last.subzone then
+		return "subzone"
+	end
+	return nil
 end
 
 -- Carried returns the newest RECENT_PATH_MAX entries of the path in the
@@ -110,15 +126,29 @@ local function CollectRecentPath()
 	loc.captured_at = Api("GetServerTime")
 	local place = ReadEntry(loc)
 	local last = path[#path]
-	if place and (not last or Changed(last, place)) then
-		path[#path + 1] = place
-		if #path > RECENT_PATH_MAX then
-			table.remove(path, 1)
+	local change = place and last and Change(last, place)
+	if not place or (last and not change) then
+		return path
+	end
+	if change == "subzone" then
+		place.zone = last.zone
+		local elapsed = place.captured_at - last.captured_at
+		if elapsed >= 0 and elapsed < RECENT_PATH_MIN_INTERVAL then
+			path[#path] = nil
+			local before = path[#path]
+			if before and not Change(before, place) then
+				return path
+			end
 		end
+	end
+	path[#path + 1] = place
+	if #path > RECENT_PATH_MAX then
+		table.remove(path, 1)
 	end
 	return path
 end
 
 -- Read by the files after this one, and by the tests.
 ns.RECENT_PATH_MAX = RECENT_PATH_MAX
+ns.RECENT_PATH_MIN_INTERVAL = RECENT_PATH_MIN_INTERVAL
 ns.CollectRecentPath = CollectRecentPath
