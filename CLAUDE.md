@@ -70,8 +70,11 @@ does, so that every import resolves.
   runner, and a Vite + React 19 + react-router single-page app served by the
   platform service. One Node service plus Postgres on Railway.
 - No Supabase.
-- Schema changes are numbered SQL migrations in `platform/`. Never apply DDL to
-  a live database yourself; escalate it to the user.
+- Schema changes are numbered SQL migrations in `platform/migrations/`,
+  applied by the runner in `platform/src/migrations.ts`. Migrations apply on
+  deploy through the `ogmcp` service's pre-deploy command. Agents never run DDL
+  against a live database by hand. A migration that drops or rewrites data
+  needs the owner's approval before merge.
 - Go 1.22 for the bridge.
 
 ## Deploy (§5, §13.1)
@@ -91,10 +94,14 @@ Change them with `railway api` and the `serviceInstanceUpdate` mutation.
 | Setting | Value |
 |---|---|
 | Build command | `pnpm --filter @ogmcp/platform... run build` |
+| Pre-deploy command | `node platform/dist/migrate.js` |
 | Start command | `node platform/dist/index.js` |
 | Healthcheck path | `/health/live` |
 | Watch paths | `/platform/**`, `/packages/sdk/**`, `/kits/**`, `/package.json`, `/pnpm-lock.yaml`, `/pnpm-workspace.yaml`, `/tsconfig.json` |
 | Variables | `DATABASE_URL` (the reference above), `RAILPACK_NODE_VERSION=24` |
+
+The pre-deploy command applies the pending migrations before the new version
+starts. When it fails, the deploy stops and the previous version keeps serving.
 
 A push to `main` deploys only when a changed file matches a watch path, so a
 bridge-only change skips the deploy. A new root workspace file, such as
@@ -112,6 +119,11 @@ unreachable.
 - `pnpm lint:seams`: the package seam checks (§5).
 - `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.
+- `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
+  pending migrations to `DATABASE_URL`, or only list them. For a local
+  database; production migrates on deploy.
+- Platform tests that apply migrations need `TEST_DATABASE_URL`: a Postgres
+  server whose user may create databases. Without it they are skipped.
 
 ## In-game testing
 

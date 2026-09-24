@@ -36,8 +36,9 @@ choose silently.
   changes) only.
 - Respect the package seams in §5. A package imports only the workspace
   packages it is allowed to depend on.
-- Schema changes are numbered SQL migrations in `platform/`. Never apply DDL to
-  a live database yourself; that is escalated to the user.
+- Schema changes are numbered SQL migrations in `platform/migrations/`. They
+  apply on deploy. Never run DDL against a live database by hand. A migration
+  that drops or rewrites data needs the owner's approval before merge.
 - If you need a credential you do not have, stop and report. Do not invent one,
   and do not substitute a mock to route around the missing credential unless the
   brief says to.
