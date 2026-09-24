@@ -1,8 +1,11 @@
 // The platform service: web UI, MCP server, bridge API, and OAuth server
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
-// Google and Discord sign-in with web sessions (§13.1), and the OAuth server
-// (§9).
+// Google and Discord sign-in with web sessions (§13.1), the web UI shell with
+// its Sign in page (§13.2), and the OAuth server (§9).
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createApp } from "./app.js";
 import { type Config, loadConfig } from "./config.js";
@@ -45,6 +48,14 @@ try {
 }
 console.log(`kits: ${kits.list().map((kit) => `${kit.key} ${kit.manifest.version}`).join(", ")}`);
 
+// The build writes the web UI to `platform/dist/web` (§13.2). Without it the
+// service would answer every page load with a 404, so it does not start.
+const webRoot = fileURLToPath(new URL("./web", import.meta.url));
+if (!existsSync(join(webRoot, "index.html"))) {
+  console.error(`web UI error: ${join(webRoot, "index.html")} is missing. Run the platform build.`);
+  process.exit(1);
+}
+
 // The pool opens no connection until the first query. This query runs now, so
 // a database that cannot be reached ends the process at start and fails the
 // deploy, not the first request. The output is a code, never the URL.
@@ -78,11 +89,12 @@ console.log(
   `public base URL ${config.publicBaseUrl}; sign-in providers: ${signIn.length === 0 ? "none (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or the DISCORD_ pair)" : signIn.join(", ")}`,
 );
 
+const https = new URL(config.publicBaseUrl).protocol === "https:";
 const sessions = new WebSessions({
   pool,
   lifetimeMs: config.webSessionLifetimeMs,
   renewWithinMs: config.webSessionRenewWithinMs,
-  secure: new URL(config.publicBaseUrl).protocol === "https:",
+  secure: https,
 });
 
 // The issuer is PUBLIC_BASE_URL (§9). oidc-provider checks the keys here.
@@ -98,6 +110,8 @@ const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
   oidc,
+  webRoot,
+  https,
   trustProxyHops: config.trustProxyHops,
 });
 

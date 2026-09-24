@@ -1,0 +1,62 @@
+import { useEffect, useState } from "react";
+import { Navigate } from "react-router";
+
+import { PROVIDER_LABELS, PROVIDERS, type Provider, useSession } from "../session.js";
+
+/**
+ * The providers the service has credentials for, from
+ * `GET /api/v1/sign-in-providers`, or null until it answers. When the request
+ * fails, every provider stays offered: its `/auth/<provider>` route answers
+ * 503 with a plain message of its own.
+ */
+function useConfiguredProviders(): readonly Provider[] | null {
+  const [configured, setConfigured] = useState<readonly Provider[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/sign-in-providers", { headers: { Accept: "application/json" } })
+      .then(async (res) => (res.ok ? ((await res.json()) as { providers: Provider[] }).providers : PROVIDERS))
+      .catch(() => PROVIDERS)
+      .then((providers) => {
+        if (!cancelled) setConfigured(providers);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return configured;
+}
+
+/**
+ * The Sign in page (§13.2): Google and Discord. Each is a link to the
+ * service's `/auth/<provider>`, which sends the browser on to the provider;
+ * after sign-in the service sends it back to `/`. A provider without
+ * credentials on this server gets a plain sentence instead of a link.
+ *
+ * Adapted from `web/src/pages/Login.tsx` in bttf/wow-guide@df80260.
+ */
+export function SignIn() {
+  const session = useSession();
+  const configured = useConfiguredProviders();
+
+  if (session.status === "signed-in") return <Navigate to="/" replace />;
+
+  return (
+    <>
+      <h1>Sign in</h1>
+      <p>Sign in with your Google or Discord account.</p>
+      <ul className="og-signin">
+        {PROVIDERS.map((provider) => (
+          <li key={provider}>
+            {configured === null || configured.includes(provider) ? (
+              <a className="og-button" href={`/auth/${provider}`}>
+                Continue with {PROVIDER_LABELS[provider]}
+              </a>
+            ) : (
+              <p>Sign-in with {PROVIDER_LABELS[provider]} is not configured on this server.</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
