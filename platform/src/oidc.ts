@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
+import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes, tokenConfiguration } from "./oidc-tokens.js";
 import { requireSameOrigin } from "./same-origin.js";
 import { currentUser } from "./web-sessions.js";
 
@@ -31,9 +32,9 @@ import { currentUser } from "./web-sessions.js";
  *
  * Off here, each for its own issue: dynamic client registration (RED-304),
  * static clients (RED-305), client ID metadata documents (RED-306), the
- * device flow (RED-307), loopback redirects (RED-308). oidc-provider's
- * defaults stand for scopes, resource indicators, and token lifetimes
- * (RED-302). The MCP endpoint's resource metadata is `mcp.ts`.
+ * device flow (RED-307), loopback redirects (RED-308). Scopes, resource
+ * indicators, token lifetimes, revocation, and DPoP are `oidc-tokens.ts`.
+ * The MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
@@ -101,12 +102,22 @@ export interface OidcOptions {
    * the issuer. So behind Railway's edge they are https.
    */
   trustProxyHops: number;
+  /** Default: `DEFAULT_TOKEN_LIFETIMES`. */
+  tokenLifetimes?: TokenLifetimes;
   /** Receives one line per server error. Default: `console.error`. */
   log?: (line: string) => void;
 }
 
 /** The provider, configured. `mountOidc` serves it. */
-export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = console.error }: OidcOptions): Provider {
+export function createOidcProvider({
+  pool,
+  issuer,
+  keys,
+  trustProxyHops,
+  tokenLifetimes = DEFAULT_TOKEN_LIFETIMES,
+  log = console.error,
+}: OidcOptions): Provider {
+  const tokens = tokenConfiguration(issuer, tokenLifetimes);
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -119,9 +130,11 @@ export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = c
     routes: ROUTES,
     // §9: OAuth 2.1 with PKCE only, for every client.
     pkce: { required: () => true },
+    ...tokens.settings,
     features: {
       // oidc-provider's built-in login pages, for development only.
       devInteractions: { enabled: false },
+      ...tokens.features,
     },
   };
   let provider: Provider;

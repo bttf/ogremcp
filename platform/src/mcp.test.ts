@@ -109,7 +109,7 @@ describe("MCP discovery", () => {
 });
 
 describe("/mcp", () => {
-  it("answers a request without a bearer token with 401 and the challenge, and one with a token with 501", async () => {
+  it("answers a request without a bearer token with 401 and the challenge, and a malformed one with invalid_token", async () => {
     const port = await serve();
     for (const method of ["POST", "GET", "DELETE"]) {
       const res = await send(port, method, "/mcp", { "content-type": "application/json" });
@@ -120,9 +120,10 @@ describe("/mcp", () => {
     const basic = await send(port, "POST", "/mcp", { authorization: "Basic dXNlcjpwYXNz" });
     expect(basic.status).toBe(401);
     expect(basic.headers["www-authenticate"]).toBe(CHALLENGE);
-    // Until RED-302 verifies the token and RED-325 serves MCP.
-    const bearer = await send(port, "POST", "/mcp", { authorization: "Bearer some-token", "content-type": "application/json" });
-    expect(bearer.status).toBe(501);
+    // Not a token at all, so nothing is looked up. Tokens that are looked up: oidc-tokens.test.ts.
+    const malformed = await send(port, "POST", "/mcp", { authorization: "Bearer not a token", "content-type": "application/json" });
+    expect(malformed.status).toBe(401);
+    expect(malformed.headers["www-authenticate"]).toBe(CHALLENGE.replace("Bearer ", 'Bearer error="invalid_token", error_description="the access token is not valid here", '));
   });
 
   it("refuses a Host that is not PUBLIC_BASE_URL's, before the challenge", async () => {
