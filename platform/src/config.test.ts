@@ -108,12 +108,13 @@ describe("loadConfig", () => {
     );
   });
 
-  it("reads CIMD_TRUSTED_HOSTS as host names that replace the default list", () => {
-    expect(loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_HOSTS: " claude.ai, agent.example " }).cimdFetchLimits.trustedHosts).toEqual([
-      "claude.ai",
-      "agent.example",
+  it("reads CIMD_TRUSTED_CLIENT_IDS as exact URLs that replace the default list", () => {
+    const ids = "https://claude.ai/oauth/mcp-oauth-client-metadata, https://agent.example/client.json";
+    expect(loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: ids }).cimdFetchLimits.trustedClientIds).toEqual([
+      "https://claude.ai/oauth/mcp-oauth-client-metadata",
+      "https://agent.example/client.json",
     ]);
-    expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_HOSTS: "https://claude.ai" })).toThrow("CIMD_TRUSTED_HOSTS must list host names only");
+    expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

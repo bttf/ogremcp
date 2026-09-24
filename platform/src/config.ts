@@ -44,7 +44,7 @@ export interface Config {
   tokenLifetimes: TokenLifetimes;
   /**
    * `CIMD_FETCHES_PER_MINUTE`, `CIMD_FETCHES_PER_HOST_PER_MINUTE`,
-   * `CIMD_FETCHES_PER_IP_PER_MINUTE`, and `CIMD_TRUSTED_HOSTS`: the limits on
+   * `CIMD_FETCHES_PER_IP_PER_MINUTE`, and `CIMD_TRUSTED_CLIENT_IDS`: the limits on
    * the OAuth server's fetches of client ID metadata documents and client
    * JWKS (§9, `cimd.ts`). Each one unset is `DEFAULT_CIMD_FETCH_LIMITS`'s.
    */
@@ -208,20 +208,22 @@ function mcpAllowedOrigins(value: string | undefined, fallback: string[]): strin
 }
 
 /**
- * `CIMD_TRUSTED_HOSTS`, comma-separated. Each entry must be a host name as a
- * URL has it, such as `claude.ai`: lowercase, no scheme, port, or path. A set
- * value replaces the default list.
+ * `CIMD_TRUSTED_CLIENT_IDS`, comma-separated. Each entry must be an https
+ * `client_id` URL exactly as a URL parser writes it, such as
+ * `https://claude.ai/oauth/mcp-oauth-client-metadata`: only a request with
+ * that exact `client_id` is trusted. A set value replaces the default list.
  */
-function cimdTrustedHosts(value: string | undefined): readonly string[] {
+function cimdTrustedClientIds(value: string | undefined): readonly string[] {
   const raw = (value ?? "").trim();
-  if (raw === "") return DEFAULT_CIMD_FETCH_LIMITS.trustedHosts;
+  if (raw === "") return DEFAULT_CIMD_FETCH_LIMITS.trustedClientIds;
   return raw
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "")
     .map((entry) => {
-      if (URL.parse(`https://${entry}/`)?.hostname !== entry) {
-        throw new Error("CIMD_TRUSTED_HOSTS must list host names only, such as claude.ai");
+      const url = URL.parse(entry);
+      if (url?.protocol !== "https:" || url.href !== entry) {
+        throw new Error("CIMD_TRUSTED_CLIENT_IDS must list https client_id URLs, such as https://claude.ai/oauth/mcp-oauth-client-metadata");
       }
       return entry;
     });
@@ -275,7 +277,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
         env["CIMD_FETCHES_PER_IP_PER_MINUTE"],
         DEFAULT_CIMD_FETCH_LIMITS.perIpPerMinute,
       ),
-      trustedHosts: cimdTrustedHosts(env["CIMD_TRUSTED_HOSTS"]),
+      trustedClientIds: cimdTrustedClientIds(env["CIMD_TRUSTED_CLIENT_IDS"]),
     },
     production: env["NODE_ENV"] === "production",
   };

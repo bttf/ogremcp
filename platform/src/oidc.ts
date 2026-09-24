@@ -171,6 +171,7 @@ export function createOidcProvider({
   }
   provider.proxy = trustProxyHops > 0;
   provider.maxIpsCount = trustProxyHops;
+  provider.use(cimd.middleware);
   // A code only: a Postgres message can repeat a row (`failureCode`).
   provider.on("server_error", (ctx: { method: string; path: string }, err: unknown) => {
     log(`oauth server error: ${ctx.method} ${ctx.path} code=${failureCode(err)}`);

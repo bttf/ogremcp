@@ -7,7 +7,7 @@ import type { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
-import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS, FetchLimiter } from "./cimd.js";
+import { addressKey, type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS, FetchLimiter } from "./cimd.js";
 import { createOidcProvider, type OidcOptions } from "./oidc.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
@@ -161,55 +161,88 @@ describe("client ID metadata documents", () => {
     expect(second).toMatchObject({ status: 400, body: expect.stringContaining("client_id metadata document fetch not allowed") });
   });
 
-  it("limits each client address, and a flood of made-up hosts does not block a trusted host", async () => {
-    const limits = { perMinute: 2, perHostPerMinute: 10, perIpPerMinute: 3, trustedHosts: ["127.0.0.1"] };
-    const base = await serveOidc(unguarded, limits);
-    const failed = { status: 400, body: expect.stringContaining("client_id metadata document fetch failed") };
-    const refused = { status: 400, body: expect.stringContaining("client_id metadata document fetch not allowed") };
-    // One address uses up the shared limit with a host that does not exist.
-    // oidc-provider looks a client up twice for a failed authorization request: two fetches.
-    expect(await authorize(base, "https://a1.invalid/x", "198.51.100.1")).toMatchObject(failed);
-    expect(await authorize(base, "https://a2.invalid/x", "198.51.100.1")).toMatchObject(refused);
-    // A trusted host is still fetched.
-    expect((await authorize(base, publish("/trusted-1.json"), "198.51.100.2")).status).toBe(303);
-    // The flooding address has one request that starts a fetch left.
-    expect((await authorize(base, publish("/trusted-2.json"), "198.51.100.1")).status).toBe(303);
-    expect(await authorize(base, publish("/trusted-3.json"), "198.51.100.1")).toMatchObject(refused);
-  });
+  const failed = { status: 400, body: expect.stringContaining("client_id metadata document fetch failed") };
+  const refused = { status: 400, body: expect.stringContaining("client_id metadata document fetch not allowed") };
+
+  /** Serves a JWKS at `path`, and a document at `document` for a client that signs its token requests with it. */
+  function publishSigned(document: string, path: string, overrides: Record<string, unknown> = {}): string {
+    const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    documents.set(path, { keys: [{ ...publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256", use: "sig" }] });
+    return publish(document, {
+      token_endpoint_auth_method: "private_key_jwt",
+      token_endpoint_auth_signing_alg: "RS256",
+      jwks_uri: `https://${host}${path}`,
+      ...overrides,
+    });
+  }
+
+  /** A token request from `address`, whose client assertion has good claims and a signature of random bytes. Answers the status. */
+  async function tokenRequest(base: string, clientId: string, address = "192.0.2.1"): Promise<number> {
+    const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const exp = Math.floor(Date.now() / 1000) + 60;
+    const claims = { iss: clientId, sub: clientId, aud: ISSUER, jti: randomBytes(8).toString("hex"), exp };
+    const assertion = `${part({ alg: "RS256", kid: "k1" })}.${part(claims)}.${randomBytes(256).toString("base64url")}`;
+    const res = await fetch(`${base}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": address },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "not-a-code",
+        redirect_uri: REDIRECT_URI,
+        code_verifier: randomBytes(32).toString("base64url"),
+        client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        client_assertion: assertion,
+      }),
+    });
+    return res.status;
+  }
 
   it("fetches a client's jwks_uri once for a flood of token requests with bad client assertions", async () => {
     const base = await serveOidc(unguarded);
-    const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    documents.set("/jwks.json", { keys: [{ ...publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256", use: "sig" }] });
-    const clientId = publish("/signed.json", {
-      token_endpoint_auth_method: "private_key_jwt",
-      token_endpoint_auth_signing_alg: "RS256",
-      jwks_uri: `https://${host}/jwks.json`,
-    });
-    /** A token request whose client assertion has good claims and a signature of random bytes. */
-    const tokenRequest = async (): Promise<number> => {
-      const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-      const exp = Math.floor(Date.now() / 1000) + 60;
-      const claims = { iss: clientId, sub: clientId, aud: ISSUER, jti: randomBytes(8).toString("hex"), exp };
-      const assertion = `${part({ alg: "RS256", kid: "k1" })}.${part(claims)}.${randomBytes(256).toString("base64url")}`;
-      const res = await fetch(`${base}/oauth/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "192.0.2.1" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: "not-a-code",
-          redirect_uri: REDIRECT_URI,
-          code_verifier: randomBytes(32).toString("base64url"),
-          client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-          client_assertion: assertion,
-        }),
-      });
-      return res.status;
-    };
-    expect(await tokenRequest()).toBe(401);
-    expect(await Promise.all(Array.from({ length: 25 }, tokenRequest))).toEqual(Array(25).fill(401));
+    const clientId = publishSigned("/signed.json", "/jwks.json");
+    expect(await tokenRequest(base, clientId)).toBe(401);
+    expect(await Promise.all(Array.from({ length: 25 }, () => tokenRequest(base, clientId)))).toEqual(Array(25).fill(401));
     expect(hits.get("/signed.json")).toBe(1);
     expect(hits.get("/jwks.json")).toBe(1);
+  });
+
+  it("limits the fetches one client address causes, token requests included, with IPv6 by /64", async () => {
+    const base = await serveOidc(unguarded, { ...DEFAULT_CIMD_FETCH_LIMITS, perIpPerMinute: 1 });
+    const clientId = publishSigned("/address.json", "/address-jwks.json");
+    // The document fetch uses the /64's one fetch.
+    expect((await authorize(base, clientId, "2001:db8:1:1::1")).status).toBe(303);
+    expect(await authorize(base, publish("/address-2.json"), "2001:db8:1:1::2")).toMatchObject(refused);
+    expect(await tokenRequest(base, clientId, "2001:db8:1:1::3")).toBe(401);
+    expect(hits.get("/address-jwks.json")).toBeUndefined();
+    // Another /64 may cause one.
+    expect(await tokenRequest(base, clientId, "2001:db8:1:2::1")).toBe(401);
+    expect(hits.get("/address-jwks.json")).toBe(1);
+  });
+
+  it("keeps a trusted client working after a flood of made-up client_ids on its host and on others", async () => {
+    const trusted = publish("/trusted.json");
+    const base = await serveOidc(unguarded, { perMinute: 4, perHostPerMinute: 2, perIpPerMinute: 100, trustedClientIds: [trusted] });
+    // oidc-provider looks a client up twice for a failed authorization request: two fetches each.
+    expect(await authorize(base, `https://${host}/made-up-1.json`, "198.51.100.1")).toMatchObject(failed);
+    expect(await authorize(base, `https://${host}/made-up-2.json`, "198.51.100.2")).toMatchObject(refused);
+    expect(await authorize(base, "https://a1.invalid/x", "198.51.100.3")).toMatchObject(failed);
+    expect(await authorize(base, "https://a2.invalid/x", "198.51.100.3")).toMatchObject(refused);
+    // The host and the total are used up; the trusted client_id is fetched all the same.
+    expect((await authorize(base, trusted, "198.51.100.4")).status).toBe(303);
+  });
+
+  it("keeps a trusted client working after a flood of token requests from clients whose jwks_uri is on its host", async () => {
+    const trusted = publish("/trusted-2.json");
+    const base = await serveOidc(unguarded, { perMinute: 100, perHostPerMinute: 2, perIpPerMinute: 100, trustedClientIds: [trusted] });
+    for (const n of [1, 2, 3]) {
+      // A client on another host, whose jwks_uri is on the trusted client's host, is refused (400) before any JWKS fetch.
+      const clientId = `https://attacker-${n}.test/client.json`;
+      publishSigned(`/attacker-${n}.json`, `/attacker-jwks-${n}.json`, { client_id: clientId });
+      documents.set("/client.json", documents.get(`/attacker-${n}.json`) ?? {});
+      expect(await tokenRequest(base, clientId)).toBe(400);
+      expect(hits.get(`/attacker-jwks-${n}.json`)).toBeUndefined();
+    }
+    expect((await authorize(base, trusted)).status).toBe(303);
   });
 });
 
@@ -217,11 +250,18 @@ describe("FetchLimiter", () => {
   it("counts in one-minute windows, and logs the first refusal of each only", () => {
     let now = 0;
     const lines: string[] = [];
-    const limits = { perMinute: 1, perHostPerMinute: 5, perIpPerMinute: 5, trustedHosts: [] };
+    const limits = { perMinute: 1, perHostPerMinute: 5, perIpPerMinute: 5, trustedClientIds: [] };
     const limiter = new FetchLimiter(limits, (line) => lines.push(line), () => now);
-    expect(["a", "b", "c"].map((host) => limiter.take(host))).toEqual([true, false, false]);
+    const take = (host: string) => limiter.take(`https://${host}/c.json`, "document", undefined);
+    expect(["a", "b", "c"].map(take)).toEqual([true, false, false]);
     expect(lines).toHaveLength(1);
     now = 60_000;
-    expect(limiter.take("b")).toBe(true);
+    expect(take("b")).toBe(true);
+  });
+
+  it("keys an IPv6 address by its /64", () => {
+    expect(addressKey("2001:db8:1:1::1")).toBe(addressKey("2001:DB8:1:1:ffff:ffff:ffff:ffff"));
+    expect(addressKey("2001:db8:1:1::1")).not.toBe(addressKey("2001:db8:1:2::1"));
+    expect(addressKey("::ffff:192.0.2.1")).toBe("192.0.2.1");
   });
 });

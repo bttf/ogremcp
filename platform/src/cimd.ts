@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { isIPv6 } from "node:net";
+
 import type { Configuration } from "oidc-provider";
 
 /**
@@ -15,12 +18,14 @@ import type { Configuration } from "oidc-provider";
  * On top of those:
  * - Every fetch oidc-provider makes goes through one counted `fetch`: the
  *   documents, and the `jwks_uri` of a client that signs its token requests
- *   (`private_key_jwt`, as ChatGPT does). Fetches are limited per minute for
- *   each host, and together for the hosts not in `trustedHosts`, so a flood
- *   of made-up hosts cannot use up the trusted hosts' share. No fetch follows
- *   a redirect.
- * - A request that starts a document fetch is limited per minute for each
- *   client address.
+ *   (`private_key_jwt`, as ChatGPT does). No fetch follows a redirect. Each
+ *   is limited per minute: for its host, for the client address of the
+ *   request that caused it (an IPv6 address by its /64), and for all fetches
+ *   together. The documents of the exact `client_id`s in `trustedClientIds`,
+ *   and their JWKS, are not limited, so no flood of other clients, on their
+ *   hosts or any other, can block them. The cache, the size caps, and the
+ *   no-redirect rule still apply to them.
+ * - A `jwks_uri` must be on the host of its `client_id`.
  * - A client's JWKS is cached by URL, for its Cache-Control time within 60 s
  *   to 1 h, and read up to 64 KB. oidc-provider builds a new client from a
  *   cached document at each request, so its own JWKS cache does not last
@@ -37,27 +42,30 @@ import type { Configuration } from "oidc-provider";
  */
 
 export interface CimdFetchLimits {
-  /** `CIMD_FETCHES_PER_MINUTE`: fetches per minute from the hosts not in `trustedHosts`, together. */
+  /** `CIMD_FETCHES_PER_MINUTE`: limited fetches per minute, together. */
   perMinute: number;
-  /** `CIMD_FETCHES_PER_HOST_PER_MINUTE`: fetches per minute from one host. */
+  /** `CIMD_FETCHES_PER_HOST_PER_MINUTE`: limited fetches per minute from one host. */
   perHostPerMinute: number;
-  /** `CIMD_FETCHES_PER_IP_PER_MINUTE`: requests per minute from one client address that start a document fetch. */
+  /** `CIMD_FETCHES_PER_IP_PER_MINUTE`: limited fetches per minute caused by requests from one client address. */
   perIpPerMinute: number;
-  /** `CIMD_TRUSTED_HOSTS`: hosts whose fetches `perMinute` does not count. `perHostPerMinute` still does. */
-  trustedHosts: readonly string[];
+  /** `CIMD_TRUSTED_CLIENT_IDS`: exact `client_id` URLs whose documents and JWKS are fetched without a limit. */
+  trustedClientIds: readonly string[];
 }
 
 /**
  * Starting values, not settled numbers (§0). A new client costs one fetch,
- * and then none while its document is cached. The trusted hosts are those of
- * the `client_id` URLs of Claude and Claude Code (`claude.ai`) and ChatGPT
- * (`chatgpt.com`), per spike S2 (RED-298).
+ * and then none while its document is cached. The trusted `client_id`s are
+ * those of Claude, Claude Code, and ChatGPT, per spike S2 (RED-298).
  */
 export const DEFAULT_CIMD_FETCH_LIMITS: CimdFetchLimits = {
   perMinute: 120,
   perHostPerMinute: 30,
   perIpPerMinute: 10,
-  trustedHosts: ["claude.ai", "chatgpt.com"],
+  trustedClientIds: [
+    "https://claude.ai/oauth/mcp-oauth-client-metadata",
+    "https://claude.ai/oauth/claude-code-client-metadata",
+    "https://chatgpt.com/oauth/client.json",
+  ],
 };
 
 type Fetch = NonNullable<Configuration["fetch"]>;
@@ -102,16 +110,42 @@ class MinuteCounts {
 }
 
 /**
- * The fetch limits. A refused fetch or request is not counted, so the maps
- * hold at most one entry per fetch that went out this minute. The first
- * refusal in a minute is logged, and the rest of that minute's are not.
+ * The key of a client address for the per-address limit: an IPv4 address
+ * whole, an IPv6 address by its /64, since one host commonly holds a whole
+ * /64.
+ */
+export function addressKey(address: string): string {
+  const ip = address.replace(/%.*$/, "").toLowerCase();
+  if (!isIPv6(ip)) return ip;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+  if (mapped?.[1] !== undefined) return mapped[1];
+  const [head = "", tail] = ip.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  // A dotted IPv4 tail holds two groups.
+  const size = (groups: string[]) => groups.reduce((n, group) => n + (group.includes(".") ? 2 : 1), 0);
+  const groups = tail === undefined ? left : [...left, ...Array<string>(8 - size(left) - size(right)).fill("0"), ...right];
+  return `${groups
+    .slice(0, 4)
+    .map((group) => group.padStart(4, "0"))
+    .join(":")}::/64`;
+}
+
+/** What a fetch is for: a client's document, or its JWKS. */
+export type FetchKind = "document" | "jwks";
+
+/**
+ * The fetch limits. A refused fetch is not counted, so the maps hold at most
+ * one entry per fetch that went out this minute. The first refusal in a
+ * minute is logged, and the rest of that minute's are not.
  */
 export class FetchLimiter {
   readonly #hosts: MinuteCounts;
-  readonly #shared: MinuteCounts;
-  readonly #ips: MinuteCounts;
+  readonly #all: MinuteCounts;
+  readonly #addresses: MinuteCounts;
   readonly #refusals: MinuteCounts;
-  readonly #trusted: ReadonlySet<string>;
+  readonly #trustedClientIds: ReadonlySet<string>;
+  readonly #trustedJwks = new Set<string>();
 
   constructor(
     private readonly limits: CimdFetchLimits,
@@ -119,45 +153,52 @@ export class FetchLimiter {
     now: () => number = Date.now,
   ) {
     this.#hosts = new MinuteCounts(now);
-    this.#shared = new MinuteCounts(now);
-    this.#ips = new MinuteCounts(now);
+    this.#all = new MinuteCounts(now);
+    this.#addresses = new MinuteCounts(now);
     this.#refusals = new MinuteCounts(now);
-    this.#trusted = new Set(limits.trustedHosts);
+    this.#trustedClientIds = new Set(limits.trustedClientIds);
   }
 
-  /** Before a document fetch from `host`: whether the request from `ip` may start it. Counts the request. */
-  allowDocumentFetch(host: string, ip: string | undefined): boolean {
-    const over = this.#over(host);
-    if (over !== null) return this.#refuse(over);
-    if (ip !== undefined) {
-      if (this.#ips.get(ip) >= this.limits.perIpPerMinute) return this.#refuse("one client address");
-      this.#ips.add(ip);
+  /** Whether `clientId` is exactly a trusted one. */
+  trusts(clientId: string): boolean {
+    return this.#trustedClientIds.has(clientId);
+  }
+
+  /** Trusts the JWKS at `href`, the `jwks_uri` of a trusted client. */
+  trustJwks(href: string): void {
+    this.#trustedJwks.add(href);
+  }
+
+  /** Whether a fetch of `url` (exactly as oidc-provider asks for it), caused by a request from `address`, fits. Counts nothing. */
+  fits(url: string, kind: FetchKind, address: string | undefined): boolean {
+    return this.#check(url, kind, address, false);
+  }
+
+  /** Whether that fetch may go. Counts it. */
+  take(url: string, kind: FetchKind, address: string | undefined): boolean {
+    return this.#check(url, kind, address, true);
+  }
+
+  #check(url: string, kind: FetchKind, address: string | undefined, count: boolean): boolean {
+    if (kind === "document" ? this.#trustedClientIds.has(url) : this.#trustedJwks.has(url)) return true;
+    const host = new URL(url).hostname;
+    let over: string | null = null;
+    if (this.#hosts.get(host) >= this.limits.perHostPerMinute) over = `host ${host}`;
+    else if (this.#all.get("") >= this.limits.perMinute) over = "all hosts";
+    else if (address !== undefined && this.#addresses.get(address) >= this.limits.perIpPerMinute) over = "one client address";
+    if (over !== null) {
+      if (this.#refusals.get("") === 0) {
+        this.log(`oauth: outgoing fetches over the limit for ${over}; the rest of this minute's refusals are not logged`);
+      }
+      this.#refusals.add("");
+      return false;
+    }
+    if (count) {
+      this.#hosts.add(host);
+      this.#all.add("");
+      if (address !== undefined) this.#addresses.add(address);
     }
     return true;
-  }
-
-  /** Before every fetch from `host`: whether it may go. Counts it. */
-  take(host: string): boolean {
-    const over = this.#over(host);
-    if (over !== null) return this.#refuse(over);
-    this.#hosts.add(host);
-    if (!this.#trusted.has(host)) this.#shared.add("");
-    return true;
-  }
-
-  /** The limit a fetch from `host` would go over, or null. */
-  #over(host: string): string | null {
-    if (this.#hosts.get(host) >= this.limits.perHostPerMinute) return `host ${host}`;
-    if (!this.#trusted.has(host) && this.#shared.get("") >= this.limits.perMinute) return "the untrusted hosts together";
-    return null;
-  }
-
-  #refuse(limit: string): false {
-    if (this.#refusals.get("") === 0) {
-      this.log(`oauth: outgoing fetches over the limit for ${limit}; the rest of this minute's refusals are not logged`);
-    }
-    this.#refusals.add("");
-    return false;
   }
 }
 
@@ -229,10 +270,15 @@ function maxAgeSeconds(response: Response): number {
   return match?.[1] === undefined ? 0 : Number(match[1]);
 }
 
-/** The settings `createOidcProvider` spreads in, and the feature it adds. */
+/**
+ * The settings `createOidcProvider` spreads in, the feature it adds, and the
+ * middleware it gives `provider.use`. The middleware keeps each request's
+ * client address for the fetches the request causes.
+ */
 export interface CimdConfiguration {
   settings: Pick<Configuration, "fetch" | "fetchResponseBodyLimits" | "sectorIdentifierUriValidate">;
   features: { clientIdMetadataDocument: CimdFeature };
+  middleware: (ctx: { ip: string }, next: () => Promise<void>) => Promise<void>;
 }
 
 /**
@@ -247,20 +293,24 @@ export function cimdConfiguration(
 ): CimdConfiguration {
   const limiter = new FetchLimiter(limits, log);
   const jwks = new JwksCache(Date.now);
+  // Outside an oidc-provider request, such as the consent page's details, there is no address.
+  const requestAddress = new AsyncLocalStorage<string>();
 
-  const counted = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = new URL(input instanceof Request ? input.url : input);
-    if (!limiter.take(url.hostname)) return Promise.reject(new Error("outgoing fetch over the limit"));
-    return fetch(input, { ...init, redirect: "manual" });
+  const counted = (url: string, kind: FetchKind, init?: RequestInit): Promise<Response> => {
+    if (!limiter.take(url, kind, requestAddress.getStore())) return Promise.reject(new Error("outgoing fetch over the limit"));
+    return fetch(url, { ...init, redirect: "manual" });
   };
 
   return {
+    middleware: (ctx, next) => requestAddress.run(addressKey(ctx.ip), next),
     settings: {
       fetch: async (input, init) => {
-        const href = new URL(input instanceof Request ? input.url : input).href;
-        if (!jwks.registered(href)) return counted(input, init);
+        // A document's URL is compared exactly as the client sent it, so it is not normalized.
+        const url = input instanceof Request ? input.url : String(input);
+        const href = new URL(url).href;
+        if (!jwks.registered(href)) return counted(url, "document", init);
         const body = await jwks.get(href, async () => {
-          const response = await counted(input, init);
+          const response = await counted(href, "jwks", init);
           if (response.status !== 200) {
             await response.body?.cancel();
             throw new Error(`jwks_uri answered ${response.status}`);
@@ -278,13 +328,19 @@ export function cimdConfiguration(
         enabled: true,
         // A later draft that breaks this one throws at start instead of changing behavior.
         ack: "draft-02",
-        // Only a document that is not cached is fetched. `ctx` is missing outside an oidc-provider request.
-        allowFetch: (ctx: { ip?: string } | undefined, clientId) => limiter.allowDocumentFetch(new URL(clientId).hostname, ctx?.ip),
+        // Only a document that is not cached is fetched. This answers "fetch not allowed" early; `fetch` counts.
+        allowFetch: (ctx: { ip?: string } | undefined, clientId) =>
+          limiter.fits(clientId, "document", ctx?.ip === undefined ? undefined : addressKey(ctx.ip)),
         // At each use of a client from a document, cached or not.
         allowClient: (_ctx, client) => {
           if (client.sectorIdentifierUri !== undefined) return false;
           if (!(client.redirectUris ?? []).every(httpsOrLoopback)) return false;
-          if (client.jwksUri !== undefined) jwks.register(client.jwksUri);
+          if (client.jwksUri !== undefined) {
+            const jwksUri = URL.parse(client.jwksUri);
+            if (jwksUri === null || jwksUri.host !== new URL(client.clientId).host) return false;
+            jwks.register(jwksUri.href);
+            if (limiter.trusts(client.clientId)) limiter.trustJwks(jwksUri.href);
+          }
           return true;
         },
       },
