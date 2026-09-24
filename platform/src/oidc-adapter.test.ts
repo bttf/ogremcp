@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import { errors } from "oidc-provider";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -94,5 +95,17 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("PostgresAdapter against Postgr
     expect(await tokens.find("rt-2")).toBeUndefined();
     expect(await tokens.find("rt-3")).toBeDefined();
     expect(await interactions.find("int-1")).toBeDefined();
+  });
+
+  it("finds nothing for a value with a NUL, and refuses to store one as invalid_request", async () => {
+    const clients = new PostgresAdapter(pool, "Client");
+    const interactions = new PostgresAdapter(pool, "Interaction");
+    expect(await clients.find("client\0")).toBeUndefined();
+    expect(await interactions.findByUid("uid\0")).toBeUndefined();
+    await expect(interactions.upsert("int-nul", { jti: "int-nul", params: { state: "a\0b" } }, 600)).rejects.toThrow(errors.InvalidRequest);
+    await expect(interactions.upsert("int\0", { jti: "int" }, 600)).rejects.toThrow(errors.InvalidRequest);
+    // A literal backslash-u0000 is text, not a NUL, and is stored.
+    await interactions.upsert("int-text", { jti: "int-text", params: { state: "\\u0000" } }, 600);
+    expect(await interactions.find("int-text")).toMatchObject({ params: { state: "\\u0000" } });
   });
 });

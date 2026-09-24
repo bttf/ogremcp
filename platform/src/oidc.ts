@@ -82,9 +82,10 @@ export interface OidcOptions {
   issuer: string;
   keys: OidcKeys;
   /**
-   * `TRUST_PROXY_HOPS`, as Express has it. Above 0, oidc-provider trusts
-   * `X-Forwarded-Proto`, so behind Railway's edge its endpoint URLs are
-   * https, and reads the client address that many hops back.
+   * `TRUST_PROXY_HOPS`, as Express has it. Above 0, oidc-provider reads the
+   * client address that many hops back, and builds its endpoint URLs from
+   * `X-Forwarded-Proto` and `X-Forwarded-Host`, which `mountOidc` sets from
+   * the issuer. So behind Railway's edge they are https.
    */
   trustProxyHops: number;
   /** Receives one line per server error. Default: `console.error`. */
@@ -136,11 +137,19 @@ export function createOidcProvider({ pool, issuer, keys, trustProxyHops, log = c
  * Serves the provider's paths, then the interaction routes. Mount it after
  * the web session middleware, which the interactions read, and before any
  * body parser, so that oidc-provider reads its own request bodies.
+ *
+ * Koa takes the leftmost `X-Forwarded-Host` and `X-Forwarded-Proto` whatever
+ * the hop count, and a client can write those. So before oidc-provider runs,
+ * both are set from the issuer, and every endpoint URL it builds is on the
+ * issuer's origin.
  */
 export function mountOidc(app: Express, provider: Provider, pool: Pool): void {
   const callback = provider.callback();
+  const issuer = new URL(provider.issuer);
   app.use((req, res, next) => {
     if (req.path === DISCOVERY_PATH || req.path.startsWith(OIDC_PATH_PREFIX)) {
+      req.headers["x-forwarded-host"] = issuer.host;
+      req.headers["x-forwarded-proto"] = issuer.protocol.slice(0, -1);
       void callback(req, res);
       return;
     }
@@ -199,6 +208,23 @@ async function findInteraction(provider: Provider, req: Request, res: Response):
   return interaction.uid === req.params["uid"] ? interaction : null;
 }
 
+/**
+ * Whether the login prompt asks for more than the web session's sign-in at
+ * `signedInAt` (seconds since the epoch). `prompt=login` asks for a sign-in
+ * made during this request. An exceeded `max_age` accepts that, or a sign-in
+ * within `max_age` seconds. A sign-in made during the request satisfies both,
+ * so the browser comes back from it and goes on.
+ */
+function needsFreshSignIn(interaction: Interaction, signedInAt: number | undefined): boolean {
+  const { reasons } = interaction.prompt;
+  if (!reasons.includes("login_prompt") && !reasons.includes("max_age")) return false;
+  if (signedInAt === undefined) return true;
+  if (signedInAt >= interaction.iat) return false;
+  if (reasons.includes("login_prompt")) return true;
+  const maxAge = Number(interaction.params["max_age"]);
+  return !(Number.isFinite(maxAge) && Math.floor(Date.now() / 1000) - signedInAt <= maxAge);
+}
+
 function signInRedirect(interaction: Interaction): string {
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(`/interaction/${interaction.uid}`)}`;
 }
@@ -207,8 +233,10 @@ function signInRedirect(interaction: Interaction): string {
  * - `GET /interaction/:uid`, where oidc-provider sends the browser. Signed
  *   out, it goes to sign in and comes back here. Signed in, a login prompt is
  *   completed with the user's uuid and the time of the sign-in, and the
- *   browser goes back to oidc-provider. The consent prompt is RED-303's page;
- *   until then it answers 501.
+ *   browser goes back to oidc-provider. When the request asks for a fresh
+ *   login (`needsFreshSignIn`), a sign-in from before it does not count: the
+ *   browser goes through sign-in again first. The consent prompt is RED-303's
+ *   page; until then it answers 501.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
  *   client, and what it asks for. It answers only the user the interaction
  *   belongs to.
@@ -227,11 +255,13 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
     const user = currentUser(res);
     if (user === null) return res.redirect(303, signInRedirect(interaction));
     if (interaction.prompt.name === "login" || interaction.session?.accountId !== user.uuid) {
+      // A web session starts at sign-in, and renewal keeps its created_at.
       const { rows } = await pool.query<{ ts: string }>(
         "select floor(extract(epoch from created_at))::bigint as ts from web_sessions where uuid = $1",
         [user.sessionUuid],
       );
       const ts = rows[0] === undefined ? undefined : Number(rows[0].ts);
+      if (needsFreshSignIn(interaction, ts)) return res.redirect(303, signInRedirect(interaction));
       const returnTo = await provider.interactionResult(req, res, { login: { accountId: user.uuid, ts } });
       return res.redirect(303, returnTo);
     }
