@@ -168,7 +168,7 @@ export interface RequireTokenOptions {
   scope: Scope;
   /**
    * More auth-params for every `WWW-Authenticate` challenge sent, after the
-   * RFC 6750 ones. For `/mcp`, RED-301 passes `resource_metadata` (RFC 9728, §9).
+   * error ones of RFC 6750. `/mcp` passes `resource_metadata` (RFC 9728, §9).
    */
   challenge?: Readonly<Record<string, string>>;
 }
@@ -186,7 +186,7 @@ const BEARER = /^Bearer +([A-Za-z0-9._~+/-]+=*) *$/i;
  *   or a token for another resource.
  * - 403 `insufficient_scope` for a token for this resource without `scope`.
  *
- * Every challenge names `scope`, then the `challenge` params. A DPoP-bound
+ * Every challenge ends with the `challenge` params and `scope`. A DPoP-bound
  * token is refused: this checks bearer tokens only.
  */
 export function requireToken({ provider, resource, scope, challenge = {} }: RequireTokenOptions): RequestHandler {
@@ -194,8 +194,8 @@ export function requireToken({ provider, resource, scope, challenge = {} }: Requ
     const params: Record<string, string> = {
       ...(error === undefined ? {} : { error }),
       ...(description === undefined ? {} : { error_description: description }),
-      scope,
       ...challenge,
+      scope,
     };
     const list = Object.entries(params).map(([name, value]) => `${name}="${value.replace(/["\\]/g, "\\$&")}"`);
     res.set("WWW-Authenticate", `Bearer ${list.join(", ")}`);

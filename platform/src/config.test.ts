@@ -8,6 +8,7 @@ import {
   DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS,
   loadConfig,
 } from "./config.js";
+import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
 
@@ -23,6 +24,7 @@ describe("loadConfig", () => {
       databaseQueryTimeoutMs: DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
       publicBaseUrl: `http://localhost:${DEFAULT_PORT}`,
       trustProxyHops: DEFAULT_TRUST_PROXY_HOPS,
+      mcpAllowedOrigins: [`http://localhost:${DEFAULT_PORT}`, ...MCP_CLIENT_ORIGINS],
       webSessionLifetimeMs: DEFAULT_WEB_SESSION_LIFETIME_DAYS * DAY_MS,
       webSessionRenewWithinMs: DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS * DAY_MS,
       google: null,
@@ -34,6 +36,14 @@ describe("loadConfig", () => {
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
     expect(config.port).toBe(8080);
     expect(config.databaseQueryTimeoutMs).toBe(2500);
+  });
+
+  it("reads MCP_ALLOWED_ORIGINS as exact origins that replace the default list", () => {
+    const config = loadConfig({ DATABASE_URL: url, MCP_ALLOWED_ORIGINS: " https://claude.ai, http://localhost:6274 " });
+    expect(config.mcpAllowedOrigins).toEqual(["https://claude.ai", "http://localhost:6274"]);
+    for (const bad of ["*", "https://*.claude.ai", "https://claude.ai/", "https://Claude.ai", "claude.ai"]) {
+      expect(() => loadConfig({ DATABASE_URL: url, MCP_ALLOWED_ORIGINS: bad })).toThrow("MCP_ALLOWED_ORIGINS must list origins only");
+    }
   });
 
   it("refuses to start without DATABASE_URL", () => {

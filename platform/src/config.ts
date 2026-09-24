@@ -1,3 +1,4 @@
+import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
 
@@ -17,6 +18,11 @@ export interface Config {
   publicBaseUrl: string;
   /** `TRUST_PROXY_HOPS`: proxies in front of the service whose `X-Forwarded-*` headers Express trusts. */
   trustProxyHops: number;
+  /**
+   * `MCP_ALLOWED_ORIGINS`: the values the `Origin` header may have on `/mcp`
+   * (§9). Unset, `PUBLIC_BASE_URL` and the target clients' web origins.
+   */
+  mcpAllowedOrigins: string[];
   /** `WEB_SESSION_LIFETIME_DAYS`, in milliseconds: how long a web session lasts after it was last renewed. */
   webSessionLifetimeMs: number;
   /** `WEB_SESSION_RENEW_WITHIN_DAYS`, in milliseconds: a web session used with less than this left is renewed. */
@@ -169,6 +175,31 @@ function tokenLifetimes(env: Record<string, string | undefined>): TokenLifetimes
 }
 
 /**
+ * `MCP_ALLOWED_ORIGINS`, comma-separated. Each entry must be an origin exactly
+ * as a browser sends it, such as `https://claude.ai`: lowercase, no path, no
+ * default port, no wildcard. A set value replaces the default list.
+ */
+function mcpAllowedOrigins(value: string | undefined, fallback: string[]): string[] {
+  const raw = (value ?? "").trim();
+  if (raw === "") return fallback;
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .map((entry) => {
+      let origin: string;
+      try {
+        origin = new URL(entry).origin;
+      } catch {
+        origin = "null";
+      }
+      // `*` is a valid host character for the URL parser, so a wildcard would pass as a literal host.
+      if (origin !== entry || entry.includes("*")) throw new Error("MCP_ALLOWED_ORIGINS must list origins only, such as https://claude.ai");
+      return entry;
+    });
+}
+
+/**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
  * only store (§11). The sign-in providers are optional: without one, its
@@ -186,6 +217,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     Math.min(DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS, lifetimeDays),
   );
   if (renewWithinDays > lifetimeDays) throw new Error("WEB_SESSION_RENEW_WITHIN_DAYS must not be more than WEB_SESSION_LIFETIME_DAYS");
+  const baseUrl = publicBaseUrl(env["PUBLIC_BASE_URL"], listenPort, google !== null || discord !== null);
   return {
     port: listenPort,
     databaseUrl: databaseUrl(env["DATABASE_URL"]),
@@ -194,8 +226,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       env["DATABASE_QUERY_TIMEOUT_MS"],
       DEFAULT_DATABASE_QUERY_TIMEOUT_MS,
     ),
-    publicBaseUrl: publicBaseUrl(env["PUBLIC_BASE_URL"], listenPort, google !== null || discord !== null),
+    publicBaseUrl: baseUrl,
     trustProxyHops: nonNegativeInt("TRUST_PROXY_HOPS", env["TRUST_PROXY_HOPS"], DEFAULT_TRUST_PROXY_HOPS),
+    mcpAllowedOrigins: mcpAllowedOrigins(env["MCP_ALLOWED_ORIGINS"], defaultMcpAllowedOrigins(baseUrl)),
     webSessionLifetimeMs: lifetimeDays * DAY_MS,
     webSessionRenewWithinMs: renewWithinDays * DAY_MS,
     google,

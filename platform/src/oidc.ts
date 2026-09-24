@@ -16,7 +16,8 @@ import { currentUser } from "./web-sessions.js";
  * (`oidc-adapter.ts`).
  *
  * Its endpoints live under `/oauth/`, and its discovery document at
- * `/.well-known/openid-configuration`. Only those paths reach
+ * `/.well-known/openid-configuration` and
+ * `/.well-known/oauth-authorization-server` (RFC 8414). Only those paths reach
  * oidc-provider: every other request stays with Express, and oidc-provider
  * reads the request body only on its own paths. `/device`, the device flow's
  * page, does not reach it yet (RED-307).
@@ -30,19 +31,22 @@ import { currentUser } from "./web-sessions.js";
  * Off here, each for its own issue: dynamic client registration (RED-304),
  * static clients (RED-305), client ID metadata documents (RED-306), the
  * device flow (RED-307), loopback redirects (RED-308). Scopes, resource
- * indicators, token lifetimes, and revocation are `oidc-tokens.ts`.
- * oidc-provider's defaults stand for discovery (RED-301). The consent page
- * is RED-303.
+ * indicators, token lifetimes, and revocation are `oidc-tokens.ts`. The
+ * consent page is RED-303. The MCP endpoint's resource metadata is `mcp.ts`.
  */
 
 /**
  * The path every oidc-provider endpoint this service serves is under, but
- * discovery. Only these paths and `DISCOVERY_PATH` reach oidc-provider.
+ * discovery. Only these paths and `DISCOVERY_PATHS` reach oidc-provider.
  */
 export const OIDC_PATH_PREFIX = "/oauth/";
 
-/** oidc-provider serves the discovery document here. RED-301 adds `/.well-known/oauth-authorization-server`. */
-export const DISCOVERY_PATH = "/.well-known/openid-configuration";
+/**
+ * oidc-provider serves the same metadata document at both (§9): OpenID
+ * Connect Discovery, and OAuth 2.0 Authorization Server Metadata (RFC 8414).
+ * MCP clients ask for the second first.
+ */
+export const DISCOVERY_PATHS: readonly string[] = ["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"];
 
 /**
  * The web UI's Sign in page (§13.2). A signed-out browser in an OAuth
@@ -161,7 +165,7 @@ export function mountOidc(app: Express, provider: Provider, pool: Pool): void {
   const callback = provider.callback();
   const issuer = new URL(provider.issuer);
   app.use((req, res, next) => {
-    if (req.path === DISCOVERY_PATH || req.path.startsWith(OIDC_PATH_PREFIX)) {
+    if (DISCOVERY_PATHS.includes(req.path) || req.path.startsWith(OIDC_PATH_PREFIX)) {
       req.headers["x-forwarded-host"] = issuer.host;
       req.headers["x-forwarded-proto"] = issuer.protocol.slice(0, -1);
       void callback(req, res);
