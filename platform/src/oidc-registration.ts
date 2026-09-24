@@ -39,8 +39,8 @@ import { failureCode } from "./db.js";
  *
  * Loopback redirects (§9, RFC 8252 §7.3) apply to every client oidc-provider
  * builds: registered, CIMD, and static. A client whose redirect URIs pass
- * `nativeLoopbackRedirects` (`cimd.ts`) gets `application_type` `native`,
- * whatever it sent. Claude Code's CIMD document, with
+ * `nativeLoopbackRedirects` (`cimd.ts`) gets `application_type` `native`
+ * when it sent none, `web`, or `native`. Claude Code's CIMD document, with
  * `http://localhost/callback`, sets none. For a native client, oidc-provider
  * matches an http redirect URI on a loopback host with the port left out of
  * both sides. The scheme, host, path, and query still match exactly, and
@@ -156,7 +156,11 @@ function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, 
     delete metadata[key];
     return;
   }
-  if (key === "redirect_uris" && Array.isArray(value) && nativeLoopbackRedirects(value)) metadata.application_type = "native";
+  // A client that sent no application_type has oidc-provider's default, web
+  // (native needs no change). Any other value is left for oidc-provider to refuse.
+  if (key === "redirect_uris" && (metadata.application_type ?? "web") === "web" && Array.isArray(value) && nativeLoopbackRedirects(value)) {
+    metadata.application_type = "native";
+  }
   if (ctx?.oidc.route !== "registration") return;
   if (NOT_ACCEPTED.has(key)) {
     if (value !== undefined) refuse(`${key} is not accepted: registered clients are public and have no keys`);

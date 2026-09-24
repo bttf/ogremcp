@@ -8,7 +8,7 @@ export interface ConsentDetails {
   /** The host of a CIMD client's `client_id` URL, which published its name; null for another client. */
   client_host: string | null;
   redirect_host: string | null;
-  /** Whether the redirect URI is http on a loopback host, so the code goes to an app on this computer. */
+  /** Whether the redirect URI is http or https on a loopback host, so the code goes to an app on this computer. */
   redirect_loopback: boolean;
   /** The requested scopes that approval grants. */
   scopes: string[];

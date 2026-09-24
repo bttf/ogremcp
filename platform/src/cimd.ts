@@ -81,10 +81,16 @@ const JWKS_CACHE_SIZE = 100;
 /** oidc-provider's loopback hosts: `localhost`, `127.0.0.1`, and `[::1]`, as `URL.hostname` has them. */
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** Whether a URI is http or https on a loopback host, so that it points at the user's own computer. */
+export function onLoopbackHost(uri: string): boolean {
+  const url = URL.parse(uri);
+  if (url === null) return false;
+  return (url.protocol === "http:" || url.protocol === "https:") && LOOPBACK_HOSTS.has(url.hostname);
+}
+
 /** Whether a redirect URI is http on a loopback host: a native app's loopback redirect (RFC 8252 §7.3). */
 export function loopbackRedirect(uri: string): boolean {
-  const url = URL.parse(uri);
-  return url?.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+  return URL.parse(uri)?.protocol === "http:" && onLoopbackHost(uri);
 }
 
 /** Whether a redirect URI is https, or http on a loopback host. */
@@ -106,7 +112,7 @@ export function nativeLoopbackRedirects(uris: readonly unknown[]): boolean {
   for (const uri of uris) {
     if (typeof uri !== "string" || !httpsOrLoopback(uri)) return false;
     if (loopbackRedirect(uri)) loopback = true;
-    else if (LOOPBACK_HOSTS.has(new URL(uri).hostname)) return false;
+    else if (onLoopbackHost(uri)) return false;
   }
   return loopback;
 }

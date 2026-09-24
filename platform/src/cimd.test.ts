@@ -7,7 +7,7 @@ import type { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
-import { addressKey, type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS, FetchLimiter } from "./cimd.js";
+import { addressKey, type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS, FetchLimiter, onLoopbackHost } from "./cimd.js";
 import { createOidcProvider, type OidcOptions } from "./oidc.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
@@ -201,6 +201,15 @@ describe("client ID metadata documents", () => {
     expect((await authorize(base, httpsLoopback, undefined, "http://localhost:53682/callback")).status).toBe(400);
   });
 
+  it("refuses a loopback client with an unknown application_type, or one that asks for id_token", async () => {
+    const base = await serveOidc(unguarded);
+    const invalid = { status: 400, body: expect.stringContaining("invalid_client_metadata") };
+    const redirect_uris = ["http://localhost/callback"];
+    expect(await authorize(base, publish("/bogus.json", { application_type: "bogus", redirect_uris }), undefined, redirect_uris[0])).toMatchObject(invalid);
+    const implicit = publish("/implicit.json", { grant_types: ["implicit"], response_types: ["id_token"], redirect_uris });
+    expect(await authorize(base, implicit, undefined, "http://localhost:53682/callback")).toMatchObject(invalid);
+  });
+
   const failed = { status: 400, body: expect.stringContaining("client_id metadata document fetch failed") };
   const refused = { status: 400, body: expect.stringContaining("client_id metadata document fetch not allowed") };
 
@@ -284,6 +293,11 @@ describe("client ID metadata documents", () => {
     }
     expect((await authorize(base, trusted)).status).toBe(303);
   });
+});
+
+it("finds a loopback host under http or https only", () => {
+  expect(["http://localhost:1/cb", "https://127.0.0.1/cb", "https://[::1]:8443/cb"].every(onLoopbackHost)).toBe(true);
+  expect(["https://localhost.evil.example/cb", "http://127.0.0.2/cb", "myapp://localhost/cb"].some(onLoopbackHost)).toBe(false);
 });
 
 describe("FetchLimiter", () => {
