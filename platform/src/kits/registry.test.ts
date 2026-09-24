@@ -40,6 +40,7 @@ describe("loadKitRegistry", () => {
     expect(registry.list().map((kit) => kit.key)).toEqual(["wow"]);
     const kit = registry.get("wow");
     expect(kit?.manifest.tool_prefix).toBe("wow");
+    expect(kit?.name).toBe("World of Warcraft");
     expect(kit?.interpreter).toBe(wow.interpreter);
     expect(registry.get("nope")).toBeUndefined();
 

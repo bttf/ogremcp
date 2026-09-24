@@ -33,10 +33,19 @@ export const KIT_SOURCES: readonly KitSource[] = [
   },
 ];
 
+/**
+ * Each first-class kit's name as the web UI shows it, by kit key (§13.2). The
+ * manifest has no display name, so the platform keeps them here. A kit without
+ * one stops the start.
+ */
+export const KIT_NAMES: ReadonlyMap<string, string> = new Map([["wow", "World of Warcraft"]]);
+
 /** A checked kit, as the rest of the platform sees it. */
 export interface Kit {
   /** The manifest's `kit`, e.g. `wow`. */
   key: string;
+  /** From `KIT_NAMES`, e.g. `World of Warcraft`. */
+  name: string;
   /** The pinned manifest (§5, §8.2). */
   manifest: Manifest;
   interpreter: Interpreter<unknown>;
@@ -58,16 +67,22 @@ export interface KitRegistryOptions {
 }
 
 /**
- * Checks every kit (`checkKits`) and reads its adapter zip. The platform calls
- * it at startup; it throws on the first problem, so a bad kit stops the start.
+ * Checks every kit (`checkKits`), finds its name in `KIT_NAMES`, and reads its
+ * adapter zip. The platform calls it at startup; it throws on the first
+ * problem, so a bad kit stops the start.
  */
 export function loadKitRegistry({ sources = KIT_SOURCES, adaptersDir = ADAPTERS_DIR }: KitRegistryOptions = {}): KitRegistry {
-  const kits: Kit[] = checkKits(sources).map(({ source, manifest, adapterFolder }) => ({
-    key: manifest.kit,
-    manifest,
-    interpreter: source.interpreter,
-    adapter: adapterFolder === null ? null : readAdapterZip(adaptersDir, manifest.kit, adapterFolder),
-  }));
+  const kits: Kit[] = checkKits(sources).map(({ source, manifest, adapterFolder }) => {
+    const name = KIT_NAMES.get(manifest.kit);
+    if (name === undefined) throw new Error(`${source.package}: kit "${manifest.kit}" has no name in KIT_NAMES.`);
+    return {
+      key: manifest.kit,
+      name,
+      manifest,
+      interpreter: source.interpreter,
+      adapter: adapterFolder === null ? null : readAdapterZip(adaptersDir, manifest.kit, adapterFolder),
+    };
+  });
   const byKey = new Map(kits.map((kit) => [kit.key, kit]));
   return {
     list: () => kits,

@@ -5,6 +5,7 @@ import { apiRouter } from "./api.js";
 import { type AuthOptions, authRouter } from "./auth.js";
 import { failureCode } from "./db.js";
 import { type HealthOptions, healthRouter } from "./health.js";
+import type { KitRegistry } from "./kits/registry.js";
 import { mountOidc } from "./oidc.js";
 import { securityHeaders } from "./security-headers.js";
 import { webFiles, webPages } from "./web.js";
@@ -17,6 +18,8 @@ export interface AppOptions {
   oidc?: Provider;
   /** Where the web UI's build is (`platform/dist/web`). Left out, no web UI is served. */
   webRoot?: string;
+  /** The first-class kits, for the Games API of `auth`'s web UI. Left out, that API is not served. */
+  kits?: KitRegistry;
   /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
   https?: boolean;
   /**
@@ -30,7 +33,7 @@ export interface AppOptions {
 }
 
 /** The Express app. `index.ts` gives it the database and serves it. */
-export function createApp({ health, auth, oidc, webRoot, https = false, trustProxyHops = 0, log = console.error }: AppOptions): Express {
+export function createApp({ health, auth, oidc, webRoot, kits, https = false, trustProxyHops = 0, log = console.error }: AppOptions): Express {
   if (oidc !== undefined && auth === undefined) throw new Error("the OAuth server needs the web sessions of `auth`");
   const app = express();
   app.disable("x-powered-by");
@@ -43,7 +46,7 @@ export function createApp({ health, auth, oidc, webRoot, https = false, trustPro
     app.use(auth.sessions.middleware());
     if (oidc !== undefined) mountOidc(app, oidc, auth.pool);
     app.use(authRouter(auth));
-    app.use(apiRouter(auth));
+    app.use(apiRouter({ ...auth, kits }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));

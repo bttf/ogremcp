@@ -1,7 +1,7 @@
 // The platform service: web UI, MCP server, bridge API, and OAuth server
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
-// its Sign in page (§13.2), and the OAuth server (§9).
+// its Sign in and Games pages (§13.2), and the OAuth server (§9).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -38,7 +38,8 @@ try {
 }
 
 // A kit whose manifest, tool names, or adapter zip is bad ends the process
-// before it listens (§5, §6.1). RED-312 serves the kits.
+// before it listens (§5, §6.1). The Games API lists them (§13.2). RED-312
+// serves them to the bridge.
 let kits: KitRegistry;
 try {
   kits = loadKitRegistry();
@@ -111,6 +112,7 @@ const app = createApp({
   auth: { pool, sessions, providers, publicBaseUrl: config.publicBaseUrl },
   oidc,
   webRoot,
+  kits,
   https,
   trustProxyHops: config.trustProxyHops,
 });

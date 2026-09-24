@@ -5,7 +5,10 @@ import { useSession } from "./session.js";
 /**
  * The navigation of a signed-in user. Add a page here when it exists (§13.2).
  */
-const NAV: readonly { to: string; label: string }[] = [{ to: "/", label: "Home" }];
+const NAV: readonly { to: string; label: string }[] = [
+  { to: "/", label: "Home" },
+  { to: "/games", label: "Games" },
+];
 
 /**
  * The frame every page sits in: the header and the centered column. A
