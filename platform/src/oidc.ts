@@ -4,7 +4,7 @@ import express, { type Express, type Request, type Response, type Router } from 
 import Provider, { type Account, type Configuration, errors, type Grant, type Interaction, interactionPolicy } from "oidc-provider";
 import type { Pool } from "pg";
 
-import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
+import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS, onLoopbackHost } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { createDevice, DEVICE_PAGE_PATH, deviceFlowConfiguration } from "./devices.js";
 import { postgresAdapter } from "./oidc-adapter.js";
@@ -37,9 +37,9 @@ import { type CurrentUser, currentUser } from "./web-sessions.js";
  * `/device` (§8.1).
  *
  * Client ID metadata documents are on (`cimd.ts`, RED-306), dynamic client
- * registration is `oidc-registration.ts` (RED-304), and the bridge's device
- * flow and client are `devices.ts` (RED-307). Off here, each for its own
- * issue: static agent clients (RED-305), loopback redirects (RED-308).
+ * registration and loopback redirects are `oidc-registration.ts` (RED-304,
+ * RED-308), and the bridge's device flow and client are `devices.ts`
+ * (RED-307). Off here, for its own issue: static agent clients (RED-305).
  * RP-initiated logout is off: no target agent uses it, and signing out of the
  * web UI is `/auth/signout`. Scopes, resource indicators, token lifetimes,
  * revocation, and DPoP are `oidc-tokens.ts`. The MCP endpoint's resource
@@ -163,8 +163,10 @@ export function createOidcProvider({
       url: (_ctx, interaction) => `/interaction/${interaction.uid}`,
     },
     routes: ROUTES,
-    // §9: OAuth 2.1 with PKCE only, for every client.
+    // §9: OAuth 2.1 with PKCE only, for every client. The code flow is the
+    // only one: no client, of any kind, may use implicit or hybrid.
     pkce: { required: () => true },
+    responseTypes: ["code"],
     ...tokens.settings,
     ...cimd.settings,
     ...registrationConfig.settings,
@@ -446,7 +448,10 @@ async function ownInteraction(
  *   approved at once (`approveDevice`): the user approved on `/device`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
  *   client, the host of its `client_id` URL for a CIMD client, the host of
- *   its redirect URI, and the scopes approval grants.
+ *   its redirect URI and whether that URI is on a loopback host (http or
+ *   https), and the scopes approval grants. Such a URI sends the code to an
+ *   app on the user's computer, so the page says so (MCP 2025-11-25
+ *   authorization spec).
  * - `POST /interaction/:uid/approve`: at the consent prompt, saves the grant
  *   (`consentGrant`) and answers `{ location }`, where the browser goes on to
  *   oidc-provider, which sends the code to the client.
@@ -505,6 +510,7 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       client_host: clientIdHost(clientId),
       redirect_uri: interaction.params["redirect_uri"] ?? null,
       redirect_host: redirectHost(interaction.params["redirect_uri"]),
+      redirect_loopback: typeof interaction.params["redirect_uri"] === "string" && onLoopbackHost(interaction.params["redirect_uri"]),
       scopes: grantedScopes(interaction, await consentGrant(provider, interaction, accountId)),
     });
   });
