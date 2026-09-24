@@ -76,7 +76,7 @@ does, so that every import resolves.
   deploy through the `ogmcp` service's pre-deploy command. Agents never run DDL
   against a live database by hand. A migration that drops or rewrites data
   needs the owner's approval before merge.
-- Go 1.22 for the bridge.
+- Go 1.27 for the bridge (`bridge/go.mod`).
 
 ## Deploy (§5, §13.1)
 
@@ -119,6 +119,9 @@ unreachable.
   build also zips each kit's `adapter/` into `platform/dist/adapters` (§8.2);
   the platform does not start without those zips.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
+- `make -C bridge dist`: unsigned dev builds of the bridge in `bridge/dist/`:
+  the Windows binary and the macOS universal binary as a zipped `.app`. Needs
+  GoReleaser v2 and macOS (`docs/releases.md`).
 - `pnpm lint:seams`: the package seam checks (§5).
 - `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.
