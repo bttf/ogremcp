@@ -1,9 +1,10 @@
 // The WoW kit's interpreter (docs/architecture.md §6.2). It parses the
 // adapter's SavedVariables file, OpenGamerMCP.lua (§6.3), into a snapshot.
 // Pure: no DB or network.
-import { ParseError, type Interpreter, type Parsed } from "@ogmcp/sdk";
+import type { Interpreter, Parsed } from "@ogmcp/sdk";
 import type { z } from "zod";
 import { detect } from "./detect.js";
+import { clip, parseError, QUOTE_MAX } from "./errors.js";
 import { readSavedVariables, type ReadLimits } from "./lua.js";
 import { dbSchema, type WowState } from "./schema.js";
 
@@ -27,6 +28,11 @@ export const ADAPTER_SCHEMA = 1;
 const ACCEPTED_SCHEMAS: readonly number[] = [ADAPTER_SCHEMA];
 
 export type ParseLimits = ReadLimits;
+
+/** The earliest `captured_at` accepted: 2004-01-01, before WoW's release. */
+const CAPTURED_AT_MIN = Date.UTC(2004, 0, 1) / 1000;
+/** How far past the parse time a `captured_at` may be, in seconds. */
+const CAPTURED_AT_AHEAD_MAX = 24 * 60 * 60;
 
 /**
  * The proposed limits (§6.2): the 5 MB upload cap (§8.3), 32 levels of
@@ -58,17 +64,17 @@ export const interpreter: Interpreter<WowState> = createInterpreter();
 
 function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed<WowState> {
   if (sourceId !== SOURCE_ID) {
-    throw new ParseError(`The WoW kit has no source "${sourceId}".`);
+    throw parseError(`The WoW kit has no source "${clip(sourceId, QUOTE_MAX)}".`);
   }
   const db = readSavedVariables(bytes, limits, FILE_NAME).get(DB_NAME);
   if (db === undefined) {
-    throw new ParseError(`${FILE_NAME} holds no Open Gamer MCP data yet. Type /transmit in game to save it.`);
+    throw parseError(`${FILE_NAME} holds no Open Gamer MCP data yet. Type /transmit in game to save it.`);
   }
   checkSchema(typeof db === "object" && !Array.isArray(db) ? db["schema"] : undefined);
 
   const result = dbSchema.safeParse(db);
   if (!result.success) {
-    throw new ParseError(describeIssue(result.error));
+    throw parseError(describeIssue(result.error));
   }
   const { schema, client, character, captured_at, state } = result.data;
   const { flavor, rules } = detect(client);
@@ -77,26 +83,38 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed
     rules,
     // The GUID is the character key (§6.3), so a character without one has no key.
     character: character?.guid ? { key: character.guid, name: character.name, realm: character.realm } : null,
-    capturedAt: captured_at === null ? null : new Date(captured_at * 1000),
+    capturedAt: capturedAt(captured_at),
     adapterSchema: schema,
     state,
   };
 }
 
+/**
+ * The adapter's stamp as a Date. A stamp before CAPTURED_AT_MIN (the adapter
+ * writes 0 without a server time) or more than a day in the future is
+ * unknown: null, so the platform falls back to the bridge's mtime (§6.2).
+ */
+function capturedAt(stamp: number | null): Date | null {
+  if (stamp === null || stamp < CAPTURED_AT_MIN || stamp > Date.now() / 1000 + CAPTURED_AT_AHEAD_MAX) {
+    return null;
+  }
+  return new Date(stamp * 1000);
+}
+
 function checkSchema(schema: unknown): void {
   if (typeof schema !== "number" || !Number.isSafeInteger(schema)) {
-    throw new ParseError(`${FILE_NAME} has no data format number. Type /transmit in game to save it again.`);
+    throw parseError(`${FILE_NAME} has no data format number. Type /transmit in game to save it again.`);
   }
   if (ACCEPTED_SCHEMAS.includes(schema)) {
     return;
   }
   const accepted = `${ACCEPTED_SCHEMAS.length === 1 ? "format" : "formats"} ${ACCEPTED_SCHEMAS.join(" and ")}`;
   if (schema > ADAPTER_SCHEMA) {
-    throw new ParseError(
+    throw parseError(
       `Your Open Gamer MCP addon saves data format ${schema}, and the server reads ${accepted}. The server does not read the newer format yet.`,
     );
   }
-  throw new ParseError(
+  throw parseError(
     `Your Open Gamer MCP addon is out of date: it saves data format ${schema}, and the server reads ${accepted}. Update the addon.`,
   );
 }
@@ -107,6 +125,6 @@ function describeIssue(error: z.ZodError): string {
   if (issue === undefined) {
     return `${FILE_NAME} holds data the server does not accept.`;
   }
-  const path = [DB_NAME, ...issue.path.map(String)].join(".");
+  const path = [DB_NAME, ...issue.path.map((key) => clip(String(key), QUOTE_MAX))].join(".");
   return `${FILE_NAME} holds data the server does not accept, at ${path}: ${issue.message}.`;
 }

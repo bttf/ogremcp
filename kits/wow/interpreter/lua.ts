@@ -19,9 +19,13 @@
 // they expect a list. A nil value leaves its key out, as in Lua.
 //
 // Limits: the file size, the table nesting depth, and the number of values
-// (tables included, keys not) are capped. Going over is a ParseError.
+// (tables included, keys not) are capped. Going over is a ParseError. The
+// upload is untrusted and parsed on the server's event loop, so time and
+// memory stay linear in its size: numerals are scanned by hand, never by a
+// backtracking regex, and strings with escapes share one byte buffer.
 
-import { ParseError } from "@ogmcp/sdk";
+import type { ParseError } from "@ogmcp/sdk";
+import { parseError, QUOTE_MAX } from "./errors.js";
 
 export type LuaValue = string | number | boolean | LuaValue[] | { [key: string]: LuaValue };
 
@@ -37,8 +41,6 @@ export interface ReadLimits {
 }
 
 const MIB = 1024 * 1024;
-/** Longest name quoted in an error message. */
-const MESSAGE_NAME_MAX = 40;
 
 const TAB = 0x09;
 const LF = 0x0a;
@@ -63,10 +65,15 @@ const RBRACE = 0x7d;
 /** Lua 5.1 single-letter escapes and the byte each one names. */
 const ESCAPES: Record<string, number> = { a: 0x07, b: 0x08, f: 0x0c, n: 0x0a, r: 0x0d, t: 0x09, v: 0x0b };
 
-const NUMBER = /^(?:0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$/;
+/** The names that are data. Any other name is code or a variable. */
+const LITERAL_NAMES = ["true", "false", "nil"];
 
 function isDigit(c: number): boolean {
   return c >= 0x30 && c <= 0x39;
+}
+
+function isHexDigit(c: number): boolean {
+  return isDigit(c) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66);
 }
 
 function isNameStart(c: number): boolean {
@@ -85,7 +92,7 @@ function isNameChar(c: number): boolean {
 export function readSavedVariables(bytes: Uint8Array, limits: ReadLimits, fileName: string): Map<string, LuaValue> {
   if (bytes.length > limits.maxBytes) {
     const size = Number.isInteger(limits.maxBytes / MIB) ? `${limits.maxBytes / MIB} MB` : `${limits.maxBytes} bytes`;
-    throw new ParseError(`${fileName} is larger than ${size}, the most the server reads.`);
+    throw parseError(`${fileName} is larger than ${size}, the most the server reads.`);
   }
   return new Reader(bytes, limits, fileName).file();
 }
@@ -98,6 +105,11 @@ class Reader {
   private pos = 0;
   private line = 1;
   private values = 0;
+  /**
+   * The bytes of the string being read, when it has escapes. One buffer for
+   * every string, grown by doubling, so an escape costs one byte.
+   */
+  private buffer = new Uint8Array(256);
 
   constructor(bytes: Uint8Array, limits: ReadLimits, fileName: string) {
     this.bytes = bytes;
@@ -142,7 +154,7 @@ class Reader {
     this.skipSpace();
     const value = this.peek() === LBRACE ? this.table(depth + 1) : this.scalar();
     if (value !== undefined && ++this.values > this.limits.maxValues) {
-      throw new ParseError(`${this.fileName} holds more than ${this.limits.maxValues} values, more than the server reads.`);
+      throw parseError(`${this.fileName} holds more than ${this.limits.maxValues} values, more than the server reads.`);
     }
     return value;
   }
@@ -183,7 +195,7 @@ class Reader {
 
   private table(depth: number): LuaValue {
     if (depth > this.limits.maxDepth) {
-      throw new ParseError(
+      throw parseError(
         `${this.fileName} nests tables more than ${this.limits.maxDepth} levels deep (line ${this.line}), more than the server reads.`,
       );
     }
@@ -244,14 +256,20 @@ class Reader {
   private quoted(): string {
     const quote = this.peek();
     this.pos++;
-    const parts: Uint8Array[] = [];
+    // Bytes in this.buffer. A string without escapes is decoded in place.
+    let length = 0;
+    let escaped = false;
     let run = this.pos;
     for (;;) {
       const c = this.peek();
       if (c === quote) {
-        parts.push(this.bytes.subarray(run, this.pos));
+        const end = this.pos;
         this.pos++;
-        return this.decode(parts);
+        if (!escaped) {
+          return this.decoder.decode(this.bytes.subarray(run, end));
+        }
+        length = this.append(length, run, end);
+        return this.decoder.decode(this.buffer.subarray(0, length));
       }
       if (c === -1) {
         throw this.unexpected();
@@ -263,10 +281,30 @@ class Reader {
         this.pos++;
         continue;
       }
-      parts.push(this.bytes.subarray(run, this.pos));
+      escaped = true;
+      length = this.append(length, run, this.pos);
       this.pos++;
-      parts.push(Uint8Array.of(this.escape()));
+      const byte = this.escape();
+      this.reserve(length + 1);
+      this.buffer[length++] = byte;
       run = this.pos;
+    }
+  }
+
+  /** Copies the file's bytes from `start` to `end` into the buffer at `length`. */
+  private append(length: number, start: number, end: number): number {
+    if (end > start) {
+      this.reserve(length + end - start);
+      this.buffer.set(this.bytes.subarray(start, end), length);
+    }
+    return length + end - start;
+  }
+
+  private reserve(capacity: number): void {
+    if (capacity > this.buffer.length) {
+      const grown = new Uint8Array(Math.max(capacity, this.buffer.length * 2));
+      grown.set(this.buffer);
+      this.buffer = grown;
     }
   }
 
@@ -353,27 +391,53 @@ class Reader {
     return isDigit(c) || (c === DOT && isDigit(this.peek(1)));
   }
 
-  /** Reads an unsigned number the way the Lua 5.1 lexer delimits one. */
+  /**
+   * Reads an unsigned numeral in one pass: hex digits after 0x, or digits
+   * with an optional fraction and exponent. A letter, digit, "_", or "." right
+   * after it makes it malformed, because the Lua 5.1 lexer takes those as part
+   * of the numeral.
+   */
   private number(): number {
     const start = this.pos;
-    while (isDigit(this.peek()) || this.peek() === DOT) {
-      this.pos++;
-    }
-    const c = this.peek();
-    if (c === 0x45 || c === 0x65) {
-      this.pos++;
-      if (this.peek() === PLUS || this.peek() === MINUS) {
+    let valid: boolean;
+    if (this.peek() === 0x30 && (this.peek(1) === 0x58 || this.peek(1) === 0x78)) {
+      this.pos += 2;
+      const digits = this.pos;
+      while (isHexDigit(this.peek())) {
         this.pos++;
       }
+      valid = this.pos > digits;
+    } else {
+      let digits = 0;
+      for (; isDigit(this.peek()); digits++) {
+        this.pos++;
+      }
+      if (this.peek() === DOT) {
+        this.pos++;
+        for (; isDigit(this.peek()); digits++) {
+          this.pos++;
+        }
+      }
+      valid = digits > 0;
+      if (valid && (this.peek() === 0x45 || this.peek() === 0x65)) {
+        this.pos++;
+        if (this.peek() === PLUS || this.peek() === MINUS) {
+          this.pos++;
+        }
+        const exponent = this.pos;
+        while (isDigit(this.peek())) {
+          this.pos++;
+        }
+        valid = this.pos > exponent;
+      }
     }
-    while (isNameChar(this.peek())) {
-      this.pos++;
+    if (!valid || isNameChar(this.peek()) || this.peek() === DOT) {
+      while (isNameChar(this.peek()) || this.peek() === DOT) {
+        this.pos++;
+      }
+      throw this.syntax(`"${this.snippet(start, this.pos)}" is not a number`);
     }
-    const text = this.decoder.decode(this.bytes.subarray(start, this.pos));
-    if (!NUMBER.test(text)) {
-      throw this.syntax(`"${clip(text)}" is not a number`);
-    }
-    const value = Number(text);
+    const value = Number(this.decoder.decode(this.bytes.subarray(start, this.pos)));
     if (!Number.isFinite(value)) {
       throw this.syntax("a number is too large");
     }
@@ -432,21 +496,10 @@ class Reader {
     return this.pos >= this.bytes.length;
   }
 
-  private decode(parts: Uint8Array[]): string {
-    if (parts.length === 1 && parts[0] !== undefined) {
-      return this.decoder.decode(parts[0]);
-    }
-    let length = 0;
-    for (const part of parts) {
-      length += part.length;
-    }
-    const joined = new Uint8Array(length);
-    let offset = 0;
-    for (const part of parts) {
-      joined.set(part, offset);
-      offset += part.length;
-    }
-    return this.decoder.decode(joined);
+  /** The ASCII text from `start` to `end`, cut to QUOTE_MAX characters. */
+  private snippet(start: number, end: number): string {
+    const text = this.decoder.decode(this.bytes.subarray(start, Math.min(end, start + QUOTE_MAX)));
+    return end - start > QUOTE_MAX ? `${text}…` : text;
   }
 
   /** The error for what starts at the current position. */
@@ -454,13 +507,17 @@ class Reader {
     if (this.atEnd()) {
       return this.syntax("the file ends in the middle of the data");
     }
-    const start = this.pos;
-    const name = this.name();
-    const cut = this.atEnd();
-    this.pos = start;
-    if (name !== null) {
-      // A name that runs to the end of the file may be a cut-off `true`.
-      return this.syntax(cut ? "the file ends in the middle of the data" : `"${clip(name)}" is code, and the server reads only data`);
+    if (isNameStart(this.peek())) {
+      let end = this.pos;
+      while (isNameChar(this.bytes[end] ?? -1)) {
+        end++;
+      }
+      const name = this.snippet(this.pos, end);
+      // At the end of the file, a start of true, false, or nil was cut off.
+      if (end === this.bytes.length && LITERAL_NAMES.some((literal) => literal.startsWith(name))) {
+        return this.syntax("the file ends in the middle of the data");
+      }
+      return this.syntax(`unexpected "${name}": the server reads only data, never code or variables`);
     }
     const c = this.peek();
     const shown = c > SPACE && c < 0x7f ? `"${String.fromCharCode(c)}"` : `byte 0x${c.toString(16).padStart(2, "0")}`;
@@ -468,14 +525,10 @@ class Reader {
   }
 
   private syntax(detail: string): ParseError {
-    return new ParseError(
+    return parseError(
       `${this.fileName} could not be read: ${detail} (line ${this.line}). Type /transmit in game to save it again.`,
     );
   }
-}
-
-function clip(text: string): string {
-  return text.length > MESSAGE_NAME_MAX ? `${text.slice(0, MESSAGE_NAME_MAX)}…` : text;
 }
 
 /** Turns a table's entries into an array when its keys are exactly 1 to n, else into an object. */

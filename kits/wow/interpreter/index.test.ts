@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ParseError } from "@ogmcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { detect } from "./detect.js";
+import { MESSAGE_MAX } from "./errors.js";
 import { DEFAULT_LIMITS, interpreter } from "./index.js";
 
 vi.mock("./detect.js", async (importOriginal) => {
@@ -74,11 +75,16 @@ describe.each(["era", "forever"] as const)("the %s stub world's file", (client) 
   });
 });
 
+it.each([0, -1, 9_000_000_000_000, 253_402_300_000])("reads captured_at %d as unknown", (stamp) => {
+  const text = files.era.replace(/\["captured_at"\] = \d+/, `["captured_at"] = ${stamp}`);
+  expect(parse(text).capturedAt).toBeNull();
+});
+
 describe("malformed input is a ParseError", () => {
   const era = () => files.era;
   it.each([
     ["truncated", () => era().slice(0, era().length / 2), /ends in the middle of the data/],
-    ["a function call", () => era().replace('"Zoëla"', 'os.execute("x")'), /"os" is code/],
+    ["a function call", () => era().replace('"Zoëla"', 'os.execute("x")'), /unexpected "os"/],
     ["a newer schema", () => era().replace('["schema"] = 1,', '["schema"] = 2,'), /saves data format 2/],
     ["an older schema", () => era().replace('["schema"] = 1,', '["schema"] = 0,'), /out of date/],
     ["a wrong type", () => era().replace('["level"] = 12,', '["level"] = "12",'), /at OpenGamerMCPDB\.state\.character\.level:/],
@@ -86,9 +92,20 @@ describe("malformed input is a ParseError", () => {
     ["too deep", () => `OpenGamerMCPDB = ${"{".repeat(33)}${"}".repeat(33)}`, /more than 32 levels deep/],
     ["too many values", () => `OpenGamerMCPDB = {${"1,".repeat(200_000)}}`, /more than 200000 values/],
     ["too large", () => new Uint8Array(DEFAULT_LIMITS.maxBytes + 1).fill(0x20), /larger than 5 MB/],
+    ["a 1 MB key", () => era().replace('["agility"]', `["${"a".repeat(1_000_000)}"]`), /\.stats\.a{39}…:/],
   ])("%s", (_, input, message) => {
-    const bytes = input();
-    expect(() => parse(bytes)).toThrow(ParseError);
-    expect(() => parse(bytes)).toThrow(message);
+    const error = catchError(() => parse(input()));
+    expect(error).toBeInstanceOf(ParseError);
+    expect(error.message).toMatch(message);
+    expect(error.message.length).toBeLessThanOrEqual(MESSAGE_MAX);
   });
 });
+
+function catchError(fn: () => unknown): Error {
+  try {
+    fn();
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error("expected an error");
+}

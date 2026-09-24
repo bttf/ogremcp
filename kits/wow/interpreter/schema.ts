@@ -172,8 +172,12 @@ export const questsSchema = z.object({
   partial: z.boolean(),
 });
 
-/** Most keys of one item's `stats`, and the longest key. */
-export const ITEM_STATS_MAX_KEYS = 24;
+/**
+ * Most keys of one item's `stats`: 24 from the stats API, plus `dps`,
+ * `min_damage`, `max_damage`, and `speed` from the tooltip
+ * (kits/wow/adapter/Items.lua). And the longest key.
+ */
+export const ITEM_STATS_MAX_KEYS = 28;
 export const ITEM_STATS_KEY_MAX_LENGTH = 40;
 /** Largest absolute value of one stat. */
 export const ITEM_STAT_MAX = 1_000_000;
@@ -345,8 +349,12 @@ export const dbSchema = z.object({
   addon_version: nilable(z.string().min(1)),
   client: nilable(clientSchema),
   character: nilable(characterKeySchema),
-  /** `GetServerTime()` when the adapter wrote the table, in Unix seconds. */
-  captured_at: nilable(z.number().int().positive()),
+  /**
+   * `GetServerTime()` when the adapter wrote the table, in Unix seconds. The
+   * adapter writes 0 when it has no server time. A stamp out of range reads as
+   * unknown (index.ts).
+   */
+  captured_at: nilable(z.number().int()),
   state: stateSchema,
 });
 

@@ -46,14 +46,35 @@ it.each([
   'A = "a" .. "b"',
   "A = { [{}] = 1 }",
   "local A = 1",
-])("never evaluates code: %s", (text) => {
+  "A = nan",
+  "A = inf",
+  "A = 1 garbage",
+])("reads only data, never code: %s", (text) => {
   expect(() => read(text)).toThrow(ParseError);
+  expect(() => read(text)).not.toThrow(/ends in the middle/);
 });
 
 it("names the code it found, in a user-facing message", () => {
   expect(() => read("A = {\n x = f() }")).toThrow(
-    'Test.lua could not be read: "f" is code, and the server reads only data (line 2). Type /transmit in game to save it again.',
+    'Test.lua could not be read: unexpected "f": the server reads only data, never code or variables (line 2). Type /transmit in game to save it again.',
   );
+});
+
+it("reads a long malformed numeral in linear time", () => {
+  // A backtracking regex took seconds here, and hours at the size cap.
+  const text = `A = ${"1".repeat(100_000)}z`;
+  const start = performance.now();
+  expect(() => read(text)).toThrow(/is not a number/);
+  expect(performance.now() - start).toBeLessThan(500);
+});
+
+it("reads an escape-heavy string at the size cap in linear memory", () => {
+  // One object per escape took 1.2 GB here.
+  const text = `A = "${"\\1".repeat(2_600_000)}"`;
+  const before = process.resourceUsage().maxRSS;
+  expect(read(text, { ...LIMITS, maxBytes: 6 * 1024 * 1024 })["A"]).toHaveLength(2_600_000);
+  // maxRSS is the process's peak resident set size, in kilobytes.
+  expect(process.resourceUsage().maxRSS - before).toBeLessThan(256 * 1024);
 });
 
 it.each(['A = { "x", { 1', 'A = "abc', "A = { 1 --[[ open", "A = { tru"])("rejects truncated input: %s", (text) => {
