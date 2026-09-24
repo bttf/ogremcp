@@ -75,7 +75,7 @@ does, so that every import resolves.
   deploy through the `ogmcp` service's pre-deploy command. Agents never run DDL
   against a live database by hand. A migration that drops or rewrites data
   needs the owner's approval before merge.
-- Go 1.22 for the bridge.
+- Go 1.27 for the bridge (`bridge/go.mod`).
 
 ## Deploy (§5, §13.1)
 
