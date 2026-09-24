@@ -18,6 +18,7 @@ const RESULTS: Readonly<Record<string, string>> = {
   not_found: "No bridge is waiting with that code. Check it against the code your bridge shows.",
   expired: "That code has expired. Codes last 10 minutes: start again from your bridge.",
   used: "That code has already been used. Start again from your bridge.",
+  rate_limited: "Too many codes did not match a bridge. Wait a few minutes, then try again.",
   failed: "The approval did not finish. Start again from your bridge.",
 };
 
@@ -38,6 +39,8 @@ async function callDevice(form?: Record<string, string>): Promise<Answer | "sign
     const headers = { Accept: "application/json" };
     const res = await fetch("/device", form === undefined ? { headers } : { method: "POST", headers, body: new URLSearchParams(form) });
     if (res.status === 401) return "signed-out";
+    // Too many misses: the answer is the page's `error` for it.
+    if (res.status === 429) return { step: "enter", xsrf: "", error: "rate_limited" };
     const body = (await res.json()) as Partial<Answer>;
     return body.step === "enter" || body.step === "confirm" ? (body as Answer) : "failed";
   } catch {

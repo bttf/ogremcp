@@ -6,7 +6,7 @@ import type { Pool } from "pg";
 
 import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS, onLoopbackHost } from "./cimd.js";
 import { failureCode } from "./db.js";
-import { createDevice, DEVICE_PAGE_PATH, deviceFlowConfiguration } from "./devices.js";
+import { createDevice, DEFAULT_MISSES, DEVICE_PAGE_PATH, deviceFlowConfiguration, type MissSettings } from "./devices.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, type RegistrationSettings, registrationConfiguration, registrationMiddleware } from "./oidc-registration.js";
@@ -127,6 +127,8 @@ export interface OidcOptions {
   log?: (line: string) => void;
   /** The `CIMD_` settings of `config.ts`. Default: `DEFAULT_CIMD_FETCH_LIMITS`. */
   cimdFetchLimits?: CimdFetchLimits;
+  /** The `DEVICE_CODE_MISS_` settings of `config.ts`. Default: `DEFAULT_MISSES`. */
+  deviceCodeMisses?: MissSettings;
   /**
    * Tests only; `index.ts` never sets it. It does each outgoing fetch in
    * place of the global `fetch`, after `cimd.ts` has counted it.
@@ -147,12 +149,13 @@ export function createOidcProvider({
   registration = DEFAULT_REGISTRATION,
   log = console.error,
   cimdFetchLimits = DEFAULT_CIMD_FETCH_LIMITS,
+  deviceCodeMisses = DEFAULT_MISSES,
   testOnlyFetch,
 }: OidcOptions): Provider {
   const tokens = tokenConfiguration(issuer, tokenLifetimes);
   const cimd = cimdConfiguration(cimdFetchLimits, log, testOnlyFetch);
   const registrationConfig = registrationConfiguration();
-  const device = deviceFlowConfiguration();
+  const device = deviceFlowConfiguration(deviceCodeMisses);
   const configuration: Configuration = {
     adapter: postgresAdapter(pool),
     jwks: keys.jwks,
@@ -194,6 +197,7 @@ export function createOidcProvider({
   provider.maxIpsCount = trustProxyHops;
   provider.use(cimd.middleware);
   provider.use(registrationMiddleware({ pool, path: ROUTES.registration, settings: registration, log }));
+  provider.use(device.middleware);
   // A code only: a Postgres message can repeat a row (`failureCode`).
   provider.on("server_error", (ctx: { method: string; path: string }, err: unknown) => {
     log(`oauth server error: ${ctx.method} ${ctx.path} code=${failureCode(err)}`);
@@ -445,7 +449,8 @@ async function ownInteraction(
  *   login (`needsFreshSignIn`), a sign-in from before it does not count: the
  *   browser goes through sign-in again first. The consent prompt goes to the
  *   Agent consent page, `/consent/:uid`. A bridge's consent prompt is
- *   approved at once (`approveDevice`): the user approved on `/device`.
+ *   approved at once, and only once (`approveDevice`): the user approved on
+ *   `/device`.
  * - `GET /interaction/:uid/details`, JSON for that page: the prompt, the
  *   client, the host of its `client_id` URL for a CIMD client, the host of
  *   its redirect URI and whether that URI is on a loopback host (http or
@@ -490,6 +495,8 @@ function interactionRouter(provider: Provider, pool: Pool): Router {
       return res.redirect(303, returnTo);
     }
     if (interaction.deviceCode !== undefined) {
+      // A repeat of this request, before the browser went on: approved already.
+      if (interaction.result?.consent?.grantId !== undefined) return res.redirect(303, interaction.returnTo);
       const grantId = await approveDevice(provider, pool, interaction, user);
       return res.redirect(303, await provider.interactionResult(req, res, { consent: { grantId } }));
     }

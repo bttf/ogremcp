@@ -1,4 +1,5 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
+import { DEFAULT_MISSES, type MissSettings } from "./devices.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
@@ -52,6 +53,14 @@ export interface Config {
    * JWKS (§9, `cimd.ts`). Each one unset is `DEFAULT_CIMD_FETCH_LIMITS`'s.
    */
   cimdFetchLimits: CimdFetchLimits;
+  /**
+   * `DEVICE_CODE_MISS_RATE_PER_HOUR`, `DEVICE_CODE_MISS_BURST`,
+   * `DEVICE_CODE_MISS_GLOBAL_RATE_PER_HOUR`, and
+   * `DEVICE_CODE_MISS_GLOBAL_BURST`: the limits on user codes entered at
+   * `/device` that match no bridge (§8.1, `devices.ts`). Each one unset is
+   * `DEFAULT_MISSES`'s.
+   */
+  deviceCodeMisses: MissSettings;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -298,6 +307,16 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
         DEFAULT_CIMD_FETCH_LIMITS.perIpPerMinute,
       ),
       trustedClientIds: cimdTrustedClientIds(env["CIMD_TRUSTED_CLIENT_IDS"]),
+    },
+    deviceCodeMisses: {
+      ratePerHour: positiveInt("DEVICE_CODE_MISS_RATE_PER_HOUR", env["DEVICE_CODE_MISS_RATE_PER_HOUR"], DEFAULT_MISSES.ratePerHour),
+      burst: positiveInt("DEVICE_CODE_MISS_BURST", env["DEVICE_CODE_MISS_BURST"], DEFAULT_MISSES.burst),
+      globalRatePerHour: positiveInt(
+        "DEVICE_CODE_MISS_GLOBAL_RATE_PER_HOUR",
+        env["DEVICE_CODE_MISS_GLOBAL_RATE_PER_HOUR"],
+        DEFAULT_MISSES.globalRatePerHour,
+      ),
+      globalBurst: positiveInt("DEVICE_CODE_MISS_GLOBAL_BURST", env["DEVICE_CODE_MISS_GLOBAL_BURST"], DEFAULT_MISSES.globalBurst),
     },
     production: env["NODE_ENV"] === "production",
   };

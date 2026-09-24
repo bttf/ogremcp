@@ -119,13 +119,20 @@ class Browser {
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   }
 
-  /** A form post of the page, followed through its redirects to where it sends the browser back. */
-  async submit(form: Record<string, string>): Promise<string> {
+  /**
+   * A form post of the page, followed through its redirects to where it sends
+   * the browser back. With `repeat`, each step of the interaction is loaded
+   * twice, and must send the browser on to the same place both times.
+   */
+  async submit(form: Record<string, string>, repeat = false): Promise<string> {
     let res = await this.send("POST", "/device", "text/html", form);
     for (let hops = 0; hops < 10 && res.status === 303; hops++) {
       const location = res.headers.get("location") ?? "";
       if (location.startsWith("/device?")) return location;
       res = await this.send("GET", location, "text/html");
+      if (repeat && location.startsWith("/interaction/")) {
+        expect((await this.send("GET", location, "text/html")).headers.get("location")).toBe(res.headers.get("location"));
+      }
     }
     throw new Error(`the form post ended at ${res.status}`);
   }
@@ -256,6 +263,37 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the device flow against Postgr
     expect(rows).toHaveLength(2);
     expect(rows[0]?.grant_id).not.toBe(rows[1]?.grant_id);
     expect(rows.every((row) => row.os === null && row.bridge_version === null)).toBe(true);
+  });
+
+  it("approves once when the browser loads a step of the interaction again", async () => {
+    const browser = new Browser(base);
+    const userId = await signIn(browser);
+    const started = await deviceAuth(base, { client_id: BRIDGE_CLIENT_ID, scope: "ingest" });
+    const xsrf = String((await browser.call()).body["xsrf"]);
+    const form = { xsrf, user_code: String(started.body["user_code"]), confirm: "yes" };
+    expect(await browser.submit(form, true)).toBe("/device?result=approved");
+    const devices = await pool.query("select 1 from devices where user_id = $1", [userId]);
+    expect(devices.rowCount).toBe(1);
+    const grants = await pool.query(
+      "select 1 from oidc_models where model = 'Grant' and payload->>'accountId' = (select uuid::text from users where id = $1)",
+      [userId],
+    );
+    expect(grants.rowCount).toBe(1);
+  });
+
+  it("refuses a user's 11th code in an hour that matches no bridge", async () => {
+    const browser = new Browser(base);
+    await signIn(browser);
+    let xsrf = String((await browser.call()).body["xsrf"]);
+    // Vowels: oidc-provider never makes this code.
+    for (let miss = 1; miss <= 10; miss++) {
+      const missed = await browser.call({ xsrf, user_code: "AAAA-AAAA" });
+      expect(missed.body).toMatchObject({ step: "enter", error: "not_found" });
+      xsrf = String(missed.body["xsrf"]);
+    }
+    const limited = await browser.send("POST", "/device", "application/json", { xsrf, user_code: "AAAA-AAAA" });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "rate_limited" });
   });
 
   it("denies a bridge at /device, and the bridge's poll gets access_denied", async () => {

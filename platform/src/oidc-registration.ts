@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { addressKey, httpsOrLoopback, nativeLoopbackRedirects } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { BRIDGE_CLIENT_ID, DEVICE_CODE_GRANT } from "./devices.js";
+import { type Bucket, level, type Limit, limit, waitSeconds } from "./token-bucket.js";
 
 /**
  * Dynamic client registration (§9, RFC 7591): the fallback for an agent that
@@ -134,8 +135,6 @@ export const DEFAULT_REGISTRATION: RegistrationSettings = {
 /** How often `startClientCleanup` runs. */
 export const CLIENT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-const HOUR_MS = 60 * 60 * 1000;
-
 const GRANT_TYPES = new Set(["authorization_code", "refresh_token"]);
 const NOT_ACCEPTED = new Set(["jwks", "jwks_uri", "sector_identifier_uri"]);
 const DROPPED = new Set(["post_logout_redirect_uris"]);
@@ -243,32 +242,6 @@ export const MAX_TRACKED_ADDRESSES = 10_000;
 
 /** How often `RegistrationLimiter` drops the address buckets that have refilled. */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
-
-interface Limit {
-  burst: number;
-  /** Requests added per millisecond. */
-  perMs: number;
-}
-
-interface Bucket {
-  tokens: number;
-  /** When `tokens` was counted, in milliseconds. */
-  at: number;
-}
-
-function limit(burst: number, ratePerHour: number): Limit {
-  return { burst, perMs: ratePerHour / HOUR_MS };
-}
-
-/** The requests `bucket` holds at `now`. A bucket not yet used is full. */
-function level({ burst, perMs }: Limit, bucket: Bucket | undefined, now: number): number {
-  return bucket === undefined ? burst : Math.min(burst, bucket.tokens + (now - bucket.at) * perMs);
-}
-
-/** The seconds until a bucket at `tokens` holds one request: 0 when it does now. */
-function waitSeconds({ perMs }: Limit, tokens: number): number {
-  return tokens >= 1 ? 0 : Math.ceil((1 - tokens) / perMs / 1000);
-}
 
 /**
  * The registration rate limit: token buckets that each hold `burst` requests

@@ -1,5 +1,10 @@
+import type { Response } from "express";
+import type Provider from "oidc-provider";
 import type { ClientMetadata, Configuration, KoaContextWithOIDC } from "oidc-provider";
 import type { Pool } from "pg";
+
+import { type Bucket, level, type Limit, limit, waitSeconds } from "./token-bucket.js";
+import { currentUser } from "./web-sessions.js";
 
 /**
  * Bridges as devices (§8.1, §11): the OAuth device authorization grant
@@ -23,6 +28,10 @@ import type { Pool } from "pg";
  * Every approval gets a grant of its own, so each device can be revoked
  * alone (`loadExistingGrant`). `revokeDevice` revokes a device, its grant,
  * and the grant's tokens.
+ *
+ * A user code that matches no live device code is a miss. Misses are limited
+ * per user and for all users together (`MissLimiter`), so no account can
+ * guess its way to another user's bridge.
  *
  * Only the bridge's own client may use the device flow. A registered or CIMD
  * client that names the device code grant is refused (`oidc-registration.ts`),
@@ -55,8 +64,86 @@ export const DEVICE_PAGE_PATH = "/device";
 /** oidc-provider's routes of the page and its return after an interaction. */
 const DEVICE_PAGE_ROUTES = new Set(["code_verification", "device_resume"]);
 
+/** oidc-provider's router matches a path whatever its ASCII case, and with one trailing slash. */
+const DEVICE_PAGE_PATTERN = /^\/device\/?$/i;
+
 /** Why the page could not go on, as `DeviceAnswer.error` and `?result=` name it. */
-export type DeviceError = "no_code" | "not_found" | "expired" | "used" | "failed";
+export type DeviceError = "no_code" | "not_found" | "expired" | "used" | "rate_limited" | "failed";
+
+/** The limits on misses (*proposed*, §0). `config.ts` reads them from the environment. */
+export interface MissSettings {
+  /** `DEVICE_CODE_MISS_RATE_PER_HOUR`: misses one user may make per hour once the burst is spent. */
+  ratePerHour: number;
+  /** `DEVICE_CODE_MISS_BURST`: misses one user may make at once. */
+  burst: number;
+  /** `DEVICE_CODE_MISS_GLOBAL_RATE_PER_HOUR`: misses of every user together, per hour. */
+  globalRatePerHour: number;
+  /** `DEVICE_CODE_MISS_GLOBAL_BURST`: misses of every user together, at once. */
+  globalBurst: number;
+}
+
+/** A user mistypes a code a few times. Ten guesses an hour among 20^8 codes find nothing. */
+export const DEFAULT_MISSES: MissSettings = { ratePerHour: 10, burst: 10, globalRatePerHour: 1000, globalBurst: 100 };
+
+/** Most users `MissLimiter` keeps a bucket for. */
+export const MAX_TRACKED_USERS = 10_000;
+
+/**
+ * The limit on misses: token buckets as in `RegistrationLimiter`, one per
+ * user (by `users.id`) and one for all users. Each post to `/device` takes a
+ * miss from both before it looks its code up, or is refused while either is
+ * empty; a post that did not miss gives it back (`refund`). So concurrent
+ * posts cannot pass the limit together.
+ *
+ * At most `MAX_TRACKED_USERS` user buckets are kept; past that, the least
+ * recently used one is dropped. The buckets are in memory, per process.
+ */
+export class MissLimiter {
+  readonly #user: Limit;
+  readonly #global: Limit;
+  /** In order of last use, least recent first. */
+  readonly #users = new Map<string, Bucket>();
+  #globalBucket: Bucket | undefined;
+
+  constructor(
+    settings: MissSettings,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.#user = limit(settings.burst, settings.ratePerHour);
+    this.#global = limit(settings.globalBurst, settings.globalRatePerHour);
+  }
+
+  /** Takes a miss from `userId`: 0 when it is allowed, or else the seconds until one will be. */
+  take(userId: string): number {
+    const now = this.now();
+    const own = level(this.#user, this.#users.get(userId), now);
+    const all = level(this.#global, this.#globalBucket, now);
+    const wait = Math.max(waitSeconds(this.#user, own), waitSeconds(this.#global, all));
+    if (wait > 0) return wait;
+    this.#keep(userId, { tokens: own - 1, at: now });
+    this.#globalBucket = { tokens: all - 1, at: now };
+    return 0;
+  }
+
+  /** Gives back the miss a post took, when it did not miss. */
+  refund(userId: string): void {
+    const now = this.now();
+    this.#keep(userId, { tokens: Math.min(this.#user.burst, level(this.#user, this.#users.get(userId), now) + 1), at: now });
+    this.#globalBucket = { tokens: Math.min(this.#global.burst, level(this.#global, this.#globalBucket, now) + 1), at: now };
+  }
+
+  #keep(userId: string, bucket: Bucket): void {
+    this.#users.delete(userId);
+    if (this.#users.size >= MAX_TRACKED_USERS) {
+      const oldest = this.#users.keys().next();
+      if (oldest.done !== true) this.#users.delete(oldest.value);
+    }
+    this.#users.set(userId, bucket);
+  }
+}
+
+/** Set on `ctx.state` when a post's user code missed. */
+const MISSED = "ogmcpUserCodeMissed";
 
 /**
  * What oidc-provider's `/device` answers the web UI's page, in JSON:
@@ -76,11 +163,11 @@ export type DeviceAnswer =
   | { step: "enter"; xsrf: string; error?: DeviceError }
   | { step: "confirm"; xsrf: string; user_code: string; client_name: string };
 
-/** oidc-provider's errors that re-render its user code page, by class name. */
+/** oidc-provider's errors that re-render its user code page, by class name. The first two are misses. */
 const PAGE_ERRORS: Readonly<Record<string, DeviceError | "denied">> = {
-  NoCodeError: "no_code",
   NotFoundError: "not_found",
   ExpiredError: "expired",
+  NoCodeError: "no_code",
   AlreadyUsedError: "used",
   AbortedError: "denied",
 };
@@ -106,14 +193,38 @@ function isNavigation(ctx: KoaContextWithOIDC): boolean {
 }
 
 /**
- * The provider settings of the device flow. `createOidcProvider` spreads
- * them in.
+ * The provider settings of the device flow, which `createOidcProvider`
+ * spreads in, and the Koa middleware it gives `provider.use`. The middleware
+ * limits misses: a post to `/device` over the limit gets 429 and
+ * `{ error: "rate_limited" }`, or as a form post goes back to the page with
+ * `?result=rate_limited`.
  */
-export function deviceFlowConfiguration(): {
+export function deviceFlowConfiguration(misses: MissSettings): {
   settings: Pick<Configuration, "clients" | "loadExistingGrant">;
   features: Pick<NonNullable<Configuration["features"]>, "deviceFlow">;
+  middleware: Parameters<Provider["use"]>[0];
 } {
+  const limiter = new MissLimiter(misses);
   return {
+    middleware: async (ctx, next) => {
+      // mountOidc passes no post to /device without a web session.
+      const user = ctx.method === "POST" && DEVICE_PAGE_PATTERN.test(ctx.path) ? currentUser(ctx.res as unknown as Response) : null;
+      if (user === null) return next();
+      const wait = limiter.take(user.id);
+      if (wait > 0) {
+        ctx.set("Cache-Control", "no-store");
+        if (isNavigation(ctx as KoaContextWithOIDC)) return finish(ctx as KoaContextWithOIDC, "rate_limited");
+        ctx.status = 429;
+        ctx.set("Retry-After", String(wait));
+        ctx.body = { error: "rate_limited" };
+        return;
+      }
+      try {
+        await next();
+      } finally {
+        if (ctx.state[MISSED] !== true) limiter.refund(user.id);
+      }
+    },
     settings: {
       clients: [BRIDGE_CLIENT],
       // oidc-provider's default reuses the grant its browser session holds
@@ -142,6 +253,7 @@ export function deviceFlowConfiguration(): {
         userCodeInputSource: (ctx, _form, _out, err) => {
           if (err === undefined) return answer(ctx, { step: "enter", xsrf: xsrfOf(ctx) });
           const error = PAGE_ERRORS[err.name] ?? "failed";
+          if (error === "not_found" || error === "expired") ctx.state[MISSED] = true;
           if (isNavigation(ctx)) return finish(ctx, error);
           // A deny is a form post, so a fetch gets no `denied`.
           answer(ctx, { step: "enter", xsrf: xsrfOf(ctx), error: error === "denied" ? "failed" : error });

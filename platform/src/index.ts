@@ -112,6 +112,7 @@ try {
     tokenLifetimes: config.tokenLifetimes,
     registration: config.registration,
     cimdFetchLimits: config.cimdFetchLimits,
+    deviceCodeMisses: config.deviceCodeMisses,
   });
 } catch (err) {
   console.error(`configuration error: ${(err as Error).message}`);
