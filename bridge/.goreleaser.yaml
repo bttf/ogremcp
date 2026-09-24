@@ -1,0 +1,59 @@
+# Bridge builds with GoReleaser OSS v2 (docs/releases.md). Runs from bridge/.
+# `make dist` runs a snapshot build. Tagged releases are RED-344 (P9).
+# Templates use BRIDGE_VERSION, not .Version, which keeps the bridge-v prefix.
+version: 2
+project_name: ogmcp-bridge
+
+builds:
+  # cgo for the tray code (§7). On an arm64 Mac the amd64 build is a
+  # cross-compile, and Go turns cgo off for those unless CGO_ENABLED=1.
+  # Without -mmacosx-version-min, clang targets the build machine's macOS, so
+  # a binary with cgo code would not start on older versions. 13.0 is the
+  # oldest macOS Go 1.27 supports, and LSMinimumSystemVersion in
+  # macos/Info.plist. The flags go in CGO_CFLAGS, not MACOSX_DEPLOYMENT_TARGET,
+  # because Go's build cache keys on them.
+  - id: bridge-darwin
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=1
+      - CGO_CFLAGS=-O2 -g -mmacosx-version-min=13.0
+      - CGO_LDFLAGS=-O2 -g -mmacosx-version-min=13.0
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Env.BRIDGE_VERSION }}"]
+  # -H windowsgui keeps Windows from opening a console window.
+  - id: bridge-windows
+    goos: [windows]
+    goarch: [amd64]
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -H windowsgui -X main.version={{ .Env.BRIDGE_VERSION }}"]
+
+universal_binaries:
+  - ids: [bridge-darwin]
+    replace: true
+    # App bundles are Pro-only, so a script wraps the universal binary in an
+    # .app and zips it.
+    hooks:
+      post:
+        - cmd: >-
+            bash scripts/macos-app.sh "{{ .Path }}" "{{ .Env.BRIDGE_VERSION }}"
+            "dist/Open Gamer MCP.app"
+            "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.app.zip"
+          output: true
+
+# Windows only: the bare macOS binary would reach checksums.txt and a release
+# without the .app's signature.
+archives:
+  - ids: [bridge-windows]
+    formats: [binary]
+    name_template: "{{ .Binary }}_{{ .Env.BRIDGE_VERSION }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: dist/*.app.zip
+
+release:
+  extra_files:
+    - glob: dist/*.app.zip

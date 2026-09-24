@@ -1,0 +1,86 @@
+# Unsigned dev builds of the bridge (§7, docs/releases.md): the Windows binary
+# and the macOS universal binary as a zipped .app, uploaded as workflow
+# artifacts. Runs on PRs that touch bridge/ and on demand. It publishes no
+# release, pushes no tag, and signs nothing: tagged, signed releases are P9.
+name: Bridge dev build
+
+on:
+  pull_request:
+    paths:
+      - bridge/**
+      - .github/workflows/bridge-dev-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The macOS build uses cgo, and scripts/macos-app.sh uses Apple's tools.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      GORELEASER_VERSION: 2.18.2
+      GORELEASER_SHA256: 4bfd26942aa0f78e275cad3e49144a7c5ce2e8a34f7d0e9d34c718125766ba12
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On a PR, build the branch's head commit, not the merge commit, so
+          # the version names a commit on the branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The version comes from git describe over the bridge-v tags.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.mod
+
+      - name: Install GoReleaser
+        run: |
+          curl -sSfL -o goreleaser.tar.gz "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_Darwin_all.tar.gz"
+          echo "${GORELEASER_SHA256}  goreleaser.tar.gz" | shasum -a 256 -c -
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf goreleaser.tar.gz -C "${RUNNER_TEMP}/bin" goreleaser
+          rm goreleaser.tar.gz
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+
+      # scripts/macos-app.sh checks that the macOS binary holds both arm64 and
+      # x86_64 and that the .app's ad hoc signature verifies.
+      - name: Build
+        run: make -C bridge dist
+
+      # The binary archive format names a binary only when GoReleaser uploads
+      # it, so copy the Windows binary to that name.
+      - name: Check and name the Windows binary
+        working-directory: bridge
+        run: |
+          jq -r '.[] | select(.extra.Format == "binary" and .goos == "windows") | [.path, .name] | @tsv' dist/artifacts.json > windows.tsv
+          test "$(wc -l < windows.tsv)" -eq 1
+          IFS=$'\t' read -r path name < windows.tsv
+          rm windows.tsv
+          file "$path"
+          file "$path" | grep -Eq 'PE32\+ executable.*\(GUI\).*x86-64'
+          cp "$path" "dist/${name}"
+
+      # Unzipped uploads: each artifact is named after its file.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: bridge/dist/*_windows_amd64.exe
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: bridge/dist/*_darwin_all.app.zip
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
