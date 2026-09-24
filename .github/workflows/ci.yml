@@ -30,6 +30,10 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # LuaJIT runs the WoW adapter's Lua tests (kits/wow/test).
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit
+
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm build

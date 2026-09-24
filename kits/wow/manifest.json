@@ -1,0 +1,45 @@
+{
+  "kit": "wow",
+  "version": "0.1.0",
+  "sdk": "^0.0.0",
+  "tool_prefix": "wow",
+  "root": {
+    "locate": [
+      { "path": "{PROGRAM_FILES_X86}/World of Warcraft" },
+      { "path": "/Applications/World of Warcraft" },
+      { "path": "{HOME}/Applications/World of Warcraft" },
+      { "prompt": "Select your World of Warcraft folder" }
+    ],
+    "verify": "_*_"
+  },
+  "adapter": {
+    "install": "_*_/Interface/AddOns/OpenGamerMCP",
+    "process": [
+      "Wow.exe",
+      "Wow?.exe",
+      "Wow-64.exe",
+      "Wow?-64.exe",
+      "WowClassic.exe",
+      "WowClassic?.exe",
+      "WowClassic-64.exe",
+      "WowClassic?-64.exe",
+      "World of Warcraft*"
+    ]
+  },
+  "sources": [
+    {
+      "id": "savedvariables",
+      "type": "file",
+      "format": "text",
+      "path": "_*_/WTF/Account/*/SavedVariables/OpenGamerMCP.lua",
+      "trigger": "on_change"
+    }
+  ],
+  "flavors": {
+    "classic_era": {
+      "status": "supported",
+      "search": ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"]
+    },
+    "forever": { "status": "experimental", "search": [] }
+  }
+}

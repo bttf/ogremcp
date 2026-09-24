@@ -18,9 +18,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests && node test/run.mjs",
+    "test:adapter": "node test/run.mjs"
+  },
+  "dependencies": {
+    "@ogmcp/sdk": "workspace:*"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
