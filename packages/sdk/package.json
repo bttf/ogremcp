@@ -10,10 +10,12 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./manifest.schema.json": "./src/manifest.schema.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "src/manifest.schema.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -21,6 +23,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "json-schema-to-typescript": "^16.0.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

@@ -334,7 +334,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Installer:** installs the bridge only, per-user, so self-update never needs admin rights. Windows: Inno Setup into `%LOCALAPPDATA%`. macOS: a notarized `.app` in a `.dmg`, installed to `~/Applications`, not the usual drag to `/Applications`. If it's launched from anywhere else (the dmg, Downloads), it offers to move itself there.
 - **Signing:** Windows via Azure Trusted Signing; macOS via Developer ID signing plus notarization. Neither is ready: Apple Developer Program enrollment is unconfirmed and no signing secrets are in CI yet (§19.1 D6).
 - **Self-update:** check GitHub Releases for `bridge-v` tags only (§5). Verify the checksum and a detached signature (e.g. an ed25519 key embedded in the binary), then install. **Windows:** swap the binary. **macOS:** replace the whole `.app` bundle, then relaunch; swapping the binary inside a signed, notarized bundle breaks its signature.
-- **Listings:** also publish the addon on CurseForge and Wago for discovery, pointing to the bridge download. They build from `addon-v` tags, and the repo must be public first (§5).
+- **Listings:** also publish the addon on CurseForge and Wago for discovery, pointing to the bridge download. They build from `addon-v` tags, and the repo must be public first (§5). Listing text and the TOC `Title` and `Notes` never say or imply that an addon feature needs payment or a tier, and name no prices (§14, D10).
 
 ## 8. Bridge ↔ server `[v1]`
 
@@ -342,7 +342,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 
 - **OAuth device-code grant** via `oidc-provider` (§13.1). The bridge shows a code, the user approves it at `/device` in the web UI, and the bridge receives a long-lived, revocable refresh token plus short-lived access tokens with scope **`ingest`**. No passwords touch the bridge.
 - `ingest` tokens can't call `/mcp`, and agent tokens can't ingest (§9).
-- Approving a device creates a `devices` row. The free-tier device limit is enforced at approval (§14). Revoking a device revokes its grant.
+- Approving a device creates a `devices` row. Approval doesn't depend on tier: a user can approve several bridges, and each one installs and updates the adapter (§7, §8.2). The free-tier device limit is enforced at ingest (§8.3, §14). Revoking a device revokes its grant.
 
 ### 8.2 Endpoints
 
@@ -387,9 +387,11 @@ Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 | `parse_error` | 422 | The interpreter rejected it. Upload kept for re-parse; `message` is user-facing. |
 | `unsupported_flavor` | 422 | Flavor is `unknown` or not in the registry (§6.3.1); `message` names it |
 | `too_large` | 413 | Over the cap |
+| `device_limit` | 403 | Free tier: another of the user's devices holds the upload slot. `message` says how to switch devices. |
 | `rate_limited` | 429 | Honor `Retry-After` |
 | (none) | 401 | Token invalid or revoked; the bridge prompts re-login |
 
+- **Device limit (free tier):** the first device to upload holds the user's upload slot. Revoking that device frees the slot (*proposed*). Other devices get `device_limit`.
 - **Cap: 5 MB of *uncompressed* bytes** per upload. Decompress with a hard limit (gzip-bomb safe).
 - **Dedup key:** `(device, kit, source_id, instance)`.
 - **Rate limit:** per device, for abuse protection (proposed: 1 upload per 5 s per instance, small burst).
@@ -410,9 +412,9 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
   - Test each target client early (§18.3 S1), because they differ in what they probe.
 - **Client registration** (support all three):
   - **Pre-registered public clients** for agents without dynamic registration (Perplexity): one static client per agent with its redirect URIs. The "Connect your agent" page shows the client ID to paste.
-  - **CIMD** (URL-based client IDs), the MCP 2025-11-25 spec's preferred mechanism. `[decide]` D7.
-  - **DCR**, which Claude uses today. Rate-limit the registration endpoint and garbage-collect long-unused clients. The token endpoint returns `401 invalid_client` for a deleted client, which tells Claude to re-register.
-  - **Loopback redirects** for native clients such as Claude Code, which register `http://localhost:<port>/callback` and pick a random port at each login. Match loopback redirect URIs ignoring the port (RFC 8252 §7.3).
+  - **CIMD** (URL-based client IDs), the MCP 2025-11-25 spec's preferred mechanism. On in v1 through `oidc-provider`'s `features.clientIdMetadataDocument` (§19.1 D7). Claude, Claude Code, and ChatGPT send CIMD client IDs.
+  - **DCR**, the fallback for clients that don't send a CIMD client ID. Rate-limit the registration endpoint and garbage-collect long-unused clients. The token endpoint returns `401 invalid_client` for a deleted client, which tells Claude to re-register.
+  - **Loopback redirects** for native clients such as Claude Code, which register `http://localhost:<port>/callback` and pick a random port at each login. Match loopback redirect URIs ignoring the port (RFC 8252 §7.3). Claude Code's CIMD document doesn't set `application_type: native`, so this needs a client-metadata validator hook in `oidc-provider`.
 - **Consent:** authorization requests land in the web UI. The user signs in (Google/Discord) if needed, then approves the agent. Wire `oidc-provider` interactions to web sessions.
 - **Tokens:** short-lived access tokens plus refresh tokens. Users revoke them under "Connected agents".
 - **Target clients:** Claude (custom connectors, including Free with its one-connector limit), Claude Code (the owner uses it), ChatGPT (developer mode; plan requirements in §19.2), and Perplexity (paid plans).
@@ -557,6 +559,7 @@ No snapshot diagnostics pages. Players see their state through their agent.
 - `[policy]` **Everything is open source and self-hostable for free.**
 - `[policy]` **Hosted Open Gamer MCP:** a free tier and a paid tier at **~$4–5/mo**. Users already pay for their agent (or are on its free plan), so it's priced as an impulse buy on top. Annual option TBD.
 - `[policy]` **Never inference.** The curated, vetted kit catalog is the moat.
+- `[policy]` **The addon is the same for every tier** (§19.1 D10). It is one build with no account, tier, or license checks, and it shows no URL, price, tier, or upgrade text in game. The paid tier changes only hosted-service limits (the table below), never what the addon collects or writes.
 - `[v1]` **Meter MCP tool calls per user per day, not searches.** Every answer should search, so capping search would cap answers.
 
 | | Free | Paid |
@@ -696,10 +699,10 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | D4 | Domain and GitHub org | G2 | Check availability of `ogmcp` and `opengamermcp` (domains and GitHub org). Google's production consent screen likely needs a domain we own. |
 | D5 | Billing provider, and whether billing ships at beta or after | P10 | |
 | D6 | Code signing: Azure Trusted Signing eligibility (or an alternative) for Windows; Apple Developer Program enrollment plus Developer ID and notarization secrets in CI for macOS | P9 | §7 |
-| D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | Spike S2 |
+| D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | **Decided 2026-09-24 (RED-299):** CIMD on in v1, with DCR and static clients as fallbacks (§9). Spike S2 (RED-298) found that `oidc-provider` 9.12 supports CIMD natively. |
 | D8 | Experimental flavors: what does "opt-in" mean? | P4 | **Decided 2026-09-24 (RED-310):** no gate in v1; `experimental` only adds caveats (§6.1). |
 | D9 | Paid → free downgrade: grace period before history older than 30 days is deleted | P10 | **Decided 2026-09-24 (RED-349):** 30 days (§11). |
-| D10 | Review Blizzard's UI Add-On Development Policy against a paid hosted tier fed by a free addon | P9 | The addon is listed and the repo goes public at P9 (§5). Non-code, but still a decision issue (§18.4). |
+| D10 | Review Blizzard's UI Add-On Development Policy against a paid hosted tier fed by a free addon | P9 | **Decided 2026-09-24 (RED-341):** keep the paid tier (§14), with the addon the same for every tier. No inquiry to Blizzard: the free tier still gives use of the service, with lower limits. The research is in RED-341. |
 | D11 | License layout: a `LICENSE` per directory (AGPL `platform/`, MIT elsewhere) plus a root note, or one license for the repo; confirm the DCO | P0 | **Decided 2026-09-24 (RED-280):** a `LICENSE` per directory (AGPL-3.0-or-later `platform/`, MIT elsewhere) plus a root note, with a DCO (§5). Community kits build on an MIT SDK. |
 | D12 | MCP transport: stateless or stateful (§9) | P6 | **Decided 2026-09-24 (RED-324):** stateless (§9). It survives deploys and multiple replicas with nothing extra, and §10.2 already assumes a new chat for tool-list changes. Cost: no `list_changed` and no MCP session IDs, so visits group by gap (§16). Stateful needs session state outside the process and a reconnect story. |
 
