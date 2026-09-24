@@ -51,11 +51,43 @@ MIT (root `LICENSE`).
   a live database yourself; escalate it to the user.
 - Go 1.22 for the bridge.
 
+## Deploy (§5, §13.1)
+
+Railway project `ogmcp`, environment `production`:
+
+- Service `ogmcp`: the platform, built with Railpack from `bttf/ogmcp`, branch
+  `main`. Domain: `ogmcp-production.up.railway.app` (the default Railway
+  domain).
+- Service `Postgres`: Railway Postgres. The `ogmcp` service's `DATABASE_URL`
+  is the reference `${{Postgres.DATABASE_URL}}`, which connects over the
+  private network.
+
+The service settings live on the service, not in a config file in the repo.
+Change them with `railway api` and the `serviceInstanceUpdate` mutation.
+
+| Setting | Value |
+|---|---|
+| Build command | `pnpm --filter @ogmcp/platform... run build` |
+| Start command | `node platform/dist/index.js` |
+| Healthcheck path | `/health/live` |
+| Watch paths | `/platform/**`, `/packages/sdk/**`, `/kits/**`, `/package.json`, `/pnpm-lock.yaml`, `/pnpm-workspace.yaml`, `/tsconfig.json` |
+| Variables | `DATABASE_URL` (the reference above), `RAILPACK_NODE_VERSION=24` |
+
+A push to `main` deploys only when a changed file matches a watch path, so a
+bridge-only change skips the deploy. A new root workspace file, such as
+`.npmrc`, needs its own watch path.
+
+`GET /health/live` answers while the process runs and never touches the
+database. `GET /health` also checks the database and answers 503 when it is
+unreachable.
+
 ## Commands
 
 - `pnpm install`
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every TS package.
 - `pnpm test:bridge`: `go vet` and `go test` in `bridge/`.
+- `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
+  `platform/.env` when it exists; `platform/.env.example` lists the names.
 
 ## In-game testing
 
