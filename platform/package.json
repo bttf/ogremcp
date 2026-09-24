@@ -10,9 +10,6 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "@ogmcp/kit-wow": "workspace:*"
-  },
   "devDependencies": {
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
