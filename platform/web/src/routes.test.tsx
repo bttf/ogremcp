@@ -53,3 +53,27 @@ it("sends a signed-out user to the Sign in page, which links to each configured 
   expect(container.querySelector("nav")).toBeNull();
   expect(container.querySelector("form")).toBeNull();
 });
+
+it("passes the Sign in page's return_to on to each provider", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) =>
+    String(input) === "/api/v1/sign-in-providers"
+      ? Response.json({ providers: ["google", "discord"] })
+      : Response.json({ error: "signed_out" }, { status: 401 }),
+  );
+
+  const container = document.body.appendChild(document.createElement("div"));
+  root = createRoot(container);
+  root.render(
+    <SessionProvider>
+      <MemoryRouter initialEntries={["/signin?return_to=%2Finteraction%2Fabc"]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </SessionProvider>,
+  );
+
+  await vi.waitFor(() => expect(container.querySelectorAll("a")).toHaveLength(2));
+  expect([...container.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([
+    "/auth/google?return_to=%2Finteraction%2Fabc",
+    "/auth/discord?return_to=%2Finteraction%2Fabc",
+  ]);
+});

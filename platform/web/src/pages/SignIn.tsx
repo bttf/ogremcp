@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useSearchParams } from "react-router";
 
 import { PROVIDER_LABELS, PROVIDERS, type Provider, useSession } from "../session.js";
 
@@ -29,14 +29,19 @@ function useConfiguredProviders(): readonly Provider[] | null {
 /**
  * The Sign in page (§13.2): Google and Discord. Each is a link to the
  * service's `/auth/<provider>`, which sends the browser on to the provider;
- * after sign-in the service sends it back to `/`. A provider without
- * credentials on this server gets a plain sentence instead of a link.
+ * after sign-in the service sends it back to `/`. A `return_to` in the page's
+ * query goes on to `/auth/<provider>`, which sends the browser there instead
+ * when it is a path on this service: an OAuth interaction sends a signed-out
+ * browser here that way (§9). A provider without credentials on this server
+ * gets a plain sentence instead of a link.
  *
  * Adapted from `web/src/pages/Login.tsx` in bttf/wow-guide@df80260.
  */
 export function SignIn() {
   const session = useSession();
   const configured = useConfiguredProviders();
+  const returnTo = useSearchParams()[0].get("return_to");
+  const query = returnTo === null ? "" : `?return_to=${encodeURIComponent(returnTo)}`;
 
   if (session.status === "signed-in") return <Navigate to="/" replace />;
 
@@ -48,7 +53,7 @@ export function SignIn() {
         {PROVIDERS.map((provider) => (
           <li key={provider}>
             {configured === null || configured.includes(provider) ? (
-              <a className="og-button" href={`/auth/${provider}`}>
+              <a className="og-button" href={`/auth/${provider}${query}`}>
                 Continue with {PROVIDER_LABELS[provider]}
               </a>
             ) : (
