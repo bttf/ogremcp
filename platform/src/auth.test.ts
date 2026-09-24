@@ -93,6 +93,10 @@ function fakeProviders(): { providers: SignInProviders; tokenRequests: URLSearch
         });
       case "https://oauth2.googleapis.com/token":
         tokenRequests.push(form);
+        if (form.get("code") === "rejected") {
+          return Response.json({ error: "invalid_grant\nforged log line", error_description: "detail never logged" }, { status: 400 });
+        }
+        if (form.get("code") === "expired") return Response.json({ error: "invalid_grant" }, { status: 400 });
         return Response.json({
           access_token: "google-access",
           token_type: "Bearer",
@@ -129,17 +133,46 @@ describe("session tokens", () => {
   });
 });
 
-describe("a provider without credentials", () => {
-  it("answers 503 with a plain message, and the service still serves", async () => {
-    // No cookie is sent, so the web session middleware never queries.
-    const sessions = new WebSessions({ pool: {} as Pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
-    const base = await serve({ pool: {} as Pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: BASE });
+// No web session cookie is sent in these, so nothing queries the database.
+describe("sign-in without the database", () => {
+  const noDatabase = {} as Pool;
+
+  it("answers 503 with a plain message for a provider without credentials, and the service still serves", async () => {
+    const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
+    const base = await serve({ pool: noDatabase, sessions, providers: { google: null, discord: null }, publicBaseUrl: BASE });
     for (const path of ["/auth/google", "/auth/discord/callback?code=x&state=y"]) {
       const res = await fetch(`${base}${path}`, { redirect: "manual" });
       expect(res.status).toBe(503);
       expect(await res.text()).toMatch(/^Sign-in with (Google|Discord) is not configured on this server\.$/);
     }
     expect((await fetch(`${base}/health/live`)).status).toBe(200);
+  });
+
+  it("sets a __Host- sign-in cookie for each provider over https", async () => {
+    const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
+    const base = await serve({ pool: noDatabase, sessions, providers: fakeProviders().providers, publicBaseUrl: "https://ogmcp.example" });
+    for (const provider of ["google", "discord"]) {
+      const res = await fetch(`${base}/auth/${provider}`, { redirect: "manual" });
+      expect(res.headers.getSetCookie()).toEqual([
+        expect.stringMatching(new RegExp(`^__Host-ogmcp_signin_${provider}=[^;]+; Max-Age=600; Path=/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$`)),
+      ]);
+    }
+  });
+
+  it("logs a provider's error code only when it is a plain code, and never its description", async () => {
+    const lines: string[] = [];
+    const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
+    const base = await serve({ pool: noDatabase, sessions, providers: fakeProviders().providers, publicBaseUrl: BASE, log: (line) => lines.push(line) });
+    for (const code of ["rejected", "expired"]) {
+      const browser = new Browser(base);
+      const begin = await browser.request("/auth/google");
+      const state = new URL(begin.headers.get("location") ?? "").searchParams.get("state") ?? "";
+      expect((await browser.request(`/auth/google/callback?code=${code}&state=${state}`)).status).toBe(400);
+    }
+    expect(lines).toEqual([
+      "sign-in with google failed: refused: ResponseBodyError invalid",
+      "sign-in with google failed: refused: ResponseBodyError invalid_grant",
+    ]);
   });
 });
 
@@ -206,7 +239,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(authorize.searchParams.get("scope")).toBe("openid");
     expect(authorize.searchParams.get("redirect_uri")).toBe(`${BASE}/auth/google/callback`);
     expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(begin.headers.getSetCookie()[0]).toMatch(/^ogmcp_signin=.+; Max-Age=600; Path=\/auth\/google\/callback; Expires=.+; HttpOnly; SameSite=Lax$/);
+    expect(begin.headers.getSetCookie()[0]).toMatch(/^ogmcp_signin_google=.+; Max-Age=600; Path=\/; Expires=.+; HttpOnly; SameSite=Lax$/);
 
     const done = await first.request(`/auth/google/callback?code=sub-1&state=${authorize.searchParams.get("state")}`);
     expect(done.status).toBe(302);

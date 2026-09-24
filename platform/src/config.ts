@@ -44,8 +44,11 @@ export const DEFAULT_PORT = 4790;
  */
 export const DEFAULT_DATABASE_QUERY_TIMEOUT_MS = 5_000;
 
-/** Railway's edge is one proxy in front of the service. It terminates TLS. */
-export const DEFAULT_TRUST_PROXY_HOPS = 1;
+/**
+ * No proxy is trusted unless configured. Railway sets 1: its edge is one
+ * proxy in front of the service, and it terminates TLS.
+ */
+export const DEFAULT_TRUST_PROXY_HOPS = 0;
 
 /** Web session lifetime and renewal window, after the Lucia sessions guide. */
 export const DEFAULT_WEB_SESSION_LIFETIME_DAYS = 30;

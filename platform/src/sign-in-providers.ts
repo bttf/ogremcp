@@ -68,10 +68,22 @@ const CHECK_FAILED = new Set([
   "OAUTH_JWT_TIMESTAMP_CHECK_FAILED",
 ]);
 
+/**
+ * A provider's `error` code as it may appear in the log: an OAuth error code
+ * such as `invalid_grant`, or `invalid`. The value can come from the callback
+ * URL, which anyone can write, so nothing else of it is logged, and
+ * `error_description` never is.
+ */
+export function loggableErrorCode(value: unknown): string {
+  return typeof value === "string" && /^[a-z_]{1,64}$/.test(value) ? value : "invalid";
+}
+
 function failure(err: unknown): SignInFailure {
   if (err instanceof SignInFailure) return err;
-  if (err instanceof client.ResponseBodyError) return new SignInFailure("refused", `ResponseBodyError ${err.error}`);
-  if (err instanceof client.AuthorizationResponseError) return new SignInFailure("refused", `AuthorizationResponseError ${err.error}`);
+  if (err instanceof client.ResponseBodyError) return new SignInFailure("refused", `ResponseBodyError ${loggableErrorCode(err.error)}`);
+  if (err instanceof client.AuthorizationResponseError) {
+    return new SignInFailure("refused", `AuthorizationResponseError ${loggableErrorCode(err.error)}`);
+  }
   if (err instanceof client.ClientError) {
     return new SignInFailure(CHECK_FAILED.has(err.code ?? "") ? "refused" : "unavailable", `ClientError ${err.code ?? "unknown"}`);
   }

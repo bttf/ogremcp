@@ -37,12 +37,19 @@ export interface AuthOptions {
 }
 
 /**
- * Holds `state`, the PKCE code verifier (empty for Discord), and, for a link,
- * the uuid of the web session that started it, joined by dots. Every part is
- * base64url or a uuid, so none holds a dot. The cookie is sent only to the
- * provider's callback path.
+ * The sign-in cookie of a provider, one per provider. It holds `state`, the
+ * PKCE code verifier (empty for Discord), and, for a link, the uuid of the web
+ * session that started it, joined by dots. Every part is base64url or a uuid,
+ * so none holds a dot.
+ *
+ * Over https it is `__Host-`, so that no other host, such as a sibling
+ * subdomain of a self-hoster's domain, can plant one (login CSRF). That
+ * prefix needs `Secure` and `Path=/`. Plain http on the local machine uses
+ * the bare name, as the web session cookie does.
  */
-const SIGN_IN_COOKIE = "ogmcp_signin";
+function signInCookieName(provider: ProviderName, secure: boolean): string {
+  return `${secure ? "__Host-" : ""}ogmcp_signin_${provider}`;
+}
 
 /** How long a sign-in may take at the provider. */
 export const SIGN_IN_TTL_MS = 10 * 60 * 1000;
@@ -62,12 +69,7 @@ function sameText(a: string, b: string): boolean {
 export function authRouter({ pool, sessions, providers, publicBaseUrl, log = console.error }: AuthOptions): Router {
   const router = express.Router();
 
-  const signInCookie = (name: ProviderName): CookieOptions => ({
-    httpOnly: true,
-    secure: sessions.secure,
-    sameSite: "lax",
-    path: `/auth/${name}/callback`,
-  });
+  const signInCookie: CookieOptions = { httpOnly: true, secure: sessions.secure, sameSite: "lax", path: "/" };
 
   router.use("/auth", (_req, res, next) => {
     res.set("Cache-Control", "no-store");
@@ -92,8 +94,8 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
         log(`sign-in with ${name} could not start: ${err.kind}: ${err.reason}`);
         return sendText(res, 502, `Could not reach ${provider.label} to start signing in. Try again.`);
       }
-      res.cookie(SIGN_IN_COOKIE, [flow.state, flow.codeVerifier ?? "", linkSession].join("."), {
-        ...signInCookie(name),
+      res.cookie(signInCookieName(name, sessions.secure), [flow.state, flow.codeVerifier ?? "", linkSession].join("."), {
+        ...signInCookie,
         maxAge: SIGN_IN_TTL_MS,
       });
       res.redirect(flow.url.toString());
@@ -102,18 +104,22 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
     router.get(`/auth/${name}/callback`, async (req, res) => {
       const provider = providers[name];
       if (provider === null) return sendText(res, 503, `Sign-in with ${label(name)} is not configured on this server.`);
-      const stored = readCookie(req, SIGN_IN_COOKIE)?.split(".");
-      res.clearCookie(SIGN_IN_COOKIE, signInCookie(name));
+      const cookieName = signInCookieName(name, sessions.secure);
+      const stored = readCookie(req, cookieName)?.split(".");
+      res.clearCookie(cookieName, signInCookie);
 
-      if (req.query["error"] !== undefined) {
+      // The whole query, as openid-client reads it. Express's `req.query`
+      // keeps only the first 1000 keys.
+      const query = new URL(req.originalUrl, publicBaseUrl).searchParams;
+      if (query.has("error")) {
         return sendText(res, 400, `Sign-in with ${provider.label} was cancelled or refused. Start again from the sign-in page.`);
       }
-      const code = req.query["code"];
-      const state = req.query["state"];
+      const code = query.get("code");
+      const state = query.get("state");
       const [storedState, storedVerifier, linkSession] = stored?.length === 3 ? stored : [];
       if (
-        typeof code !== "string" ||
-        typeof state !== "string" ||
+        code === null ||
+        state === null ||
         storedState === undefined ||
         storedVerifier === undefined ||
         linkSession === undefined ||
@@ -124,7 +130,7 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = con
 
       let providerUserId: string;
       try {
-        providerUserId = await provider.finish(new URL(req.originalUrl, publicBaseUrl).searchParams, {
+        providerUserId = await provider.finish(query, {
           state: storedState,
           codeVerifier: storedVerifier === "" ? null : storedVerifier,
         });
