@@ -1,4 +1,7 @@
 import express, { type RequestHandler, type Response, type Router } from "express";
+import type Provider from "oidc-provider";
+
+import { requireToken, resourcesOf } from "./oidc-tokens.js";
 
 /**
  * Discovery for the MCP endpoint and the checks in front of it (§9).
@@ -12,15 +15,15 @@ import express, { type RequestHandler, type Response, type Router } from "expres
  *   with CORS, so that a browser-based client can read them.
  * - `/mcp`: the `Host` must name `PUBLIC_BASE_URL`'s host, and an `Origin`,
  *   when sent, must be one of `MCP_ALLOWED_ORIGINS`, which blocks DNS
- *   rebinding. Then a request without a bearer token gets 401 with the
+ *   rebinding. Then the access token must be for this resource and carry
+ *   `read` (`requireToken`). A request without one gets 401 with the
  *   challenge of RFC 9728 §5.1, which points at the metadata.
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
  *
- * The token is not verified yet: RED-302 adds `requireToken`, which takes the
- * place of `requireBearer` here. The MCP server itself is RED-325. Until
- * then, a request with a bearer token gets 501.
+ * The MCP server itself is RED-325. Until then, a request with a valid token
+ * gets 501.
  *
  * Adapted from `cloud/src/mcp.ts` in bttf/wow-guide@df80260.
  */
@@ -58,8 +61,8 @@ export function defaultMcpAllowedOrigins(publicBaseUrl: string): string[] {
 export interface McpOptions {
   /** `PUBLIC_BASE_URL`. The resource is `<it>/mcp`, and the Host check compares against it. */
   publicBaseUrl: string;
-  /** The OAuth server's issuer, the one authorization server of the resource. */
-  issuer: string;
+  /** The OAuth server: its issuer is the one authorization server of the resource, and it holds the access tokens. */
+  provider: Provider;
   /**
    * `MCP_ALLOWED_ORIGINS`: the values `Origin` may have on `/mcp`, each an
    * exact origin. Default: `defaultMcpAllowedOrigins(publicBaseUrl)`.
@@ -69,24 +72,17 @@ export interface McpOptions {
 
 /** The resource identifier of the MCP endpoint (RFC 8707, RFC 9728): what tokens for it are asked for. */
 export function mcpResource(publicBaseUrl: string): string {
-  return `${new URL(publicBaseUrl).origin}${MCP_PATH}`;
+  return resourcesOf(new URL(publicBaseUrl).origin).mcp;
 }
 
 /** The Protected Resource Metadata document of the MCP endpoint (RFC 9728 §2). */
-function resourceMetadata({ publicBaseUrl, issuer }: Pick<McpOptions, "publicBaseUrl" | "issuer">) {
+function resourceMetadata({ publicBaseUrl, provider }: Pick<McpOptions, "publicBaseUrl" | "provider">) {
   return {
     resource: mcpResource(publicBaseUrl),
-    authorization_servers: [issuer],
+    authorization_servers: [provider.issuer],
     scopes_supported: [...MCP_SCOPES],
     bearer_methods_supported: ["header"],
   };
-}
-
-/** The token of an `Authorization: Bearer` header, or null. */
-export function bearerToken(header: string | undefined): string | null {
-  if (header === undefined) return null;
-  const match = /^Bearer +([^\s]+)$/i.exec(header);
-  return match?.[1] ?? null;
 }
 
 function sendRpcError(res: Response, status: number, code: number, message: string): void {
@@ -143,20 +139,20 @@ export function mcpRouter(options: McpOptions): Router {
     sendRpcError(res, 403, -32000, "Origin not allowed");
   };
 
-  // The challenge of RFC 9728 §5.1, with the scope an agent needs (MCP
-  // 2025-11-25, Scope Selection Strategy). RED-302's `requireToken` replaces
-  // this check and adds `error="invalid_token"` for a token that fails.
-  const requireBearer: RequestHandler = (req, res, next) => {
-    if (bearerToken(req.get("authorization")) !== null) return next();
-    res.set("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="${MCP_SCOPES.join(" ")}"`);
-    sendRpcError(res, 401, -32001, "Unauthorized");
-  };
+  // Its challenges carry RFC 9728 §5.1's pointer to the metadata, and the
+  // scope an agent needs (MCP 2025-11-25, Scope Selection Strategy).
+  const requireRead = requireToken({
+    provider: options.provider,
+    resource: mcpResource(options.publicBaseUrl),
+    scope: "read",
+    challenge: { resource_metadata: metadataUrl },
+  });
 
   // RED-325 serves MCP here.
   const notImplemented: RequestHandler = (_req, res) => {
     sendRpcError(res, 501, -32000, "Not implemented yet");
   };
 
-  router.all(MCP_PATH, checkHost, checkOrigin, requireBearer, notImplemented);
+  router.all(MCP_PATH, checkHost, checkOrigin, requireRead, notImplemented);
   return router;
 }

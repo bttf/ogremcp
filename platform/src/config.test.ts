@@ -11,6 +11,7 @@ import {
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
+import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +32,7 @@ describe("loadConfig", () => {
       google: null,
       discord: null,
       oidcKeys: null,
+      tokenLifetimes: DEFAULT_TOKEN_LIFETIMES,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
@@ -91,6 +93,19 @@ describe("loadConfig", () => {
       "WEB_SESSION_RENEW_WITHIN_DAYS must not be more than WEB_SESSION_LIFETIME_DAYS",
     );
     expect(loadConfig({ DATABASE_URL: url, WEB_SESSION_LIFETIME_DAYS: "7" }).webSessionRenewWithinMs).toBe(7 * DAY_MS);
+  });
+
+  it("reads the OAuth token lifetimes, and refuses a refresh token that outlasts its grant", () => {
+    const config = loadConfig({
+      DATABASE_URL: url,
+      OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES: "15",
+      OAUTH_REFRESH_TOKEN_LIFETIME_DAYS: "7",
+      OAUTH_GRANT_LIFETIME_DAYS: "90",
+    });
+    expect(config.tokenLifetimes).toEqual({ accessTokenSeconds: 15 * 60, refreshTokenSeconds: 7 * 86_400, grantSeconds: 90 * 86_400 });
+    expect(() => loadConfig({ DATABASE_URL: url, OAUTH_GRANT_LIFETIME_DAYS: "20" })).toThrow(
+      "OAUTH_REFRESH_TOKEN_LIFETIME_DAYS must not be more than OAUTH_GRANT_LIFETIME_DAYS",
+    );
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

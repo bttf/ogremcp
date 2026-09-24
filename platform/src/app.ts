@@ -60,7 +60,7 @@ export function createApp({
   app.use(healthRouter(health));
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
-    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, issuer: oidc.issuer, allowedOrigins: mcpAllowedOrigins }));
+    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins }));
   }
   if (webRoot !== undefined) app.use(webFiles(webRoot));
   if (auth !== undefined) {

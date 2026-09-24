@@ -108,6 +108,7 @@ try {
     issuer: config.publicBaseUrl,
     keys: oidcKeys,
     trustProxyHops: config.trustProxyHops,
+    tokenLifetimes: config.tokenLifetimes,
     registration: config.registration,
   });
 } catch (err) {
