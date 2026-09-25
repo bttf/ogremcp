@@ -537,6 +537,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Open-source the code and schema, but be careful with the data.** Publisher prose (quest text, item descriptions) is their IP. Facts (locations, levels, IDs) are safer to redistribute.
 - **Flavor matters.** Classic data is wrong wherever Forever changes content.
 - **Later still:** pre-crawl kit sources into a self-hosted search index.
+- **Known v1 gap it should fix** (owner, 2026-09-25): `fetch_game_page` on Wowhead Classic pages returns mostly site chrome (ads, comment and screenshot forms, client promos, pagination). Its numbers come out wrong: difficulty levels run together, and the money reward reads 0. Reward item stats and the player comments are missing. Firecrawl's raw HTML of the same page, at the same cost, carries the quest data, the item data (`WH.Gatherer.addData`), and the comments with ratings (`lv_comments0`). The owner chose to fix this with §12.1 rather than add a Wowhead page reader to v1. When it is built: a clean quest summary (name, ID, levels, faction, start and end NPC, objectives, rewards with stats, XP and reputation, difficulty range, zone) plus the top comments by rating, marked as player comments.
 
 ## 13. Platform service `[v1]`
 
