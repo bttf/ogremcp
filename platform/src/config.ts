@@ -5,6 +5,7 @@ import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
+import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
@@ -63,10 +64,18 @@ export interface Config {
    */
   deviceCodeMisses: MissSettings;
   /**
-   * `INGEST_MAX_UNCOMPRESSED_BYTES`: the cap on an upload's uncompressed
-   * bytes (§8.3, `ingest.ts`). Unset, `DEFAULT_INGEST`'s.
+   * `INGEST_MAX_UNCOMPRESSED_BYTES`, the cap on an upload's uncompressed
+   * bytes; `INGEST_RATE_PER_MINUTE` and `INGEST_BURST`, the rate limit per
+   * device and source instance; and `INGEST_DEVICE_RATE_PER_MINUTE` and
+   * `INGEST_DEVICE_BURST`, the rate limit per device (§8.3, `ingest.ts`).
+   * Each one unset is `DEFAULT_INGEST`'s.
    */
   ingest: IngestSettings;
+  /**
+   * `HISTORY_MAX_SNAPSHOTS`: the most snapshots a kit tool's history read
+   * returns (§6.2, `tool-context.ts`). Unset, `DEFAULT_TOOL_CONTEXT`'s.
+   */
+  toolContext: ToolContextSettings;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -326,6 +335,17 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     },
     ingest: {
       maxBytes: positiveInt("INGEST_MAX_UNCOMPRESSED_BYTES", env["INGEST_MAX_UNCOMPRESSED_BYTES"], DEFAULT_INGEST.maxBytes),
+      ratePerMinute: positiveInt("INGEST_RATE_PER_MINUTE", env["INGEST_RATE_PER_MINUTE"], DEFAULT_INGEST.ratePerMinute),
+      burst: positiveInt("INGEST_BURST", env["INGEST_BURST"], DEFAULT_INGEST.burst),
+      deviceRatePerMinute: positiveInt(
+        "INGEST_DEVICE_RATE_PER_MINUTE",
+        env["INGEST_DEVICE_RATE_PER_MINUTE"],
+        DEFAULT_INGEST.deviceRatePerMinute,
+      ),
+      deviceBurst: positiveInt("INGEST_DEVICE_BURST", env["INGEST_DEVICE_BURST"], DEFAULT_INGEST.deviceBurst),
+    },
+    toolContext: {
+      maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
     },
     production: env["NODE_ENV"] === "production",
   };
