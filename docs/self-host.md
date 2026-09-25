@@ -31,7 +31,13 @@ the commit it was built from (§6.5). It has no way to load other kits.
    ```
 
 2. Set `POSTGRES_PASSWORD` to letters and digits, such as the output of
-   `openssl rand -hex 32`.
+   `openssl rand -hex 32`. Postgres reads it only when it creates the
+   `ogmcp_postgres-data` volume, at the first start. To change it later, set
+   it in Postgres first, then in `.env`, then run `docker compose up -d`:
+
+   ```sh
+   docker compose exec postgres psql -U ogmcp -d ogmcp -c '\password ogmcp'
+   ```
 3. Set `PUBLIC_BASE_URL` to the origin users reach, such as
    `https://ogmcp.example.com`. The default, `http://localhost:4790`, works
    from this machine only.
@@ -88,17 +94,24 @@ Perplexity.
 
 ## Point a bridge at the server
 
-The bridge reads the server's origin from `OGMCP_BASE_URL` when it starts.
-Without it, the bridge uses the hosted service. Set it to `PUBLIC_BASE_URL`:
+The bridge reads the server's origin from `OGMCP_BASE_URL` each time it
+starts. Without it, the bridge uses the hosted service. Set it to
+`PUBLIC_BASE_URL`: an origin with `https://`, or `http://` on a loopback
+address.
 
-- From a terminal on macOS or Linux, where `bridge` is the bridge binary:
-  `OGMCP_BASE_URL=https://ogmcp.example.com bridge run`
-- For the macOS app: `launchctl setenv OGMCP_BASE_URL https://ogmcp.example.com`,
-  then start the app.
-- On Windows: `setx OGMCP_BASE_URL https://ogmcp.example.com`, then start the
-  bridge from a new session.
+- Windows: run `setx OGMCP_BASE_URL https://ogmcp.example.com`, then quit the
+  bridge and start it again. `setx` stores the variable for the user, so it
+  lasts across restarts and reaches the bridge when it starts at login.
+- macOS: no setting reaches the app for good. Its start-at-login item sets no
+  environment, and `launchctl setenv` lasts only until logout, so a bridge
+  started at login uses the hosted service. Turn off start at login in the
+  bridge's menu, and start the bridge from a shell with the variable set,
+  after each login:
 
-The value is an origin with `https://`, or `http://` on a loopback address.
+  ```sh
+  OGMCP_BASE_URL=https://ogmcp.example.com "/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"
+  ```
+
 The Get started page links to the bridge download when `BRIDGE_DOWNLOAD_URL`
 is set in `.env`.
 

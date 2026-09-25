@@ -41,14 +41,15 @@ RUN rm -rf node_modules packages/*/node_modules kits/*/node_modules platform/nod
 # What the service reads at run time, in the repo's layout: the dependencies,
 # and each package's package.json, LICENSE, build output, and data files. A
 # new first-class kit is added here too. @ogmcp/sdk has no dependencies, so it
-# has no node_modules.
+# has no node_modules. cp fails the build when a path is missing, and -a keeps
+# pnpm's symlinks.
 RUN mkdir /prod \
- && tar -cf - \
+ && cp -a --parents \
       node_modules \
       packages/sdk/package.json packages/sdk/LICENSE packages/sdk/dist packages/sdk/src/manifest.schema.json \
       kits/wow/package.json kits/wow/LICENSE kits/wow/dist kits/wow/manifest.json kits/wow/node_modules \
       platform/package.json platform/LICENSE platform/dist platform/migrations platform/node_modules \
-    | tar -xf - -C /prod
+      /prod
 
 FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production \
