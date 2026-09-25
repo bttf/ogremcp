@@ -6,8 +6,9 @@ import { when } from "../dates.js";
 export interface Agent {
   id: string;
   client_id: string;
+  /** Null when the client names none, or its name is not known yet. */
   client_name: string | null;
-  /** The host of a CIMD client's `client_id` URL, which published its name; null for another client. */
+  /** The host of a CIMD client's `client_id` URL, which published its name; null for another client. The page shows it when the name is not known. */
   client_host: string | null;
   approved_at: string | null;
   /** When the agent last got an access token, if known. */
@@ -101,10 +102,10 @@ function AgentCard({ agent, onRevoked }: { agent: Agent; onRevoked: (id: string)
     <section className="og-card" aria-labelledby={`${id}-name`}>
       <div className="og-card__head">
         <h2 id={`${id}-name`}>
-          <bdi>{agent.client_name ?? "An agent with no name"}</bdi>
+          <bdi>{agent.client_name ?? agent.client_host ?? "An agent with no name"}</bdi>
         </h2>
       </div>
-      {agent.client_host !== null && (
+      {agent.client_name !== null && agent.client_host !== null && (
         <p>
           Its name comes from <strong>{agent.client_host}</strong>.
         </p>

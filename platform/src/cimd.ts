@@ -299,6 +299,20 @@ function maxAgeSeconds(response: Response): number {
   return match?.[1] === undefined ? 0 : Number(match[1]);
 }
 
+/** Set while `withoutFetching` runs. */
+const noFetch = new AsyncLocalStorage<true>();
+
+/**
+ * Runs `read` so that no fetch is made: a CIMD client whose document
+ * oidc-provider has not cached is not fetched, and `Client.find` throws for
+ * it. A cached document and a stored or static client are read as usual. A
+ * web UI route runs outside oidc-provider's requests, where the per-address
+ * limit cannot apply, so it reads clients this way.
+ */
+export function withoutFetching<T>(read: () => Promise<T>): Promise<T> {
+  return noFetch.run(true, read);
+}
+
 /**
  * The settings `createOidcProvider` spreads in, the feature it adds, and the
  * middleware it gives `provider.use`. The middleware keeps each request's
@@ -326,6 +340,7 @@ export function cimdConfiguration(
   const requestAddress = new AsyncLocalStorage<string>();
 
   const counted = (url: string, kind: FetchKind, init?: RequestInit): Promise<Response> => {
+    if (noFetch.getStore() === true) return Promise.reject(new Error("no fetch allowed here"));
     if (!limiter.take(url, kind, requestAddress.getStore())) return Promise.reject(new Error("outgoing fetch over the limit"));
     return fetch(url, { ...init, redirect: "manual" });
   };
@@ -359,7 +374,7 @@ export function cimdConfiguration(
         ack: "draft-02",
         // Only a document that is not cached is fetched. This answers "fetch not allowed" early; `fetch` counts.
         allowFetch: (ctx: { ip?: string } | undefined, clientId) =>
-          limiter.fits(clientId, "document", ctx?.ip === undefined ? undefined : addressKey(ctx.ip)),
+          noFetch.getStore() !== true && limiter.fits(clientId, "document", ctx?.ip === undefined ? undefined : addressKey(ctx.ip)),
         // At each use of a client from a document, cached or not.
         allowClient: (_ctx, client) => {
           if (client.sectorIdentifierUri !== undefined) return false;

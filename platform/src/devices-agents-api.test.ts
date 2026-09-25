@@ -44,6 +44,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
   let server: Server | undefined;
   let adaptersDir: string;
   let base: string;
+  /** Every outgoing fetch the OAuth server made. */
+  const fetched: string[] = [];
 
   beforeAll(async () => {
     adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
@@ -63,7 +65,17 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
     });
-    provider = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
+    provider = createOidcProvider({
+      pool,
+      issuer: ISSUER,
+      keys: generateOidcKeys(),
+      trustProxyHops: 0,
+      log: () => {},
+      testOnlyFetch: (input) => {
+        fetched.push(input instanceof Request ? input.url : String(input));
+        return Promise.resolve(new Response(null, { status: 404 }));
+      },
+    });
     sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
     const app = createApp({
       health: { checkDatabase: () => Promise.resolve() },
@@ -253,5 +265,18 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
     });
     expect(((await refreshed.json()) as Record<string, unknown>)["error"]).toBe("invalid_grant");
     expect(await api(user, "GET", "/api/v1/agents")).toEqual({ status: 200, body: { agents: [] } });
+  });
+
+  it("lists an agent whose CIMD document is not cached by its host, and fetches nothing", async () => {
+    const user = await signIn();
+    const clientId = "https://agent.example/oauth/client.json";
+    const grant = new provider.Grant({ accountId: user.uuid, clientId });
+    grant.addResourceScope(RESOURCES.mcp, "read");
+    await grant.save();
+    expect(await api(user, "GET", "/api/v1/agents")).toMatchObject({
+      status: 200,
+      body: { agents: [{ client_id: clientId, client_name: null, client_host: "agent.example" }] },
+    });
+    expect(fetched).toEqual([]);
   });
 });

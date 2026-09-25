@@ -1,6 +1,7 @@
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
 
+import { withoutFetching } from "./cimd.js";
 import { BRIDGE_CLIENT_ID } from "./devices.js";
 import { clientIdHost } from "./oidc.js";
 
@@ -20,7 +21,10 @@ export interface AgentGrant {
   /** The grant's `oidc_models.uuid`. */
   id: string;
   client_id: string;
-  /** The client's `client_name`, or null when it names none or it could not be read. */
+  /**
+   * The client's `client_name`, or null when it names none or is not known
+   * without a fetch: a CIMD client whose document is not cached.
+   */
   client_name: string | null;
   /** For a CIMD client, the host of its `client_id` URL, which published the name. Null for another client. */
   client_host: string | null;
@@ -42,13 +46,14 @@ interface GrantRow {
 }
 
 /**
- * The client's name, or null. A CIMD client's document is fetched when
- * oidc-provider has not cached it, within the limits of `cimd.ts`; a fetch
- * that fails or is refused gives null.
+ * The client's name, or null. Nothing is fetched (`withoutFetching`): a
+ * CIMD client's name comes from oidc-provider's cache of its document, or is
+ * null. Reloading the page then cannot spend the CIMD fetch limits that
+ * sign-ins need.
  */
 async function clientName(provider: Provider, clientId: string): Promise<string | null> {
   try {
-    const name = (await provider.Client.find(clientId))?.clientName;
+    const name = (await withoutFetching(() => provider.Client.find(clientId)))?.clientName;
     return typeof name === "string" && name !== "" ? name : null;
   } catch {
     return null;
