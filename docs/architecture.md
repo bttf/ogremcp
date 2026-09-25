@@ -206,6 +206,7 @@ interface Parsed<State> {
   adapterSchema: number;
   state: State;                   // top-level keys = the kit's `sections`
 }
+// No string in Parsed, key or value, holds U+0000: Postgres refuses it in jsonb and text (§11). Map it to U+FFFD.
 
 interface ToolDef<State> {
   name: string;                   // must start with `${tool_prefix}_`
@@ -345,6 +346,8 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 
 - **OAuth device-code grant** via `oidc-provider` (§13.1). The bridge shows a code, the user approves it at `/device` in the web UI, and the bridge receives a long-lived, revocable refresh token plus short-lived access tokens with scope **`ingest`**. No passwords touch the bridge.
 - `ingest` tokens can't call `/mcp`, and agent tokens can't ingest (§9).
+- Only the bridge's own pre-registered public client (`ogmcp-bridge`) may use the device-code grant, and only it gets `ingest`. DCR, CIMD, and static agent clients can't register or use it, so no agent can phish a device code into an `ingest` token.
+- `/device` limits code lookups that miss (a code that doesn't exist or has expired) per user and overall (*proposed*: 10 per hour per user; config), as RFC 8628 §5.1 advises.
 - Approving a device creates a `devices` row. Approval doesn't depend on tier: a user can approve several bridges, and each one installs and updates the adapter (§7, §8.2). The free-tier device limit is enforced at ingest (§8.3, §14). Revoking a device revokes its grant.
 
 ### 8.2 Endpoints
@@ -353,8 +356,10 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 |---|---|---|
 | `GET` | `/api/v1/kits` | The user's enabled kits, with manifest and adapter versions. The adapter version is the addon TOC's `## Version` (semver); it equals the `addon_version` the adapter stamps (§6.3) and the `addon-v` tag (§5). |
 | `GET` | `/api/v1/kits/{kit}/manifest` | The pinned manifest |
-| `GET` | `/api/v1/kits/{kit}/adapter` | The adapter zip, built from `kits/{kit}/adapter` at platform build time (sha256 in a response header) |
+| `GET` | `/api/v1/kits/{kit}/adapter` | The adapter zip, built from `kits/{kit}/adapter` at platform build time. Its sha256 is in the `X-Adapter-Sha256` header, lower-case hex. |
 | `POST` | `/api/v1/ingest` | Upload one source instance |
+
+Every endpoint takes an `ingest` access token. The manifest and adapter routes serve any kit in the registry, enabled or not, and answer `404` for any other kit.
 
 ### 8.3 Ingest contract
 
@@ -392,11 +397,14 @@ Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 | `too_large` | 413 | Over the cap |
 | `device_limit` | 403 | Free tier: another of the user's devices holds the upload slot. `message` says how to switch devices. |
 | `rate_limited` | 429 | Honor `Retry-After` |
+| `bad_request` | 400 | Malformed request: a missing or extra part, bad JSON, bad hex, an unknown kit or source, or a `sha256` that doesn't match the uncompressed bytes |
 | (none) | 401 | Token invalid or revoked; the bridge prompts re-login |
 
 - **Device limit (free tier):** the first device to upload holds the user's upload slot. Revoking that device frees the slot (*proposed*). Other devices get `device_limit`.
 - **Cap: 5 MB of *uncompressed* bytes** per upload. Decompress with a hard limit (gzip-bomb safe).
-- **Dedup key:** `(device, kit, source_id, instance)`.
+- **Dedup key:** `(device, kit, source_id, instance)`. A duplicate still updates the device's last-seen time.
+- **Kits:** ingest accepts any kit in the registry, enabled on the Games page or not.
+- `meta.mtime` is optional. Without it, `snapshot_at` falls back to receipt time (§6.2).
 - **Rate limit:** per device, for abuse protection (proposed: 1 upload per 5 s per instance, small burst).
 
 ### 8.4 Server → bridge `[later]`
@@ -407,7 +415,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - **Transport:** MCP Streamable HTTP at `/mcp`, stateless (§19.1 D12). There are no MCP session IDs and no `list_changed` stream, so nothing has to survive deploys or span replicas.
 - **Host and Origin checks:** validate both on `/mcp` and reject unexpected values, to block DNS rebinding. The prototype has these; keep them.
-- **Auth: OAuth 2.1 + PKCE only.** No secret-URL fallback.
+- **Auth: OAuth 2.1 + PKCE only.** No secret-URL fallback. The authorization server offers only the `code` response type, so no client can use the implicit or hybrid flows.
 - **Scopes:** agents get `read`, which covers every v1 MCP tool (including `report_issue`, which never touches the game). Bridges get `ingest` (§8.1). Tokens are audience-bound (RFC 8707 resource indicators), so neither works at the other's endpoints.
 - **Discovery:**
   - Protected Resource Metadata at `/.well-known/oauth-protected-resource` (RFC 9728). Unauthenticated `/mcp` requests get `401` with `WWW-Authenticate: Bearer resource_metadata="<url>"`.
@@ -417,7 +425,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
   - **Pre-registered public clients** for agents without dynamic registration (Perplexity): one static client per agent with its redirect URIs. The "Connect your agent" page shows the client ID to paste.
   - **CIMD** (URL-based client IDs), the MCP 2025-11-25 spec's preferred mechanism. On in v1 through `oidc-provider`'s `features.clientIdMetadataDocument` (§19.1 D7). Claude, Claude Code, and ChatGPT send CIMD client IDs.
   - **DCR**, the fallback for clients that don't send a CIMD client ID. Rate-limit the registration endpoint and garbage-collect long-unused clients. The token endpoint returns `401 invalid_client` for a deleted client, which tells Claude to re-register.
-  - **Loopback redirects** for native clients such as Claude Code, which register `http://localhost:<port>/callback` and pick a random port at each login. Match loopback redirect URIs ignoring the port (RFC 8252 §7.3). Claude Code's CIMD document doesn't set `application_type: native`, so this needs a client-metadata validator hook in `oidc-provider`.
+  - **Loopback redirects** for native clients such as Claude Code, which register `http://localhost:<port>/callback` and pick a random port at each login. Match loopback redirect URIs ignoring the port (RFC 8252 §7.3). Claude Code's CIMD document doesn't set `application_type: native`, so a client-metadata validator hook in `oidc-provider` treats a client as native when at least one redirect URI is `http` on `localhost`, `127.0.0.1`, or `[::1]` and every other one is `https` on a non-loopback host. Only the port is ignored. The consent page warns when the redirect URI is on a loopback host, because a local app receives the code.
 - **Consent:** authorization requests land in the web UI. The user signs in (Google/Discord) if needed, then approves the agent. Wire `oidc-provider` interactions to web sessions.
 - **Tokens:** short-lived access tokens plus refresh tokens. Users revoke them under "Connected agents".
 - **Target clients:** Claude (custom connectors, including Free with its one-connector limit), Claude Code (the owner uses it), ChatGPT (developer mode; plan requirements in §19.2), and Perplexity (paid plans).
