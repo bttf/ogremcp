@@ -394,6 +394,8 @@ func (w *Watcher) rescan() {
 		// rescan finds that the watch is not on the folder Stat saw.
 		info, err := os.Stat(dir)
 		if err == nil {
+			// On Windows, SameFile reads the file ID on first use; read it now.
+			os.SameFile(info, info)
 			err = w.fsw.Add(dir)
 		}
 		if err != nil {
