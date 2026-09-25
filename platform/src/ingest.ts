@@ -223,7 +223,7 @@ export function ingestHandler({ pool, kits, settings, log = console.log }: Inges
 
     let bytes: Buffer;
     try {
-      bytes = await gunzipAsync(parts.file, { maxOutputLength: settings.maxBytes });
+      bytes = await decompress(parts.file, settings.maxBytes);
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;
       if (code === "ERR_BUFFER_TOO_LARGE") return reply(req, res, tooLarge(`The file is over ${size(settings.maxBytes)} uncompressed.`));
@@ -240,6 +240,15 @@ export function ingestHandler({ pool, kits, settings, log = console.log }: Inges
 }
 
 const gunzipAsync = promisify(gunzip);
+
+/**
+ * An upload's bytes, from their gzip, with an output limit of `maxBytes`, so
+ * a gzip bomb stops there (§8.3). Over it, the promise rejects with code
+ * `ERR_BUFFER_TOO_LARGE`. Ingest and the re-parse command (§11) share it.
+ */
+export function decompress(gzipped: Buffer, maxBytes: number): Promise<Buffer> {
+  return gunzipAsync(gzipped, { maxOutputLength: maxBytes });
+}
 
 function reply(req: Request, res: Response, { http, answer, retryAfter }: Outcome): void {
   // The rest of an unread body is dropped with the connection.
@@ -433,16 +442,7 @@ async function store(
       return { http: 200, answer: { status: "duplicate" } };
     }
 
-    let parsed: Parsed<unknown> | undefined;
-    let parseError: string | null = null;
-    try {
-      parsed = meta.kit.interpreter.parse(meta.sourceId, bytes);
-    } catch (err) {
-      if (!(err instanceof ParseError)) throw err;
-      parseError = err.message;
-    }
-    // "unknown" is never a key of `flavors` (the SDK's manifest schema).
-    const rejectedFlavor = parsed !== undefined && !Object.hasOwn(meta.kit.manifest.flavors, parsed.flavor) ? parsed.flavor : null;
+    const result = parseUpload(meta.kit, meta.sourceId, bytes);
 
     const upload = await client.query<{ id: string; uuid: string }>(
       `insert into uploads (user_id, device_id, kit, source_id, instance, sha256, content_gzip, mtime, kit_version,
@@ -459,10 +459,10 @@ async function store(
         gzipped,
         meta.mtime,
         meta.kit.manifest.version,
-        parsed?.adapterSchema ?? null,
-        parsed === undefined ? "failed" : rejectedFlavor === null ? "parsed" : "rejected",
-        parseError,
-        rejectedFlavor,
+        result.parsed?.adapterSchema ?? null,
+        result.status,
+        result.parseError,
+        result.rejectedFlavor,
         meta.errors === null ? null : JSON.stringify(meta.errors),
       ],
     );
@@ -471,37 +471,18 @@ async function store(
     const uploadId = uploadRow.id;
 
     let snapshotUuid: string | undefined;
-    if (parsed !== undefined && rejectedFlavor === null) {
-      // now() is the transaction's start, which is also the upload's received_at.
-      const snapshot = await client.query<{ uuid: string }>(
-        `insert into snapshots (user_id, upload_id, kit, flavor, rules, character_key, character_name, character_realm,
-                                snapshot_at, state)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::timestamptz, now()), $10)
-         returning uuid`,
-        [
-          device.userId,
-          uploadId,
-          meta.kit.key,
-          parsed.flavor,
-          parsed.rules,
-          parsed.character?.key ?? null,
-          parsed.character?.name ?? null,
-          parsed.character?.realm ?? null,
-          parsed.capturedAt ?? meta.mtime,
-          JSON.stringify(parsed.state),
-        ],
-      );
-      snapshotUuid = snapshot.rows[0]?.uuid;
+    if (result.status === "parsed") {
+      snapshotUuid = (await writeSnapshot(client, uploadId, result.parsed)) ?? undefined;
       if (snapshotUuid === undefined) throw new Error("insert into snapshots returned no row");
     }
 
     await touchDevice(client, device, meta, true);
     await client.query("commit");
-    if (rejectedFlavor !== null) {
-      if (rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device, meta.kit, uploadRow.uuid, parsed?.unknownFlavor));
+    if (result.status === "rejected") {
+      if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
       return { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } };
     }
-    if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: parseError ?? "" } };
+    if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: result.parseError ?? "" } };
     return { http: 201, answer: { status: "stored", snapshot_uuid: snapshotUuid } };
   } catch (err) {
     await client.query("rollback").catch(() => {});
@@ -509,6 +490,79 @@ async function store(
   } finally {
     client.release();
   }
+}
+
+/**
+ * What an upload's bytes parse to (§6.2), with the `uploads` columns that
+ * record it (§11): `parse_status`, `parse_error`, and `flavor`.
+ */
+export type UploadParse =
+  /** A flavor the kit manifest's `flavors` registers. It gets a snapshot. */
+  | { status: "parsed"; parsed: Parsed<unknown>; parseError: null; rejectedFlavor: null }
+  /** A flavor that is "unknown" or not registered (§6.3.1). No snapshot. */
+  | { status: "rejected"; parsed: Parsed<unknown>; parseError: null; rejectedFlavor: string }
+  /** The interpreter threw a `ParseError`: its user-facing message. No snapshot. */
+  | { status: "failed"; parsed: null; parseError: string; rejectedFlavor: null };
+
+/**
+ * Parses an upload of the kit's source `sourceId` with the kit's interpreter
+ * and checks its flavor against the manifest (§6.1, §8.3). Ingest and the
+ * re-parse command (§11) share it. `now` is `ParseOptions.now`: the re-parse
+ * passes the upload's receipt time. An error other than `ParseError` is a
+ * kit bug, and propagates.
+ */
+export function parseUpload(kit: Kit, sourceId: string, bytes: Uint8Array, now?: Date): UploadParse {
+  let parsed: Parsed<unknown>;
+  try {
+    parsed = kit.interpreter.parse(sourceId, bytes, now === undefined ? undefined : { now });
+  } catch (err) {
+    if (!(err instanceof ParseError)) throw err;
+    return { status: "failed", parsed: null, parseError: err.message, rejectedFlavor: null };
+  }
+  // "unknown" is never a key of `flavors` (the SDK's manifest schema).
+  if (!Object.hasOwn(kit.manifest.flavors, parsed.flavor)) {
+    return { status: "rejected", parsed, parseError: null, rejectedFlavor: parsed.flavor };
+  }
+  return { status: "parsed", parsed, parseError: null, rejectedFlavor: null };
+}
+
+/**
+ * Stores the snapshot of the parsed upload `uploadId` (§11): inserts it, or
+ * replaces the upload's snapshot in place, which keeps its uuid. Answers the
+ * snapshot's uuid, or null when the upload's snapshot already holds this
+ * parse and nothing was written. `snapshot_at` is the adapter's stamp
+ * (`Parsed.capturedAt`), else the upload's `mtime`, else its `received_at`
+ * (§6.2). Ingest and the re-parse command share it.
+ */
+export async function writeSnapshot(client: PoolClient, uploadId: string, parsed: Parsed<unknown>): Promise<string | null> {
+  const { rows } = await client.query<{ uuid: string }>(
+    `insert into snapshots (user_id, upload_id, kit, flavor, rules, character_key, character_name, character_realm,
+                            snapshot_at, state)
+     select u.user_id, u.id, u.kit, $2::text, $3::text[], $4::text, $5::text, $6::text,
+            coalesce($7::timestamptz, u.mtime, u.received_at), $8::jsonb
+       from uploads u
+      where u.id = $1
+     on conflict (upload_id) do update
+        set flavor = excluded.flavor, rules = excluded.rules, character_key = excluded.character_key,
+            character_name = excluded.character_name, character_realm = excluded.character_realm,
+            snapshot_at = excluded.snapshot_at, state = excluded.state
+      where (snapshots.flavor, snapshots.rules, snapshots.character_key, snapshots.character_name,
+             snapshots.character_realm, snapshots.snapshot_at, snapshots.state)
+            is distinct from (excluded.flavor, excluded.rules, excluded.character_key, excluded.character_name,
+             excluded.character_realm, excluded.snapshot_at, excluded.state)
+     returning uuid`,
+    [
+      uploadId,
+      parsed.flavor,
+      parsed.rules,
+      parsed.character?.key ?? null,
+      parsed.character?.name ?? null,
+      parsed.character?.realm ?? null,
+      parsed.capturedAt,
+      JSON.stringify(parsed.state),
+    ],
+  );
+  return rows[0]?.uuid ?? null;
 }
 
 /** The flavor an interpreter returns for a payload that maps to no flavor (§6.3.1). */
