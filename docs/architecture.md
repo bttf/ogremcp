@@ -284,7 +284,7 @@ The interpreter maps `client` facts to a flavor key and rules. Seasonal realms r
 - **Numeric values:** only `WOW_PROJECT_MAINLINE = 1` and `WOW_PROJECT_CLASSIC = 2` are listed here. Take the other constants' values from FrameXML at implementation time; the server can't read Lua globals.
 - **Sanity check:** project IDs have lagged new clients before (TBC Classic first reported itself as `2`). Cross-check `interface` against the flavor's expected major version (Classic Era is 1.x, i.e. `11xxx`; Forever is `16xxx`; retail is six digits). On a mismatch, map to `unknown` and log the raw facts.
 - **Forever reports as retail:** its `WOW_PROJECT_ID` is 1, the same as retail, so its row is keyed on `interface`. Match rows top to bottom.
-- **Mapped-but-unregistered flavors keep their name**, so the `unsupported_flavor` message can say "TBC Classic isn't supported yet", and rejection counts show which flavor to add next (§16.1).
+- **Mapped-but-unregistered flavors keep their key**, so rejection counts show which flavor to add next (§16.1). The `unsupported_flavor` message doesn't name the flavor ("This version of World of Warcraft isn't supported yet."): a readable name would have to leave the kit outside the `Interpreter` interface (§5). Owner decision, 2026-09-24.
 - **SoD is a flavor, not a rule:** its content (runes, raids, level caps) differs from Era, so it needs its own search scope. Hardcore and Fresh keep Era's content, so they're rules.
 - **Rules change behavior, not scope** (§10.5). On `hardcore`, death is permanent. On `fresh`, content unlocks by phase, so a search result may describe something not yet live on that realm.
 
@@ -393,7 +393,7 @@ Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 | `stored` | 201 | Parsed and stored |
 | `duplicate` | 200 | Same sha256 as this instance's last upload; nothing stored |
 | `parse_error` | 422 | The interpreter rejected it. Upload kept for re-parse; `message` is user-facing. |
-| `unsupported_flavor` | 422 | Flavor is `unknown` or not in the registry (§6.3.1); `message` names it |
+| `unsupported_flavor` | 422 | Flavor is `unknown` or not in the registry (§6.3.1). The upload is kept with the flavor key; `message` says the game version isn't supported, without naming it. |
 | `too_large` | 413 | Over the cap |
 | `device_limit` | 403 | Free tier: another of the user's devices holds the upload slot. `message` says how to switch devices. |
 | `rate_limited` | 429 | Honor `Retry-After` |
