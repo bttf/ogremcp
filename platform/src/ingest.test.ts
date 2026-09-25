@@ -124,7 +124,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     provider = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
     sessions = new WebSessions({ pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
     // The tests post one instance several times in a row. The rate limit's test has its own server.
-    base = await serve({ ...DEFAULT_INGEST, burst: 1_000 });
+    base = await serve({ ...DEFAULT_INGEST, burst: 1_000, deviceBurst: 1_000 });
   });
 
   afterAll(async () => {
@@ -410,8 +410,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect(rows.find((row) => row.uuid === fromBob.body?.snapshot_uuid)).toMatchObject({ user_id: bob.id, device_id: bobToken.deviceId });
   });
 
-  it("answers rate_limited with Retry-After to an upload of one instance over the limit, and not to another instance", async () => {
-    const limited = await serve({ ...DEFAULT_INGEST, burst: 1 });
+  it("answers rate_limited with Retry-After over the limit of an instance, and over the limit of the device", async () => {
+    const limited = await serve({ ...DEFAULT_INGEST, burst: 1, deviceBurst: 2 });
     const { accessToken, deviceId } = await token(await newUser());
     expect((await post(accessToken, upload(savedVariables(CAPTURED_AT)), limited)).res.status).toBe(201);
 
@@ -423,6 +423,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     // Another account's SavedVariables on the same device has a bucket of its own.
     const other = upload(savedVariables(CAPTURED_AT), { instance: sha256("_classic_era_/WTF/Account/OTHER/SavedVariables/OpenGamerMCP.lua") });
     expect((await post(accessToken, other, limited)).res.status).toBe(201);
+    // A new instance each time still meets the device's bucket, which the refused upload took nothing from.
+    const third = await post(accessToken, upload(savedVariables(CAPTURED_AT), { instance: sha256("made up") }), limited);
+    expect(third.res.status).toBe(429);
+    expect(third.body?.status).toBe("rate_limited");
     expect(await uploadsOf(deviceId)).toHaveLength(2);
   });
 });

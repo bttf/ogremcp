@@ -28,8 +28,9 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  * 2. The parts are read with hard limits, so nothing large is buffered:
  *    `META_MAX_BYTES` for `meta`, `maxCompressedBytes` for `file`. Over
  *    either: 413 `too_large`. `meta` is checked as soon as it is read, and
- *    the upload is counted against the rate limit of its `(device, kit,
- *    source_id, instance)` (§8.3, `UploadLimiter`). Over it: 429
+ *    the upload is counted against the rate limits of its `(device, kit,
+ *    source_id, instance)` and of its device (§8.3, `UploadLimiter`). Over
+ *    either: 429
  *    `rate_limited` with `Retry-After` in whole seconds, and nothing of the
  *    `file` part that follows `meta` is buffered. (A `file` part sent before
  *    `meta` is buffered within its limit first, and not decompressed.)
@@ -75,13 +76,24 @@ export interface IngestSettings {
   ratePerMinute: number;
   /** `INGEST_BURST`: uploads of one source instance of one device, at once (§8.3). */
   burst: number;
+  /** `INGEST_DEVICE_RATE_PER_MINUTE`: uploads of one device, all its instances together, per minute (§8.3). */
+  deviceRatePerMinute: number;
+  /** `INGEST_DEVICE_BURST`: uploads of one device, all its instances together, at once (§8.3). */
+  deviceBurst: number;
 }
 
 /**
  * 5 MB of uncompressed bytes (§8.3), as the WoW interpreter counts them.
- * One upload per 5 seconds per instance, after a burst of 3 (§8.3).
+ * One upload per 5 seconds per instance, after a burst of 3, and one per
+ * 2 seconds per device, after a burst of 10 (§8.3).
  */
-export const DEFAULT_INGEST: IngestSettings = { maxBytes: 5 * 1024 * 1024, ratePerMinute: 12, burst: 3 };
+export const DEFAULT_INGEST: IngestSettings = {
+  maxBytes: 5 * 1024 * 1024,
+  ratePerMinute: 12,
+  burst: 3,
+  deviceRatePerMinute: 30,
+  deviceBurst: 10,
+};
 
 /** The most bytes the `meta` part may have. The §8.3 JSON is a few hundred. */
 export const META_MAX_BYTES = 16 * 1024;
@@ -203,7 +215,7 @@ export function ingestHandler({ pool, kits, settings, log = console.log }: Inges
     const parts = await readParts(req, maxCompressedBytes(settings.maxBytes), (text) => {
       const checked = checkMeta(text, kits);
       if ("http" in checked) return checked;
-      const wait = limiter.take(uploadKey(device, checked));
+      const wait = limiter.take(device.id, uploadKey(device, checked));
       return wait > 0 ? rateLimited(wait) : checked;
     });
     if ("http" in parts) return reply(req, res, parts);
@@ -340,7 +352,7 @@ function readParts(
   });
 }
 
-/** The rate limit's key: the upload's dedup key, `(device, kit, source_id, instance)` (§8.3). */
+/** The instance rate limit's key: the upload's dedup key, `(device, kit, source_id, instance)` (§8.3). */
 function uploadKey(device: Device, meta: CheckedMeta): string {
   return JSON.stringify([device.id, meta.kit.key, meta.sourceId, meta.instance]);
 }
