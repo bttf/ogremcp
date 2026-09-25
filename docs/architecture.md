@@ -226,7 +226,7 @@ interface ToolContext<State> {
 
 - `ParseError` messages are user-facing. The bridge shows them to the player (§8.3).
 - Accept the current adapter schema and the previous one, because the addon can lag the server (CurseForge/Wago installs, §7).
-- Tool handlers read snapshots only through `ToolContext`. The platform resolves `character` (name or `Name-Realm`, case-insensitive; ambiguous → an error listing matches) and applies tier gating.
+- Tool handlers read snapshots only through `ToolContext`. The platform resolves `character` (name or `Name-Realm`, case-insensitive; ambiguous → an error listing matches) and applies tier gating. Realms compare without spaces, hyphens, and periods, the form WoW chat shows (`Zoela-LivingFlame`). The same `Name-Realm` in two flavors is ambiguous unless `flavor` is given. `history` returns at most a configured number of snapshots (*proposed* 100). Bad arguments and unknown or ambiguous characters are user-facing errors (§10.5).
 - **Parsing SavedVariables:** it's a Lua table literal. The WoW interpreter parses it with a literal-only parser (it never evaluates Lua) and enforces limits on size (the 5 MB cap, §8.3), nesting depth, and value count (proposed: 32 levels, 200k values). Going over is a `ParseError`. The parser lives in the WoW kit until a second kit needs it.
 
 ### 6.3 Adapter (WoW) `[v1]`
