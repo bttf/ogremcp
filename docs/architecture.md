@@ -166,7 +166,8 @@ ogremcp/
   "flavors": {
     "classic_era": {
       "status": "supported",
-      "search": ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"]
+      "search": ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"],
+      "mixed": ["https://warcraft.wiki.gg/"]
     },
     "forever": { "status": "experimental", "search": [] }
   }
@@ -186,6 +187,7 @@ ogremcp/
 - `flavors` is the **single registry of per-flavor config**. Adding a flavor starts here (§6.4).
   - `status`: `supported` (play-tested) or `experimental` (the agent caveats its answers because sources may be thin). Experimental flavors have no gate in v1: ingest accepts them, and the agent caveats its answers (§19.1 D8).
   - `search`: the flavor's search scope. Entries are **URL prefixes, not bare domains**, because some hosts serve several flavors. An empty list means no vetted sources yet (§12). Forever's sources are TBD (§19.2).
+  - `mixed` (optional): the `search` prefixes whose pages cover several game versions on the same page, such as a wiki that mixes retail and Classic. Each must also be in `search`. Results from them are flagged (§12). Owner decision, 2026-09-25, after the G1 grounding checks (RED-367).
   - Which payload maps to which flavor is defined in §6.3.1. A payload whose flavor isn't in the registry is rejected at ingest (§8.3).
 
 ### 6.2 Interpreter interface `[v1]` (sketch)
@@ -526,6 +528,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Enforcement:** query with `site:` filters for the scope, then **post-filter results by URL prefix**. The post-filter is what guarantees scope.
 - **Empty scope** (a flavor with no vetted sources): return `no_sources`, and the agent says it can't verify (§10.5).
 - `fetch_game_page` only fetches URLs inside the game's scopes, including after redirects. This controls cost and narrows prompt-injection exposure; page text is still untrusted (§10.5).
+- **Mixed-version sources:** a `search_game_info` result under one of the searched flavor's `mixed` prefixes (§6.1), and a `fetch_game_page` result under any flavor's `mixed` prefix, carry `mixed_versions: true`. The tool descriptions tell the agent to prefer facts from other results and to say when a fact may belong to another version.
 - **Shared cache** across users, in `search_cache`, keyed by `(kit, flavor, scope_hash, normalized_query)` and `(url)`, with a TTL (proposed 7 days). `scope_hash` changes when a manifest's scope does, so stale entries age out. **Uncached searches are the main variable cost**, so the cache hit rate is the core of the unit economics. Players ask the same questions, so it should be high.
 - **No separate search cap.** Capping search would cap answers. Usage is metered by the tool-call cap (§14).
 
@@ -700,12 +703,13 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | S2 | CIMD support in `oidc-provider` (D7) | P3 |
 | S3 | Firecrawl scoping: do `site:` filters + prefix post-filtering return good Classic Era results? | Start of P7 |
 | S4 | Combat-log tailing (§15) | After G2; no milestone (§18.4) |
+| S5 | Open datasets for Classic Era game data (§12.1): license, coverage, format, flavor marking; recommend a source and a tool shape | After G1; no milestone. Owner decision, 2026-09-25: §12.1 itself stays after G2 |
 
 ### 18.4 Linear conventions
 
 - One Linear milestone per phase and per gate. Each gate milestone holds one issue that runs the §18.2 check, blocked by the issues in the phases the gate depends on.
 - Label issues by package: `sdk`, `kit-wow`, `platform`, `bridge` (§5).
-- Spikes S1–S3 go in their phase's milestone. S4 gets no milestone: create its issue once G2 passes.
+- Spikes S1–S3 go in their phase's milestone. S4 gets no milestone: create its issue once G2 passes. S5 gets no milestone (RED-368).
 - Every issue cites the § it implements, takes its acceptance criteria from that §, and gets blocking relations from the "Depends on" column.
 - Every D-item becomes one issue labeled `decision` that blocks the issues it names, including non-code ones like D10. Values marked *proposed* in the text (limits, TTLs) don't need decision issues; they're config. A D-item with a proposal still does.
 
