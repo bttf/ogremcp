@@ -84,9 +84,11 @@ export interface BridgeApiOptions {
   kits: KitRegistry;
   /** The ingest limits. Default: `DEFAULT_INGEST`. */
   ingest?: IngestSettings;
+  /** The ingest endpoint's log (`IngestOptions.log`). */
+  ingestLog?: (line: string) => void;
 }
 
-export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = DEFAULT_INGEST }: BridgeApiOptions): Router {
+export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = DEFAULT_INGEST, ingestLog }: BridgeApiOptions): Router {
   const router = express.Router();
   const requireIngest = requireToken({ provider, resource: resourcesOf(new URL(publicBaseUrl).origin).bridge, scope: "ingest" });
   const noStore: RequestHandler = (_req, res, next) => {
@@ -147,7 +149,7 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
     }),
   );
 
-  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest }));
+  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest, log: ingestLog }));
 
   return router;
 }

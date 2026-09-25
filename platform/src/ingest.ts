@@ -41,10 +41,10 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  * 5. A parsed upload whose flavor is "unknown" or not registered is kept
  *    with `parse_status = 'rejected'` and its `flavor`, so rejections can be
  *    counted by flavor (§16.1), and gets no snapshot. It gets 422
- *    `unsupported_flavor` with a message that names the flavor, from the
- *    kit's `flavorNames` (§6.3.1, §8.3). For "unknown", ingest also logs the
- *    interpreter's `unknownFlavor` reason and raw facts as one JSON line,
- *    with the user's uuid as the only user identifier.
+ *    `unsupported_flavor` with a message that names the game, not the
+ *    flavor (§8.3). For "unknown", ingest also logs the interpreter's
+ *    `unknownFlavor` reason and raw facts as one JSON line, with the user's
+ *    uuid as the only user identifier (§6.3.1).
  *
  * Every request that reaches step 4 sets the device's `last_seen_at`, and
  * its `os` and `bridge_version` when `meta.client` names them. A stored
@@ -87,7 +87,7 @@ export type IngestStatus = "stored" | "duplicate" | "parse_error" | "unsupported
 /** The answer's body (§8.3). A 401 has none. */
 export interface IngestAnswer {
   status: IngestStatus;
-  /** For `parse_error`, the interpreter's user-facing message. For `unsupported_flavor`, one that names the flavor. */
+  /** For `parse_error`, the interpreter's user-facing message. For `unsupported_flavor`, one that names the game. */
   message?: string;
   /** For `stored`. */
   snapshot_uuid?: string;
@@ -168,10 +168,12 @@ export interface IngestOptions {
   pool: Pool;
   kits: KitRegistry;
   settings: IngestSettings;
+  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: `console.log`. */
+  log?: (line: string) => void;
 }
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
-export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestHandler {
+export function ingestHandler({ pool, kits, settings, log = console.log }: IngestOptions): RequestHandler {
   return async (req, res) => {
     const token = currentToken(res);
     const device = token === null ? undefined : await findDevice(pool, token);
@@ -194,7 +196,7 @@ export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestH
       return reply(req, res, badRequest("meta.sha256 is not the SHA-256 of the uncompressed file."));
     }
 
-    const outcome = await store(pool, device, meta, parts.file, bytes);
+    const outcome = await store(pool, device, meta, parts.file, bytes, log);
     if (outcome === null) return refuseDevice(res);
     reply(req, res, outcome);
   };
@@ -347,7 +349,14 @@ function checkMeta(text: string, kits: KitRegistry): CheckedMeta | Outcome {
  * Steps 4 and 5 of the module comment, in one transaction. Answers null when
  * the device was revoked since `findDevice`.
  */
-async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buffer, bytes: Buffer): Promise<Outcome | null> {
+async function store(
+  pool: Pool,
+  device: Device,
+  meta: CheckedMeta,
+  gzipped: Buffer,
+  bytes: Buffer,
+  log: (line: string) => void,
+): Promise<Outcome | null> {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -433,8 +442,8 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
     await touchDevice(client, device, meta, true);
     await client.query("commit");
     if (rejectedFlavor !== null) {
-      if (rejectedFlavor === UNKNOWN_FLAVOR) logUnknownFlavor(device, meta.kit, uploadRow.uuid, parsed?.unknownFlavor);
-      return { http: 422, answer: { status: "unsupported_flavor", message: unsupportedFlavorMessage(meta.kit, rejectedFlavor) } };
+      if (rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device, meta.kit, uploadRow.uuid, parsed?.unknownFlavor));
+      return { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } };
     }
     if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: parseError ?? "" } };
     return { http: 201, answer: { status: "stored", snapshot_uuid: snapshotUuid } };
@@ -449,29 +458,21 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
 /** The flavor an interpreter returns for a payload that maps to no flavor (§6.3.1). */
 const UNKNOWN_FLAVOR = "unknown";
 
-/** The `unsupported_flavor` message (§8.3). It names the flavor, e.g. "TBC Classic isn't supported yet." */
-function unsupportedFlavorMessage(kit: Kit, flavor: string): string {
-  if (flavor === UNKNOWN_FLAVOR) return `Open Gamer MCP didn't recognize this version of ${kit.name}.`;
-  const name = Object.hasOwn(kit.flavorNames, flavor) ? kit.flavorNames[flavor] : undefined;
-  return name === undefined ? `The ${kit.name} flavor "${flavor}" isn't supported yet.` : `${name} isn't supported yet.`;
-}
-
 /**
- * Logs why an upload's flavor is "unknown", with the raw detection facts, as
- * one JSON line (§6.3.1, §16). The user's uuid is its only user identifier.
+ * The log line for an upload whose flavor is "unknown": why, with the raw
+ * detection facts, as JSON (§6.3.1, §16). The user's uuid is its only user
+ * identifier.
  */
-function logUnknownFlavor(device: Device, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): void {
-  console.log(
-    JSON.stringify({
-      level: "warn",
-      message: "ingest: unsupported_flavor for an unknown flavor",
-      user_uuid: device.userUuid,
-      upload_uuid: uploadUuid,
-      kit: kit.key,
-      reason: unknown?.reason ?? null,
-      facts: unknown?.facts ?? null,
-    }),
-  );
+function unknownFlavorLine(device: Device, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): string {
+  return JSON.stringify({
+    level: "warn",
+    message: "ingest: unsupported_flavor for an unknown flavor",
+    user_uuid: device.userUuid,
+    upload_uuid: uploadUuid,
+    kit: kit.key,
+    reason: unknown?.reason ?? null,
+    facts: unknown?.facts ?? null,
+  });
 }
 
 /** Sets the device's `last_seen_at`, its versions, and, for a stored upload, `first_upload_at` when unset. */

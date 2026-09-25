@@ -1,15 +1,14 @@
 // The kit registry (docs/architecture.md §5, §6.5). It is the only platform
 // module that imports `@ogmcp/kit-*`, and it types each kit as an
-// `Interpreter`. It imports a kit's interpreter and flavor names by name and
-// its manifest.json as JSON, and never re-exports a kit module
-// (`pnpm lint:seams` checks both).
+// `Interpreter`. It imports a kit's interpreter by name and its manifest.json
+// as JSON, and never re-exports a kit module (`pnpm lint:seams` checks both).
 //
 // Hosted runs only the first-class kits in `kits/`, at the deployed commit
 // (§6.5): the static imports below. Nothing loads a kit at runtime.
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-import { FLAVOR_NAMES as wowFlavorNames, interpreter as wowInterpreter } from "@ogmcp/kit-wow";
+import { interpreter as wowInterpreter } from "@ogmcp/kit-wow";
 import wowManifest from "@ogmcp/kit-wow/manifest.json" with { type: "json" };
 import type { Interpreter, Manifest } from "@ogmcp/sdk";
 
@@ -30,7 +29,6 @@ export const KIT_SOURCES: readonly KitSource[] = [
     package: "@ogmcp/kit-wow",
     manifest: wowManifest,
     interpreter: wowInterpreter,
-    flavorNames: wowFlavorNames,
     adapterDir: adapterDir(resolve("@ogmcp/kit-wow/manifest.json")),
   },
 ];
@@ -51,8 +49,6 @@ export interface Kit {
   /** The pinned manifest (§5, §8.2). */
   manifest: Manifest;
   interpreter: Interpreter<unknown>;
-  /** The kit's player-facing flavor names, by flavor key (`KitSource.flavorNames`). */
-  flavorNames: Readonly<Record<string, string>>;
   /** The adapter zip the build made (§8.2), or null for an adapter-less kit. */
   adapter: AdapterZip | null;
 }
@@ -84,7 +80,6 @@ export function loadKitRegistry({ sources = KIT_SOURCES, adaptersDir = ADAPTERS_
       name,
       manifest,
       interpreter: source.interpreter,
-      flavorNames: source.flavorNames,
       adapter: adapterFolder === null ? null : readAdapterZip(adaptersDir, manifest.kit, adapterFolder),
     };
   });

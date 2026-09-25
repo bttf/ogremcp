@@ -8,7 +8,6 @@ import { clip, parseError, QUOTE_MAX } from "./errors.js";
 import { readSavedVariables, type ReadLimits } from "./lua.js";
 import { dbSchema, type WowState } from "./schema.js";
 
-export { FLAVOR_NAMES } from "./detect.js";
 export type { Client, WowState } from "./schema.js";
 
 /** The manifest's only source (kits/wow/manifest.json). */

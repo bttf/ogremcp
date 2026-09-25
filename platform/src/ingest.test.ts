@@ -9,7 +9,7 @@ import { gzipSync } from "node:zlib";
 
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
@@ -83,6 +83,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   let kits: KitRegistry;
   let server: Server | undefined;
   let base: string;
+  /** What the ingest endpoint logged. */
+  const logged: string[] = [];
 
   beforeAll(async () => {
     adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
@@ -109,6 +111,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
       auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
       oidc: provider,
       kits,
+      ingestLog: (line) => logged.push(line),
     });
     server = createServer(app).listen(0, "127.0.0.1");
     await once(server, "listening");
@@ -283,30 +286,31 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   it("keeps an unregistered or unknown flavor's upload without a snapshot, and stores an experimental one", async () => {
     const user = await newUser();
     const { accessToken, deviceId } = await token(user);
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      // TBC Classic maps to a flavor the manifest does not register (§6.3.1).
-      const tbc = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Hellfire Peninsula", `{ ["project_id"] = 5, ["interface"] = 20506 }`)));
-      expect(tbc.res.status).toBe(422);
-      expect(tbc.body).toEqual({ status: "unsupported_flavor", message: "TBC Classic isn't supported yet." });
-      expect(log).not.toHaveBeenCalled();
+    logged.length = 0;
+    const unsupported = { status: "unsupported_flavor", message: "This version of World of Warcraft isn't supported yet." };
 
-      // A Classic Era project ID with a Mists Classic interface fails the sanity check.
-      const mismatch = `{ ["project_id"] = 2, ["interface"] = 50504, ["build"] = "69934" }`;
-      const unknown = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Durotar", mismatch)));
-      expect(unknown.res.status).toBe(422);
-      expect(unknown.body).toEqual({ status: "unsupported_flavor", message: "Open Gamer MCP didn't recognize this version of World of Warcraft." });
+    // TBC Classic maps to a flavor the manifest does not register (§6.3.1).
+    const tbc = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Hellfire Peninsula", `{ ["project_id"] = 5, ["interface"] = 20506 }`)));
+    expect(tbc.res.status).toBe(422);
+    expect(tbc.body).toEqual(unsupported);
+    expect(logged).toEqual([]);
 
-      const rows = await uploadsOf(deviceId);
-      expect(rows.map((row) => [row["parse_status"], row["flavor"], row["parse_error"], row["adapter_schema"]])).toEqual([
-        ["rejected", "tbc_classic", null, 1],
-        ["rejected", "unknown", null, 1],
-      ]);
-      const snapshots = await pool.query("select 1 from snapshots where upload_id = any($1)", [rows.map((row) => row["id"])]);
-      expect(snapshots.rowCount).toBe(0);
+    // A Classic Era project ID with a Mists Classic interface fails the sanity check.
+    const mismatch = `{ ["project_id"] = 2, ["interface"] = 50504, ["build"] = "69934" }`;
+    const unknown = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Durotar", mismatch)));
+    expect(unknown.res.status).toBe(422);
+    expect(unknown.body).toEqual(unsupported);
 
-      expect(log).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+    const rows = await uploadsOf(deviceId);
+    expect(rows.map((row) => [row["parse_status"], row["flavor"], row["parse_error"], row["adapter_schema"]])).toEqual([
+      ["rejected", "tbc_classic", null, 1],
+      ["rejected", "unknown", null, 1],
+    ]);
+    const snapshots = await pool.query("select 1 from snapshots where upload_id = any($1)", [rows.map((row) => row["id"])]);
+    expect(snapshots.rowCount).toBe(0);
+
+    expect(logged.map((line) => JSON.parse(line) as unknown)).toEqual([
+      {
         level: "warn",
         message: expect.any(String),
         user_uuid: user.uuid,
@@ -314,10 +318,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
         kit: "wow",
         reason: "interface 50504 does not match classic_era",
         facts: { project_id: 2, season_id: null, version: null, build: "69934", interface: 50504 },
-      });
-    } finally {
-      log.mockRestore();
-    }
+      },
+    ]);
 
     // Forever is experimental, and experimental flavors have no gate (D8).
     const forever = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Elwynn Forest", `{ ["project_id"] = 1, ["interface"] = 16001 }`)));
