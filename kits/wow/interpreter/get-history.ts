@@ -4,7 +4,7 @@
 // plus `snapshots`: each snapshot with its own envelope and the requested
 // sections (sections.ts). It goes out as `structuredContent` and as the same
 // JSON in a text block, trimmed to the size cap (§10.5).
-import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogmcp/sdk";
+import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogremcp/sdk";
 import {
   type Cut,
   cutBags,

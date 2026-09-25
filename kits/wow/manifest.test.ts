@@ -1,4 +1,4 @@
-import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
+import schema from "@ogremcp/sdk/manifest.schema.json" with { type: "json" };
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it } from "vitest";
 import manifest from "./manifest.json" with { type: "json" };

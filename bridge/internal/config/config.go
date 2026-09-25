@@ -5,10 +5,10 @@
 // holds no secret: the refresh token is in the OS keychain (package
 // keychain).
 //
-// The file is JSON, ogmcp-bridge/config.json in the user's config directory:
+// The file is JSON, ogremcp-bridge/config.json in the user's config directory:
 //
 //	{
-//	  "server_url": "https://ogmcp.example.com",
+//	  "server_url": "https://ogremcp.example.com",
 //	  "refresh_interval": "5m",
 //	  "debounce": "2s",
 //	  "max_upload_bytes": 5242880,
@@ -31,17 +31,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
 )
 
-// DefaultServerURL is the server when neither OGMCP_BASE_URL nor server_url
-// names one: the platform's Railway domain, for development. The production
-// domain is not decided yet (§19.1 D4).
-const DefaultServerURL = "https://ogmcp-production.up.railway.app"
+// DefaultServerURL is the server when neither OGREMCP_BASE_URL nor server_url
+// names one: the hosted service (§19.1 D4).
+const DefaultServerURL = "https://ogremcp.redpine.software"
 
 // EnvServerURL is the environment variable that overrides server_url, for
 // development.
-const EnvServerURL = "OGMCP_BASE_URL"
+const EnvServerURL = "OGREMCP_BASE_URL"
 
 // DefaultRefreshInterval is how often the bridge fetches the kits and
 // resolves the globs again, unless the file sets refresh_interval (§7,
@@ -147,7 +146,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not find the user config directory: %w", err)
 	}
-	return filepath.Join(dir, "ogmcp-bridge", "config.json"), nil
+	return filepath.Join(dir, "ogremcp-bridge", "config.json"), nil
 }
 
 // Load reads the file at path. A missing file gives an empty File.

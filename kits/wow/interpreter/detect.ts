@@ -1,5 +1,5 @@
 // Flavor and rules detection (docs/architecture.md §6.3.1).
-import type { UnknownFlavor } from "@ogmcp/sdk";
+import type { UnknownFlavor } from "@ogremcp/sdk";
 import type { Client } from "./schema.js";
 
 export interface Detection {

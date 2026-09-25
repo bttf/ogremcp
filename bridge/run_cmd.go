@@ -9,12 +9,12 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/config"
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/upload"
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/upload"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // run is the dev command `bridge run`: it logs in when the bridge holds no

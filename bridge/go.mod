@@ -1,4 +1,4 @@
-module github.com/bttf/ogmcp/bridge
+module github.com/bttf/ogremcp/bridge
 
 go 1.27.1
 

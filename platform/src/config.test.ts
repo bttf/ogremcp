@@ -23,7 +23,7 @@ import { NO_TOOL_CALL_CAPS } from "./usage.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const url = "postgresql://ogmcp:secret-password@localhost:5432/ogmcp";
+const url = "postgresql://ogremcp:secret-password@localhost:5432/ogremcp";
 
 describe("loadConfig", () => {
   it("reads PORT, DATABASE_URL, and DATABASE_QUERY_TIMEOUT_MS, with defaults", () => {
@@ -72,7 +72,7 @@ describe("loadConfig", () => {
   });
 
   it("refuses a malformed DATABASE_URL without repeating it", () => {
-    for (const bad of ["mysql://ogmcp:secret-password@localhost/ogmcp", "postgresql://ogmcp:secret-password@localhost", "secret-password"]) {
+    for (const bad of ["mysql://ogremcp:secret-password@localhost/ogremcp", "postgresql://ogremcp:secret-password@localhost", "secret-password"]) {
       let message = "";
       try {
         loadConfig({ DATABASE_URL: bad });
@@ -91,20 +91,20 @@ describe("loadConfig", () => {
 
   it("reads each sign-in provider as a pair, and then needs PUBLIC_BASE_URL", () => {
     const google = { GOOGLE_CLIENT_ID: "google-id", GOOGLE_CLIENT_SECRET: "google-client-secret" };
-    const config = loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogmcp.example/", ...google });
+    const config = loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogremcp.example/", ...google });
     expect(config.google).toEqual({ clientId: "google-id", clientSecret: "google-client-secret" });
     expect(config.discord).toBeNull();
-    expect(config.publicBaseUrl).toBe("https://ogmcp.example");
+    expect(config.publicBaseUrl).toBe("https://ogremcp.example");
 
     expect(() => loadConfig({ DATABASE_URL: url, ...google })).toThrow("PUBLIC_BASE_URL must be set when a sign-in provider is configured");
     let message = "";
     try {
-      loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogmcp.example", DISCORD_CLIENT_SECRET: "discord-client-secret" });
+      loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogremcp.example", DISCORD_CLIENT_SECRET: "discord-client-secret" });
     } catch (err) {
       message = (err as Error).message;
     }
     expect(message).toBe("DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET must be set together");
-    expect(() => loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogmcp.example/app" })).toThrow("PUBLIC_BASE_URL must be an origin only");
+    expect(() => loadConfig({ DATABASE_URL: url, PUBLIC_BASE_URL: "https://ogremcp.example/app" })).toThrow("PUBLIC_BASE_URL must be an origin only");
   });
 
   it("refuses a renewal window longer than the web session lifetime", () => {
@@ -165,9 +165,9 @@ describe("loadConfig", () => {
   });
 
   it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {
-    const config = loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: " https://downloads.example/ogmcp-bridge " });
-    expect(config.bridgeDownloadUrl).toBe("https://downloads.example/ogmcp-bridge");
-    for (const bad of ["javascript:alert(1)", "http://downloads.example/ogmcp-bridge", "downloads.example"]) {
+    const config = loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: " https://downloads.example/ogremcp-bridge " });
+    expect(config.bridgeDownloadUrl).toBe("https://downloads.example/ogremcp-bridge");
+    for (const bad of ["javascript:alert(1)", "http://downloads.example/ogremcp-bridge", "downloads.example"]) {
       expect(() => loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: bad })).toThrow("BRIDGE_DOWNLOAD_URL must be an https URL");
     }
   });
@@ -216,12 +216,12 @@ describe("loadConfig", () => {
     expect(resolveOidcKeys(null, "http://localhost:4790", false).ephemeral).toBe(true);
     for (const [base, production] of [
       ["http://localhost:4790", true],
-      ["https://ogmcp.example", false],
-      ["http://ogmcp.example", false],
+      ["https://ogremcp.example", false],
+      ["http://ogremcp.example", false],
     ] as const) {
       expect(() => resolveOidcKeys(null, base, production)).toThrow(/^OIDC_JWKS and OIDC_COOKIE_KEYS must be set/);
     }
     const configured = generateOidcKeys();
-    expect(resolveOidcKeys(configured, "https://ogmcp.example", true)).toEqual({ keys: configured, ephemeral: false });
+    expect(resolveOidcKeys(configured, "https://ogremcp.example", true)).toEqual({ keys: configured, ephemeral: false });
   });
 });

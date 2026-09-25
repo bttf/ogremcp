@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogmcp/sdk";
+import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 
 import type { EventRecorder } from "./events.js";

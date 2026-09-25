@@ -409,12 +409,12 @@ func TestUnauthorizedEndsLogin(t *testing.T) {
 
 func TestParseBaseURL(t *testing.T) {
 	for raw, want := range map[string]string{
-		"https://OGMCP.example/":  "https://ogmcp.example",
-		"http://localhost:3000":   "http://localhost:3000",
-		"http://127.0.0.1:3000/":  "http://127.0.0.1:3000",
-		"http://ogmcp.example":    "",
-		"https://ogmcp.example/x": "",
-		"ogmcp.example":           "",
+		"https://OGREMCP.example/":  "https://ogremcp.example",
+		"http://localhost:3000":     "http://localhost:3000",
+		"http://127.0.0.1:3000/":    "http://127.0.0.1:3000",
+		"http://ogremcp.example":    "",
+		"https://ogremcp.example/x": "",
+		"ogremcp.example":           "",
 	} {
 		got, err := ParseBaseURL(raw)
 		if got != want || (err == nil) != (want != "") {

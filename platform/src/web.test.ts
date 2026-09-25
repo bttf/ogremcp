@@ -20,7 +20,7 @@ let server: Server | undefined;
 let webRoot: string;
 
 beforeAll(() => {
-  webRoot = mkdtempSync(join(tmpdir(), "ogmcp-web-"));
+  webRoot = mkdtempSync(join(tmpdir(), "ogremcp-web-"));
   writeFileSync(join(webRoot, "index.html"), PAGE);
   mkdirSync(join(webRoot, "assets"));
   writeFileSync(join(webRoot, "assets", "index-abc123.js"), "export {};");

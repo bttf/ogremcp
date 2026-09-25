@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogmcp/sdk";
+import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogremcp/sdk";
 import { beforeAll, expect, it, vi } from "vitest";
 import { DEFAULT_HISTORY_LIMIT } from "./get-history.js";
 import { interpreter, type WowState } from "./index.js";
@@ -14,7 +14,7 @@ import { interpreter, type WowState } from "./index.js";
 const snapshots = {} as Record<"era" | "forever", Snapshot<WowState>>;
 
 beforeAll(() => {
-  const out = mkdtempSync(join(tmpdir(), "ogmcp-get-history-"));
+  const out = mkdtempSync(join(tmpdir(), "ogremcp-get-history-"));
   try {
     const script = fileURLToPath(new URL("../test/adapter_test.lua", import.meta.url));
     const run = spawnSync("luajit", [script, out], { encoding: "utf8" });

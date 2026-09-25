@@ -49,16 +49,16 @@ jobs:
         run: docker compose build
 
       - name: Generate OAuth keys
-        run: docker compose run --rm --no-deps -T ogmcp node platform/dist/gen-oidc-keys.js >> .env
+        run: docker compose run --rm --no-deps -T ogremcp node platform/dist/gen-oidc-keys.js >> .env
 
-      - name: Start postgres and ogmcp
+      - name: Start postgres and ogremcp
         run: docker compose up --detach --wait --wait-timeout 120
 
       # §11: the service applied the migrations before it started. /health
       # also checks the database; the discovery document needs the OAuth keys.
       - name: Check the service answers
         run: |
-          docker compose logs ogmcp | grep -F "migrate: applied"
+          docker compose logs ogremcp | grep -F "migrate: applied"
           curl -fsS http://localhost:4790/health
           curl -fsS -o /dev/null http://localhost:4790/.well-known/openid-configuration
 

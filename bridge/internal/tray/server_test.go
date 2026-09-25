@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/config"
 )
 
 // tokenServer is a server's discovery document, token endpoint, and kit

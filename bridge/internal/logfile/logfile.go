@@ -4,7 +4,7 @@
 // windowsgui), so the log goes here.
 //
 // Adapted from bttf/wow-guide@df80260, bridge/internal/logfile, with the
-// folder and file names changed to Open Gamer MCP's.
+// folder and file names changed to Ogre MCP's.
 package logfile
 
 import (
@@ -24,9 +24,9 @@ const (
 
 // DefaultPath is where the tray app keeps its log:
 //
-//	macOS    ~/Library/Logs/ogmcp-bridge/bridge.log
-//	Windows  %LocalAppData%\ogmcp-bridge\logs\bridge.log
-//	other    <user config dir>/ogmcp-bridge/logs/bridge.log
+//	macOS    ~/Library/Logs/ogremcp-bridge/bridge.log
+//	Windows  %LocalAppData%\ogremcp-bridge\logs\bridge.log
+//	other    <user config dir>/ogremcp-bridge/logs/bridge.log
 func DefaultPath() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -34,20 +34,20 @@ func DefaultPath() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("finding the home directory: %w", err)
 		}
-		return filepath.Join(home, "Library", "Logs", "ogmcp-bridge", "bridge.log"), nil
+		return filepath.Join(home, "Library", "Logs", "ogremcp-bridge", "bridge.log"), nil
 	case "windows":
 		// UserCacheDir is %LocalAppData% on Windows.
 		dir, err := os.UserCacheDir()
 		if err != nil {
 			return "", fmt.Errorf("finding the local app data directory: %w", err)
 		}
-		return filepath.Join(dir, "ogmcp-bridge", "logs", "bridge.log"), nil
+		return filepath.Join(dir, "ogremcp-bridge", "logs", "bridge.log"), nil
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("finding the user config directory: %w", err)
 	}
-	return filepath.Join(dir, "ogmcp-bridge", "logs", "bridge.log"), nil
+	return filepath.Join(dir, "ogremcp-bridge", "logs", "bridge.log"), nil
 }
 
 // File is a log file that is rotated before a write would take it past

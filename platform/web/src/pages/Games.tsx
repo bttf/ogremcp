@@ -75,7 +75,7 @@ export function Games() {
       {games === "loading" ? (
         <p>Loading…</p>
       ) : games === "error" ? (
-        <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
       ) : (
         <div className="og-games">
           {games.map((game) => (

@@ -1,6 +1,6 @@
-# Open Gamer MCP
+# Ogre MCP
 
-Open Gamer MCP (`ogmcp`) connects a video game to any AI agent through one
+Ogre MCP (`ogremcp`) connects a video game to any AI agent through one
 remote MCP server. A kit per game reads live game state; the agent uses it to
 give spoiler-free, friend-style guidance. The first kit is WoW, starting with
 Classic Era.
@@ -20,8 +20,8 @@ Rules from §0:
 - Values marked *proposed* (limits, TTLs, sizes) are config, not constants.
 - Build order and dependencies are in §18.
 
-Tracker: Linear project **Open Gamer MCP**,
-https://linear.app/redpinesoftware/project/open-gamer-mcp-f052b560decb
+Tracker: Linear project **Ogre MCP**,
+https://linear.app/redpinesoftware/project/ogre-mcp-f052b560decb
 (workspace `redpinesoftware`, team `RED`). Always pass `-w redpinesoftware` to
 the `linear` CLI. The Linear MCP connector is bound to a different workspace and
 cannot see this one.
@@ -30,10 +30,10 @@ cannot see this one.
 
 | Path | Contents | License |
 |---|---|---|
-| `packages/sdk/` | `@ogmcp/sdk`. Manifest schema, `Interpreter` interface, shared types. Depends on nothing. | MIT |
-| `kits/wow/` | `@ogmcp/kit-wow`. `adapter/` (Lua addon), `interpreter/` (TS), `manifest.json`, `fixtures/`. Depends on `@ogmcp/sdk` only. | MIT |
-| `platform/` | `@ogmcp/platform`. Node service: web UI, MCP server, bridge API, OAuth server. Depends on `@ogmcp/sdk`, and on kits only through the `Interpreter` interface. | AGPL-3.0-or-later |
-| `bridge/` | Go module `github.com/bttf/ogmcp/bridge`. Knows only manifest JSON and the HTTP API. | MIT |
+| `packages/sdk/` | `@ogremcp/sdk`. Manifest schema, `Interpreter` interface, shared types. Depends on nothing. | MIT |
+| `kits/wow/` | `@ogremcp/kit-wow`. `adapter/` (Lua addon), `interpreter/` (TS), `manifest.json`, `fixtures/`. Depends on `@ogremcp/sdk` only. | MIT |
+| `platform/` | `@ogremcp/platform`. Node service: web UI, MCP server, bridge API, OAuth server. Depends on `@ogremcp/sdk`, and on kits only through the `Interpreter` interface. | AGPL-3.0-or-later |
+| `bridge/` | Go module `github.com/bttf/ogremcp/bridge`. Knows only manifest JSON and the HTTP API. | MIT |
 | `docs/` | `architecture.md` and process docs. | MIT |
 
 `packages/sdk`, `kits/wow`, and `platform` are pnpm workspace packages.
@@ -54,14 +54,14 @@ does, so that every import resolves.
   import or an alias (tsconfig `paths`, package.json `imports`) that leaves its
   own package, and any import that does not resolve.
 - In `platform`, only the kit registry, `platform/src/kits/registry.ts`, may
-  import `@ogmcp/kit-*`, and it may not re-export a kit. It imports a kit's
+  import `@ogremcp/kit-*`, and it may not re-export a kit. It imports a kit's
   exports by name: no `import * as`, and a default import only of a kit's JSON
   file. If the path changes, change `KIT_REGISTRY` in
   `.dependency-cruiser.cjs` and `scripts/lint-seams.mjs` too.
 - The CI `bridge` job fails if the bridge builds from Go code in the repo
   outside `bridge/`.
 - The lint cannot see a specifier built at runtime, such as
-  `` import(`@ogmcp/kit-${name}`) ``, `import(name)`, or a `createRequire`
+  `` import(`@ogremcp/kit-${name}`) ``, `import(name)`, or a `createRequire`
   call. Reviewers check for these by hand.
 
 ## Stack decisions (D1, §13.1)
@@ -73,19 +73,20 @@ does, so that every import resolves.
 - No Supabase.
 - Schema changes are numbered SQL migrations in `platform/migrations/`,
   applied by the runner in `platform/src/migrations.ts`. Migrations apply on
-  deploy through the `ogmcp` service's pre-deploy command. Agents never run DDL
-  against a live database by hand. A migration that drops or rewrites data
+  deploy through the `ogremcp` service's pre-deploy command. Agents never run
+  DDL against a live database by hand. A migration that drops or rewrites data
   needs the owner's approval before merge.
 - Go 1.27 for the bridge (`bridge/go.mod`).
 
 ## Deploy (§5, §13.1)
 
-Railway project `ogmcp`, environment `production`:
+Railway project `ogremcp`, environment `production`:
 
-- Service `ogmcp`: the platform, built with Railpack from `bttf/ogmcp`, branch
-  `main`. Domain: `ogmcp-production.up.railway.app` (the default Railway
-  domain).
-- Service `Postgres`: Railway Postgres. The `ogmcp` service's `DATABASE_URL`
+- Service `ogremcp`: the platform, built with Railpack from `bttf/ogremcp`,
+  branch `main`. Domain: `ogremcp.redpine.software`, a custom domain with DNS
+  on Cloudflare. The default Railway domain, `ogmcp-production.up.railway.app`,
+  still exists but is not the public URL.
+- Service `Postgres`: Railway Postgres. The `ogremcp` service's `DATABASE_URL`
   is the reference `${{Postgres.DATABASE_URL}}`, which connects over the
   private network.
 
@@ -94,7 +95,7 @@ Change them with `railway api` and the `serviceInstanceUpdate` mutation.
 
 | Setting | Value |
 |---|---|
-| Build command | `pnpm --filter @ogmcp/platform... run build` |
+| Build command | `pnpm --filter @ogremcp/platform... run build` |
 | Pre-deploy command | `node platform/dist/migrate.js` |
 | Start command | `node platform/dist/index.js` |
 | Healthcheck path | `/health/live` |
@@ -126,17 +127,17 @@ unreachable.
 - `node scripts/check-adapter-version.mjs origin/main`: a change to any file
   under `kits/*/adapter/` must raise that kit's TOC `## Version` above the
   base branch's, or the bridge never installs it (§7). CI runs it on PRs.
-- `pnpm --filter @ogmcp/platform dev:web`: Vite dev server for the web UI.
+- `pnpm --filter @ogremcp/platform dev:web`: Vite dev server for the web UI.
   The service serves `platform/dist/web`, which the platform build produces.
-- `pnpm --filter @ogmcp/platform start`: run the built platform. It reads
+- `pnpm --filter @ogremcp/platform start`: run the built platform. It reads
   `platform/.env` when it exists; `platform/.env.example` lists the names.
-- `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
-  pending migrations to `DATABASE_URL`, or only list them. For a local
+- `pnpm --filter @ogremcp/platform migrate [--dry-run]`: after a build, apply
+  the pending migrations to `DATABASE_URL`, or only list them. For a local
   database; production migrates on deploy.
-- `pnpm --filter @ogmcp/platform reparse [--dry-run]`: after a build, re-parse
+- `pnpm --filter @ogremcp/platform reparse [--dry-run]`: after a build, re-parse
   the stored uploads of `DATABASE_URL` with the current kits (§11); options
   in `platform/src/reparse.ts`. Not part of the deploy.
-- `pnpm -s --filter @ogmcp/platform gen-oidc-keys`: after a build, print fresh
+- `pnpm -s --filter @ogremcp/platform gen-oidc-keys`: after a build, print fresh
   values for `OIDC_JWKS` and `OIDC_COOKIE_KEYS`, the OAuth server's keys, as
   `KEY=value` lines for Railway or `platform/.env`. They are secrets. `-s`
   keeps pnpm's own lines out of the output.
@@ -146,7 +147,7 @@ unreachable.
 ## In-game testing
 
 In-game checks run in WoW Classic Era only. Disable the WoWGuide addon while
-testing OpenGamerMCP, because both register `/transmit`.
+testing OgreMCP, because both register `/transmit`.
 
 ## Commits
 

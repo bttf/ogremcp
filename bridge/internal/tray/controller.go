@@ -11,16 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/adapter"
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/autostart"
-	"github.com/bttf/ogmcp/bridge/internal/config"
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
-	"github.com/bttf/ogmcp/bridge/internal/process"
-	"github.com/bttf/ogmcp/bridge/internal/upload"
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/adapter"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/autostart"
+	"github.com/bttf/ogremcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/process"
+	"github.com/bttf/ogremcp/bridge/internal/upload"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // DefaultSaveRetry is how often the tray tries again to save a login that

@@ -2,7 +2,7 @@
 --
 -- The client writes SavedVariables on a UI reload and on logout, not during
 -- play, so /transmit reloads the UI. The reload fires PLAYER_LOGOUT, where
--- Collect.lua collects every part and writes OpenGamerMCPDB. /transmit
+-- Collect.lua collects every part and writes OgreMCPDB. /transmit
 -- changes nothing in the game, and it is the adapter's only command
 -- (docs/architecture.md §1, §6.3).
 --
@@ -21,7 +21,7 @@ local Lookup = ns.Lookup
 local TRANSMIT_RELOAD_TIMEOUT = 3
 
 local function Print(text)
-	DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Open Gamer MCP|r " .. text)
+	DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Ogre MCP|r " .. text)
 end
 
 -- ReloadFunction returns ReloadUI, else C_UI.Reload, whichever the client has.
@@ -55,7 +55,7 @@ local function Transmit()
 	return true
 end
 
-SLASH_OPENGAMERMCPTRANSMIT1 = "/transmit"
-SlashCmdList.OPENGAMERMCPTRANSMIT = function()
+SLASH_OGREMCPTRANSMIT1 = "/transmit"
+SlashCmdList.OGREMCPTRANSMIT = function()
 	Transmit()
 end

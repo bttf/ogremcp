@@ -1,4 +1,4 @@
-import { jsonResult, userError } from "@ogmcp/sdk";
+import { jsonResult, userError } from "@ogremcp/sdk";
 import { describe, expect, it } from "vitest";
 
 import { UserFacingError } from "./tool-context.js";

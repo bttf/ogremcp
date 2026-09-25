@@ -35,7 +35,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PATHS = ["/api/v1/kits", "/api/v1/kits/wow/manifest", "/api/v1/kits/wow/adapter"];
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§8.2)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;
@@ -45,7 +45,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
   let base: string;
 
   beforeAll(async () => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
     kits = loadKitRegistry({ adaptersDir });
 

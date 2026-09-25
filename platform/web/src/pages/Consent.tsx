@@ -22,8 +22,8 @@ export interface ConsentDetails {
  */
 const SCOPE_WORDS: Readonly<Record<string, string>> = {
   read: "Read your game state and search game info",
-  ingest: "Send your game state to Open Gamer MCP",
-  openid: "See your Open Gamer MCP account ID",
+  ingest: "Send your game state to Ogre MCP",
+  openid: "See your Ogre MCP account ID",
   offline_access: "Stay connected until you revoke access",
 };
 
@@ -148,7 +148,7 @@ export function Consent() {
     return (
       <>
         <h1>Approve an agent</h1>
-        <p role="alert">{loaded.status === "expired" ? EXPIRED : "Open Gamer MCP did not answer. Reload the page to try again."}</p>
+        <p role="alert">{loaded.status === "expired" ? EXPIRED : "Ogre MCP did not answer. Reload the page to try again."}</p>
       </>
     );
   }
@@ -161,7 +161,7 @@ export function Consent() {
         <strong>
           <bdi>{client_name ?? "An agent with no name"}</bdi>
         </strong>{" "}
-        asks to connect to your Open Gamer MCP account.
+        asks to connect to your Ogre MCP account.
       </p>
       {client_host !== null && (
         <p>

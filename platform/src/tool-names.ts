@@ -3,7 +3,7 @@
 // and `createToolRegistry` to platform tools, at startup, so a bad name stops
 // the start. Each rule applies to the full name: a `tool_prefix` may be 60
 // characters, so a name built on it can still pass 64.
-import { checkToolName } from "@ogmcp/sdk";
+import { checkToolName } from "@ogremcp/sdk";
 
 /** §10.2: at most 8 tools per kit. */
 export const MAX_KIT_TOOLS = 8;

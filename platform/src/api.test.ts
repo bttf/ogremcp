@@ -30,7 +30,7 @@ let kits: KitRegistry;
 
 // The real registry, over adapter zips written for these tests.
 beforeAll(() => {
-  adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+  adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
   writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
   kits = loadKitRegistry({ adaptersDir });
 });
@@ -62,7 +62,7 @@ describe("without a web session", () => {
   });
 
   it("GET /api/v1/setup answers 401", async () => {
-    const base = await serve({} as Pool, "https://downloads.example/ogmcp-bridge");
+    const base = await serve({} as Pool, "https://downloads.example/ogremcp-bridge");
     const res = await fetch(`${base}/api/v1/setup`);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "signed_out" });
@@ -80,7 +80,7 @@ describe("without a web session", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -109,7 +109,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
     if (user === undefined) throw new Error("no user row");
     const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
     const { token } = await sessions.create(user.id);
-    return { ...user, cookie: `ogmcp_session=${token}` };
+    return { ...user, cookie: `ogremcp_session=${token}` };
   }
 
   it("GET /api/v1/me answers the signed-in user's uuid and linked providers, and no serial id", async () => {
@@ -128,10 +128,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
 
   it("GET /api/v1/setup answers the MCP URL, and the download URL only when one is configured (§13.2)", async () => {
     const user = await signIn();
-    const configured = await serve(pool, "https://downloads.example/ogmcp-bridge");
+    const configured = await serve(pool, "https://downloads.example/ogremcp-bridge");
     const res = await fetch(`${configured}/api/v1/setup`, { headers: { cookie: user.cookie } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mcp_url: `${BASE}/mcp`, bridge_download_url: "https://downloads.example/ogmcp-bridge" });
+    expect(await res.json()).toEqual({ mcp_url: `${BASE}/mcp`, bridge_download_url: "https://downloads.example/ogremcp-bridge" });
     server?.close();
 
     const unconfigured = await serve(pool);

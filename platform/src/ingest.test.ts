@@ -45,7 +45,7 @@ const CLASSIC_ERA_CLIENT = `{ ["project_id"] = 2, ["interface"] = 11509 }`;
 
 /** A SavedVariables file the WoW interpreter parses (§6.3), with synthetic data. */
 function savedVariables(capturedAt: number, zone = "Elwynn Forest", client = CLASSIC_ERA_CLIENT): string {
-  return `OpenGamerMCPDB = {
+  return `OgreMCPDB = {
   ["schema"] = 1,
   ["client"] = ${client},
   ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
@@ -59,12 +59,12 @@ const CAPTURED_AT = 1_790_000_000;
 
 /** The WoW kit's golden SavedVariables file from a Classic Era client (§6.4), next to its adapter folder. */
 function eraFixture(): Buffer {
-  const wow = KIT_SOURCES.find((source) => source.package === "@ogmcp/kit-wow");
+  const wow = KIT_SOURCES.find((source) => source.package === "@ogremcp/kit-wow");
   if (wow === undefined) throw new Error("no wow kit");
-  return readFileSync(join(dirname(wow.adapterDir), "fixtures/classic_era/OpenGamerMCP.lua"));
+  return readFileSync(join(dirname(wow.adapterDir), "fixtures/classic_era/OgreMCP.lua"));
 }
 
-const INSTANCE = sha256("_classic_era_/WTF/Account/TEST/SavedVariables/OpenGamerMCP.lua");
+const INSTANCE = sha256("_classic_era_/WTF/Account/TEST/SavedVariables/OgreMCP.lua");
 
 /** An upload of `text`: its gzip and its §8.3 meta, with `meta` over the defaults. */
 function upload(text: string | Buffer, meta: Partial<IngestMeta> = {}): { gz: Buffer; meta: IngestMeta } {
@@ -84,7 +84,7 @@ function upload(text: string | Buffer, meta: Partial<IngestMeta> = {}): { gz: Bu
 }
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;
@@ -115,7 +115,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   }
 
   beforeAll(async () => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
     kits = loadKitRegistry({ adaptersDir });
 
@@ -198,7 +198,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   ): Promise<{ res: Response; body: IngestAnswer | null }> {
     const form = new FormData();
     form.append("meta", JSON.stringify(meta));
-    form.append("file", new Blob([new Uint8Array(gz)]), "OpenGamerMCP.lua.gz");
+    form.append("file", new Blob([new Uint8Array(gz)]), "OgreMCP.lua.gz");
     const res = await fetch(`${to}/api/v1/ingest`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: form });
     const text = await res.text();
     const json = res.headers.get("content-type")?.startsWith("application/json") === true;
@@ -316,7 +316,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const statuses = [
       await post(accessToken, good),
       await post(accessToken, good),
-      await post(accessToken, upload("OpenGamerMCPDB = os.exit()")),
+      await post(accessToken, upload("OgreMCPDB = os.exit()")),
       await post(accessToken, tbc),
       await post(accessToken, upload(savedVariables(CAPTURED_AT), { kit: "nope" })),
       await post(accessToken, { ...good, meta: { ...good.meta, pad: "x".repeat(20_000) } as IngestMeta }),
@@ -381,10 +381,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
 
   it("keeps an upload that fails to parse, for a re-parse, and answers parse_error", async () => {
     const { accessToken, deviceId } = await token(await newUser());
-    const bad = upload("OpenGamerMCPDB = os.exit()");
+    const bad = upload("OgreMCPDB = os.exit()");
     const res = await post(accessToken, bad);
     expect(res.res.status).toBe(422);
-    expect(res.body).toEqual({ status: "parse_error", message: expect.stringMatching(/^OpenGamerMCP\.lua could not be read/) });
+    expect(res.body).toEqual({ status: "parse_error", message: expect.stringMatching(/^OgreMCP\.lua could not be read/) });
 
     const rows = await uploadsOf(deviceId);
     expect(rows).toHaveLength(1);
@@ -397,7 +397,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     // A failure after the schema and the client facts were read records them (§16.1). A schema that no integer
     // column holds is left out, and the upload is still kept.
     const badZone = await post(accessToken, upload(savedVariables(CAPTURED_AT).replace('["zone"] = "Elwynn Forest"', '["zone"] = 5')));
-    expect(badZone.body).toEqual({ status: "parse_error", message: expect.stringContaining("OpenGamerMCPDB.state.location.zone") });
+    expect(badZone.body).toEqual({ status: "parse_error", message: expect.stringContaining("OgreMCPDB.state.location.zone") });
     const hugeSchema = await post(accessToken, upload(savedVariables(CAPTURED_AT).replace('["schema"] = 1', '["schema"] = 4294967296')));
     expect(hugeSchema.body).toEqual({ status: "parse_error", message: expect.stringContaining("data format 4294967296") });
 
@@ -469,7 +469,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
       "",
       JSON.stringify(good.meta),
       "--X",
-      'Content-Disposition: form-data; name="file"; filename="OpenGamerMCP.lua.gz"',
+      'Content-Disposition: form-data; name="file"; filename="OgreMCP.lua.gz"',
       "Content-Type: application/octet-stream",
       "",
       "",
@@ -547,7 +547,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const good = upload(savedVariables(CAPTURED_AT));
 
     // A failed parse claims no slot, so the other device's stored upload takes it.
-    expect((await post(a.accessToken, upload("OpenGamerMCPDB = os.exit()"))).res.status).toBe(422);
+    expect((await post(a.accessToken, upload("OgreMCPDB = os.exit()"))).res.status).toBe(422);
     expect((await post(b.accessToken, good)).res.status).toBe(201);
     expect(await claimed(user)).toEqual([b.deviceId]);
 
@@ -623,7 +623,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect(again.body).toEqual({ status: "rate_limited", message: expect.any(String) });
 
     // Another account's SavedVariables on the same device has a bucket of its own.
-    const other = upload(savedVariables(CAPTURED_AT), { instance: sha256("_classic_era_/WTF/Account/OTHER/SavedVariables/OpenGamerMCP.lua") });
+    const other = upload(savedVariables(CAPTURED_AT), { instance: sha256("_classic_era_/WTF/Account/OTHER/SavedVariables/OgreMCP.lua") });
     expect((await post(accessToken, other, limited)).res.status).toBe(201);
     // A new instance each time still meets the device's bucket, which the refused upload took nothing from.
     const third = await post(accessToken, upload(savedVariables(CAPTURED_AT), { instance: sha256("made up") }), limited);

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 func mkdir(t *testing.T, parts ...string) string {

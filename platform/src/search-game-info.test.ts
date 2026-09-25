@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { ToolResult } from "@ogmcp/sdk";
+import type { ToolResult } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -74,7 +74,7 @@ describe("search_game_info (§10.3, §12)", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("search_game_info's default flavor", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 

@@ -64,7 +64,7 @@ export function startServer(server: Server, port: number, io: ListenIo = {}): Se
   const exit = io.exit ?? process.exit;
   server.once("listening", () => {
     const address = server.address();
-    log(`ogmcp platform listening on ${typeof address === "string" ? address : `:${address?.port}`}`);
+    log(`ogremcp platform listening on ${typeof address === "string" ? address : `:${address?.port}`}`);
   });
   server.once("error", (err: NodeJS.ErrnoException) => {
     error(

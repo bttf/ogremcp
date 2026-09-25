@@ -1,7 +1,7 @@
 // User-facing ParseError messages (docs/architecture.md §6.2, §8.3). The
 // bridge shows them to the player, so every message is clipped to
 // MESSAGE_MAX characters, and text quoted from the upload to QUOTE_MAX.
-import { ParseError, type ParseErrorFacts } from "@ogmcp/sdk";
+import { ParseError, type ParseErrorFacts } from "@ogremcp/sdk";
 
 export const MESSAGE_MAX = 300;
 export const QUOTE_MAX = 40;

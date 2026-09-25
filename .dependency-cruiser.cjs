@@ -5,7 +5,7 @@
 // declarations and kit re-exports from the kit registry.
 //
 // An import by package name shows up in one of two forms: a path in the repo
-// (the package resolved through its node_modules link), or the bare @ogmcp/*
+// (the package resolved through its node_modules link), or the bare @ogremcp/*
 // name when the package does not resolve (not declared, or not built yet).
 // The package rules match both forms. Any other import that does not resolve
 // fails, so that no import goes unchecked.
@@ -17,9 +17,9 @@ const KIT_REGISTRY = "^platform/src/kits/registry\\.ts$";
 // A workspace package directory. $1 in a `to` pattern is the importer's own.
 const PACKAGE = "^((packages|kits)/[^/]+|platform)/";
 // Every package in the repo, by directory or by package name.
-const ANY_PACKAGE = ["^(packages|kits)/[^/]+/", "^(platform|bridge)/", "^@ogmcp/"];
-const SDK = ["^packages/sdk/", "^@ogmcp/sdk(/|$)"];
-const KITS = ["^kits/[^/]+/", "^@ogmcp/kit-"];
+const ANY_PACKAGE = ["^(packages|kits)/[^/]+/", "^(platform|bridge)/", "^@ogremcp/"];
+const SDK = ["^packages/sdk/", "^@ogremcp/sdk(/|$)"];
+const KITS = ["^kits/[^/]+/", "^@ogremcp/kit-"];
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
@@ -29,7 +29,7 @@ module.exports = {
       // `paths`, package.json `imports`) that resolves inside the repo, as local.
       name: "no-relative-or-alias-import-across-packages",
       comment:
-        "A relative or aliased import stays inside its own package. Import an allowed package by its @ogmcp/* name (§5).",
+        "A relative or aliased import stays inside its own package. Import an allowed package by its @ogremcp/* name (§5).",
       severity: "error",
       from: { path: PACKAGE },
       to: { dependencyTypes: ["local"], pathNot: "^$1/" },
@@ -37,10 +37,10 @@ module.exports = {
     {
       name: "no-unresolved-import",
       comment:
-        "Every import must resolve, so the seam rules can check where it points. Only an @ogmcp/* package that is not built yet is exempt (§5).",
+        "Every import must resolve, so the seam rules can check where it points. Only an @ogremcp/* package that is not built yet is exempt (§5).",
       severity: "error",
       from: { path: PACKAGE },
-      to: { couldNotResolve: true, pathNot: "^@ogmcp/" },
+      to: { couldNotResolve: true, pathNot: "^@ogremcp/" },
     },
     {
       name: "sdk-imports-no-package",
@@ -55,7 +55,7 @@ module.exports = {
     },
     {
       name: "kit-imports-sdk-only",
-      comment: "A kit depends on @ogmcp/sdk only (§5).",
+      comment: "A kit depends on @ogremcp/sdk only (§5).",
       severity: "error",
       from: { path: "^kits/([^/]+)/" },
       to: {
@@ -67,7 +67,7 @@ module.exports = {
     {
       name: "platform-imports-sdk-only",
       comment:
-        "Platform depends on @ogmcp/sdk only. Kits are imported only in platform/src/kits/registry.ts (§5).",
+        "Platform depends on @ogremcp/sdk only. Kits are imported only in platform/src/kits/registry.ts (§5).",
       severity: "error",
       from: { path: "^platform/", pathNot: KIT_REGISTRY },
       to: {
@@ -78,7 +78,7 @@ module.exports = {
     },
     {
       name: "kit-registry-imports-sdk-and-kits-only",
-      comment: "The kit registry depends on @ogmcp/sdk and on kits only (§5).",
+      comment: "The kit registry depends on @ogremcp/sdk and on kits only (§5).",
       severity: "error",
       from: { path: KIT_REGISTRY },
       to: {

@@ -139,7 +139,7 @@ class Browser {
 }
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the device flow against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let sessions: WebSessions;
@@ -148,7 +148,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the device flow against Postgr
   let webRoot: string;
 
   beforeAll(async () => {
-    webRoot = mkdtempSync(join(tmpdir(), "ogmcp-web-"));
+    webRoot = mkdtempSync(join(tmpdir(), "ogremcp-web-"));
     writeFileSync(join(webRoot, "index.html"), "<!doctype html><title>web</title>");
     admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
     await admin.query(`create database "${name}"`);
@@ -234,7 +234,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the device flow against Postgr
     expect(entered).toMatchObject({ status: 200, body: { step: "enter", xsrf: expect.any(String) } });
     const xsrf = String(entered.body["xsrf"]);
     const confirm = await browser.call({ xsrf, user_code: userCode.toLowerCase().replace("-", " ") });
-    expect(confirm.body).toEqual({ step: "confirm", xsrf, user_code: userCode, client_name: "Open Gamer MCP bridge" });
+    expect(confirm.body).toEqual({ step: "confirm", xsrf, user_code: userCode, client_name: "Ogre MCP bridge" });
     expect(await browser.submit({ xsrf, user_code: userCode, confirm: "yes" })).toBe("/device?result=approved");
 
     const issued = await token({ grant_type: DEVICE_CODE_GRANT, device_code: deviceCode });

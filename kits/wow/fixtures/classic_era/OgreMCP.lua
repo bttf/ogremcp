@@ -1,5 +1,5 @@
 
-OpenGamerMCPDB = {
+OgreMCPDB = {
 ["state"] = {
 ["inventory"] = {
 ["items"] = {

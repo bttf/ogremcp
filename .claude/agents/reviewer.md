@@ -28,7 +28,7 @@ In priority order:
 
 1. **Correctness.** Does it do what the issue asks? Wrong logic, unhandled
    errors, race conditions, off-by-one, incorrect async handling.
-2. **Contract drift.** Does it match the types in `@ogmcp/sdk` and
+2. **Contract drift.** Does it match the types in `@ogremcp/sdk` and
    `docs/architecture.md`? Do the adapter, bridge, and platform agree on the
    wire format? Does it keep the package seams in §5?
 3. **Security.** Secrets in the repo, secrets in logs, missing auth on an

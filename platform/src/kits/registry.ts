@@ -1,5 +1,5 @@
 // The kit registry (docs/architecture.md §5, §6.5). It is the only platform
-// module that imports `@ogmcp/kit-*`, and it types each kit as an
+// module that imports `@ogremcp/kit-*`, and it types each kit as an
 // `Interpreter`. It imports a kit's interpreter by name and its manifest.json
 // as JSON, and never re-exports a kit module (`pnpm lint:seams` checks both).
 //
@@ -8,9 +8,9 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-import { interpreter as wowInterpreter } from "@ogmcp/kit-wow";
-import wowManifest from "@ogmcp/kit-wow/manifest.json" with { type: "json" };
-import type { Interpreter, Manifest } from "@ogmcp/sdk";
+import { interpreter as wowInterpreter } from "@ogremcp/kit-wow";
+import wowManifest from "@ogremcp/kit-wow/manifest.json" with { type: "json" };
+import type { Interpreter, Manifest } from "@ogremcp/sdk";
 
 import { ADAPTERS_DIR, type AdapterZip, readAdapterZip } from "./adapter.js";
 import { checkKits, type KitSource } from "./validate.js";
@@ -26,10 +26,10 @@ function adapterDir(manifestPath: string): string {
 /** The first-class kits (§6.5). The build zips their adapters; startup checks them. */
 export const KIT_SOURCES: readonly KitSource[] = [
   {
-    package: "@ogmcp/kit-wow",
+    package: "@ogremcp/kit-wow",
     manifest: wowManifest,
     interpreter: wowInterpreter,
-    adapterDir: adapterDir(resolve("@ogmcp/kit-wow/manifest.json")),
+    adapterDir: adapterDir(resolve("@ogremcp/kit-wow/manifest.json")),
   },
 ];
 

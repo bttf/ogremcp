@@ -16,11 +16,11 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/bttf/ogmcp/bridge/internal/autostart"
-	"github.com/bttf/ogmcp/bridge/internal/config"
-	"github.com/bttf/ogmcp/bridge/internal/lock"
-	"github.com/bttf/ogmcp/bridge/internal/logfile"
-	"github.com/bttf/ogmcp/bridge/internal/tray"
+	"github.com/bttf/ogremcp/bridge/internal/autostart"
+	"github.com/bttf/ogremcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/lock"
+	"github.com/bttf/ogremcp/bridge/internal/logfile"
+	"github.com/bttf/ogremcp/bridge/internal/tray"
 )
 
 // runTray runs the bridge as a tray app (§7): an icon in the macOS menu bar or
@@ -36,12 +36,12 @@ import (
 func runTray() int {
 	logPath, err := logfile.DefaultPath()
 	if err != nil {
-		alert("Open Gamer MCP could not start: " + err.Error())
+		alert("Ogre MCP could not start: " + err.Error())
 		return 1
 	}
 	logFile, err := logfile.Open(logPath, logfile.DefaultMaxBytes, logfile.DefaultKeep)
 	if err != nil {
-		alert("Open Gamer MCP could not open its log file: " + err.Error())
+		alert("Ogre MCP could not open its log file: " + err.Error())
 		return 1
 	}
 	defer logFile.Close()
@@ -54,12 +54,12 @@ func runTray() int {
 	held, err := acquireLock()
 	if errors.Is(err, lock.ErrLocked) {
 		logger.Info("another bridge runs for this user; quitting")
-		alert("Open Gamer MCP is already running. Its icon is in " + trayPlace() + ".")
+		alert("Ogre MCP is already running. Its icon is in " + trayPlace() + ".")
 		return 0
 	}
 	if err != nil {
 		logger.Error("could not take the single-instance lock", "error", err.Error())
-		alert("Open Gamer MCP could not start: " + err.Error())
+		alert("Ogre MCP could not start: " + err.Error())
 		return 1
 	}
 	defer held.Release()
@@ -67,7 +67,7 @@ func runTray() int {
 	settings, settingsPath, err := loadSettings()
 	if err != nil {
 		logger.Error("could not read the settings file", "error", err.Error())
-		alert("Open Gamer MCP could not read its settings file: " + err.Error())
+		alert("Ogre MCP could not read its settings file: " + err.Error())
 		return 1
 	}
 	client, base, err := newClient(settings)
@@ -75,9 +75,9 @@ func runTray() int {
 		// A server URL the bridge refuses: it does not fall back to the
 		// hosted service.
 		logger.Error("could not start", "error", err.Error())
-		msg := "Open Gamer MCP could not start: " + err.Error()
+		msg := "Ogre MCP could not start: " + err.Error()
 		if os.Getenv(config.EnvServerURL) == "" {
-			cmd := "ogmcp-bridge"
+			cmd := "ogremcp-bridge"
 			if exe, err := executable(); err == nil {
 				cmd = `"` + exe + `"`
 			}

@@ -54,7 +54,7 @@ export interface WebSessionOptions {
 }
 
 /** Where the middleware leaves the current user, in `res.locals`. */
-const USER = "ogmcpUser";
+const USER = "ogremcpUser";
 
 export class WebSessions {
   /**
@@ -76,7 +76,7 @@ export class WebSessions {
     this.renewWithinMs = options.renewWithinMs;
     this.secure = options.secure;
     this.now = options.now ?? (() => new Date());
-    this.cookieName = options.secure ? "__Host-ogmcp_session" : "ogmcp_session";
+    this.cookieName = options.secure ? "__Host-ogremcp_session" : "ogremcp_session";
   }
 
   /** Starts a web session for the user of `users.id` `userId`. The token goes in the cookie and nowhere else. */

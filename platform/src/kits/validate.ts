@@ -1,8 +1,8 @@
 // The checks a kit passes before the platform uses it (docs/architecture.md
 // §5, §6.1, §10.1, §10.2). The platform runs them at startup and at build
 // time, so a bad kit fails the build and the deploy, not a request.
-import type { Interpreter, Manifest } from "@ogmcp/sdk";
-import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
+import type { Interpreter, Manifest } from "@ogremcp/sdk";
+import schema from "@ogremcp/sdk/manifest.schema.json" with { type: "json" };
 import { Ajv2020 } from "ajv/dist/2020.js";
 
 import { checkKitToolName, MAX_KIT_TOOLS } from "../tool-names.js";
@@ -24,7 +24,7 @@ export interface CheckedKit {
   manifest: Manifest;
   /**
    * The folder the adapter zip holds: the last segment of `adapter.install`,
-   * e.g. `OpenGamerMCP`. Null for an adapter-less kit.
+   * e.g. `OgreMCP`. Null for an adapter-less kit.
    */
   adapterFolder: string | null;
 }
@@ -93,7 +93,7 @@ function adapterFolder(pkg: string, manifest: Manifest): string | null {
   const folder = manifest.adapter.install.split(/[/\\]/).at(-1) ?? "";
   if (folder === "" || folder === "." || GLOB.test(folder)) {
     throw new Error(
-      `${pkg}: adapter.install must end in the adapter's folder name, with no glob characters, e.g. "_*_/Interface/AddOns/OpenGamerMCP".`,
+      `${pkg}: adapter.install must end in the adapter's folder name, with no glob characters, e.g. "_*_/Interface/AddOns/OgreMCP".`,
     );
   }
   return folder;

@@ -26,7 +26,7 @@ import { WebSessions } from "./web-sessions.js";
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in oidc.test.ts are skipped");
 
-const ISSUER = "https://ogmcp.example";
+const ISSUER = "https://ogremcp.example";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
@@ -65,7 +65,7 @@ async function get(port: number, path: string, headers: Record<string, string> =
         host: "127.0.0.1",
         port,
         path,
-        headers: { host: "ogmcp.example", "x-forwarded-proto": "https", accept: "application/json", ...headers },
+        headers: { host: "ogremcp.example", "x-forwarded-proto": "https", accept: "application/json", ...headers },
       },
       (res) => {
         let body = "";
@@ -115,7 +115,7 @@ describe("OAuth server", () => {
   it("builds endpoint URLs on the issuer's origin whatever X-Forwarded-Host and -Proto a client sends", async () => {
     const port = await serve(1);
     const forged = await get(port, "/.well-known/openid-configuration", {
-      "x-forwarded-host": "evil.example, ogmcp.example",
+      "x-forwarded-host": "evil.example, ogremcp.example",
       "x-forwarded-proto": "http, https",
     });
     const metadata = JSON.parse(forged.body) as Record<string, unknown>;
@@ -187,7 +187,7 @@ describe("OAuth server", () => {
     const port = await serve(0);
     const metadata = JSON.parse((await get(port, "/.well-known/openid-configuration")).body) as Record<string, unknown>;
     expect(metadata["issuer"]).toBe(ISSUER);
-    expect(metadata["token_endpoint"]).toBe("http://ogmcp.example/oauth/token");
+    expect(metadata["token_endpoint"]).toBe("http://ogremcp.example/oauth/token");
   });
 });
 
@@ -224,7 +224,7 @@ class Browser {
 }
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth interactions against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   const issuer = "http://localhost:4790";
   const redirectUri = "https://agent.example/callback";
   /** An authorization request's client and redirect URI. */

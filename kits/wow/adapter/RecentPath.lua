@@ -37,13 +37,13 @@
 -- dropped. A zone change always appends.
 --
 -- recent_path is the one section carried across reloads (§6.3.1). The first
--- collection of a session takes the entries of the OpenGamerMCPDB the client
+-- collection of a session takes the entries of the OgreMCPDB the client
 -- loaded, when that table belongs to the same character. The zone of a
 -- carried entry is read again from its map ID, so an entry written while
 -- GetRealZoneText named a building takes the name of its zone map. An entry
 -- whose map gives no zone name keeps its zone. A client that does not read
 -- SavedVariables back, as WoW Forever builds 69893 and 69913 do, leaves
--- OpenGamerMCPDB empty, so there the path starts at the reload. The adapter
+-- OgreMCPDB empty, so there the path starts at the reload. The adapter
 -- checks the table, never the client.
 
 local _, ns = ...
@@ -108,10 +108,10 @@ local function Change(last, place)
 end
 
 -- Carried returns the newest RECENT_PATH_MAX entries of the path in the
--- OpenGamerMCPDB the client loaded, or an empty list when that table is
+-- OgreMCPDB the client loaded, or an empty list when that table is
 -- missing or belongs to a character other than guid.
 local function Carried(guid)
-	local saved = OpenGamerMCPDB
+	local saved = OgreMCPDB
 	local out = {}
 	if not guid or ReadName(PlainField(PlainField(saved, "character"), "guid")) ~= guid then
 		return out

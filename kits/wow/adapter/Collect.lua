@@ -1,6 +1,6 @@
 -- Collection -----------------------------------------------------------------
 --
--- A collection reads every part of OpenGamerMCPDB from the client and keeps
+-- A collection reads every part of OgreMCPDB from the client and keeps
 -- the values in memory. The table itself is written only at PLAYER_LOGOUT,
 -- which fires on logout and on every UI reload, just before the client writes
 -- SavedVariables (docs/architecture.md §6.3).
@@ -16,7 +16,7 @@ local MarkItemCacheStale = ns.MarkItemCacheStale
 local ItemsPending = ns.ItemsPending
 local Write = ns.Write
 
--- The parts of OpenGamerMCPDB read from the client, in collection order. A
+-- The parts of OgreMCPDB read from the client, in collection order. A
 -- part with top set goes to the top level of the table, every other part
 -- into state.
 local COLLECT_PARTS = {

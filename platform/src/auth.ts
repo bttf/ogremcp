@@ -54,7 +54,7 @@ export interface AuthOptions {
  * the bare name, as the web session cookie does.
  */
 function signInCookieName(provider: ProviderName, secure: boolean): string {
-  return `${secure ? "__Host-" : ""}ogmcp_signin_${provider}`;
+  return `${secure ? "__Host-" : ""}ogremcp_signin_${provider}`;
 }
 
 /** How long a sign-in may take at the provider. */
@@ -162,7 +162,7 @@ export function authRouter({ pool, sessions, providers, publicBaseUrl, log = log
           return sendText(
             res,
             409,
-            `This ${provider.label} account is already linked to another Open Gamer MCP account, so it was not connected to yours. Accounts are never merged.`,
+            `This ${provider.label} account is already linked to another Ogre MCP account, so it was not connected to yours. Accounts are never merged.`,
           );
         }
         return res.redirect(returnTo);

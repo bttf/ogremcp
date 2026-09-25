@@ -1,4 +1,4 @@
-import { jsonResult, type ToolResult, userError } from "@ogmcp/sdk";
+import { jsonResult, type ToolResult, userError } from "@ogremcp/sdk";
 
 import { FirecrawlError } from "./firecrawl.js";
 import type { Kit } from "./kits/registry.js";

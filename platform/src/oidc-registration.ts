@@ -166,7 +166,7 @@ function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, 
   if (ctx?.oidc.route !== "registration") {
     // Registration refuses it below, as it does every grant type but the code flow's.
     if (key === "grant_types" && Array.isArray(value) && value.includes(DEVICE_CODE_GRANT) && metadata.client_id !== BRIDGE_CLIENT_ID) {
-      refuse("grant_types may not hold the device code grant: only the Open Gamer MCP bridge uses it");
+      refuse("grant_types may not hold the device code grant: only the Ogre MCP bridge uses it");
     }
     return;
   }

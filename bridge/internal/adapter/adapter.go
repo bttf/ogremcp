@@ -43,8 +43,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/process"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/process"
 )
 
 // DefaultStagedInterval is how often Run checks whether the game still runs
@@ -103,7 +103,7 @@ func (s State) String() string {
 type Status struct {
 	Kit string
 	// Path is the adapter folder, such as
-	// .../_classic_era_/Interface/AddOns/OpenGamerMCP.
+	// .../_classic_era_/Interface/AddOns/OgreMCP.
 	Path  string
 	State State
 	// Installed is the version in the folder after the sync, or "" when

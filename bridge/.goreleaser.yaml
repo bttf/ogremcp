@@ -2,7 +2,7 @@
 # `make dist` runs a snapshot build. Tagged releases are RED-344 (P9).
 # Templates use BRIDGE_VERSION, not .Version, which keeps the bridge-v prefix.
 version: 2
-project_name: ogmcp-bridge
+project_name: ogremcp-bridge
 
 builds:
   # cgo for the tray code (§7). On an arm64 Mac the amd64 build is a
@@ -38,7 +38,7 @@ universal_binaries:
       post:
         - cmd: >-
             bash scripts/macos-app.sh "{{ .Path }}" "{{ .Env.BRIDGE_VERSION }}"
-            "dist/Open Gamer MCP.app"
+            "dist/Ogre MCP.app"
             "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.app.zip"
           output: true
 

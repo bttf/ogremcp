@@ -1,7 +1,7 @@
 // The WoW kit's interpreter (docs/architecture.md §6.2). It parses the
-// adapter's SavedVariables file, OpenGamerMCP.lua (§6.3), into a snapshot.
+// adapter's SavedVariables file, OgreMCP.lua (§6.3), into a snapshot.
 // Pure: no DB or network.
-import type { Interpreter, Parsed } from "@ogmcp/sdk";
+import type { Interpreter, Parsed } from "@ogremcp/sdk";
 import type { z } from "zod";
 import { detect } from "./detect.js";
 import { clip, parseError, QUOTE_MAX } from "./errors.js";
@@ -14,9 +14,9 @@ export type { Client, WowState } from "./schema.js";
 
 /** The manifest's only source (kits/wow/manifest.json). */
 const SOURCE_ID = "savedvariables";
-const FILE_NAME = "OpenGamerMCP.lua";
+const FILE_NAME = "OgreMCP.lua";
 /** The table the adapter's TOC declares as its SavedVariables. */
-const DB_NAME = "OpenGamerMCPDB";
+const DB_NAME = "OgreMCPDB";
 
 /** The adapter schema the adapter in kits/wow/adapter writes (Storage.lua). */
 export const ADAPTER_SCHEMA = 1;
@@ -69,7 +69,7 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits, now: Da
   }
   const db = readSavedVariables(bytes, limits, FILE_NAME).get(DB_NAME);
   if (db === undefined) {
-    throw parseError(`${FILE_NAME} holds no Open Gamer MCP data yet. Type /transmit in game to save it.`);
+    throw parseError(`${FILE_NAME} holds no Ogre MCP data yet. Type /transmit in game to save it.`);
   }
   const table = typeof db === "object" && !Array.isArray(db) ? db : undefined;
   const adapterSchema = checkSchema(table?.["schema"]);
@@ -125,12 +125,12 @@ function checkSchema(schema: unknown): number {
   const accepted = `${ACCEPTED_SCHEMAS.length === 1 ? "format" : "formats"} ${ACCEPTED_SCHEMAS.join(" and ")}`;
   if (schema > ADAPTER_SCHEMA) {
     throw parseError(
-      `Your Open Gamer MCP addon saves data format ${schema}, and the server reads ${accepted}. The server does not read the newer format yet.`,
+      `Your Ogre MCP addon saves data format ${schema}, and the server reads ${accepted}. The server does not read the newer format yet.`,
       { adapterSchema: schema },
     );
   }
   throw parseError(
-    `Your Open Gamer MCP addon is out of date: it saves data format ${schema}, and the server reads ${accepted}. Update the addon.`,
+    `Your Ogre MCP addon is out of date: it saves data format ${schema}, and the server reads ${accepted}. Update the addon.`,
     { adapterSchema: schema },
   );
 }

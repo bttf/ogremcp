@@ -2,10 +2,10 @@
 // `platform/migrations/` to the database of `DATABASE_URL`. See
 // `migrations.ts` for what the runner does.
 //
-//   pnpm --filter @ogmcp/platform migrate [--dry-run]
+//   pnpm --filter @ogremcp/platform migrate [--dry-run]
 //   node platform/dist/migrate.js [--dry-run]
 //
-// Railway runs the second form as the `ogmcp` service's pre-deploy command,
+// Railway runs the second form as the `ogremcp` service's pre-deploy command,
 // so a deploy migrates before the new version starts, and a failed migrate
 // stops the deploy. Self-host runs it at container start (§13.3). With
 // `--dry-run` it lists the pending files and applies nothing.

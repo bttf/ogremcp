@@ -56,7 +56,7 @@ export function GetStarted() {
       {setup === "loading" ? (
         <p>Loading…</p>
       ) : setup === "error" ? (
-        <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
       ) : (
         <ol className="og-cards og-steps">
           <Step title="Choose your games" done={progress.games}>
@@ -66,7 +66,7 @@ export function GetStarted() {
             </p>
           </Step>
           <Step title="Download the bridge" done={progress.bridge}>
-            <p>The bridge is one app for every game you play. It runs on Windows and macOS and sends your game state to Open Gamer MCP.</p>
+            <p>The bridge is one app for every game you play. It runs on Windows and macOS and sends your game state to Ogre MCP.</p>
             {setup.bridge_download_url === null ? (
               <p>The download is not available yet.</p>
             ) : (
@@ -83,7 +83,7 @@ export function GetStarted() {
             </p>
           </Step>
           <Step title="Connect your agent" done={progress.agent}>
-            <p>Add Open Gamer MCP to your AI agent, such as Claude or ChatGPT, and approve it.</p>
+            <p>Add Ogre MCP to your AI agent, such as Claude or ChatGPT, and approve it.</p>
             <p>
               <Link to="/connect">Connect your agent</Link>
             </p>

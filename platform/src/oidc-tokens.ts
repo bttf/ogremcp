@@ -164,7 +164,7 @@ export interface VerifiedToken {
   scopes: string[];
 }
 
-const TOKEN = "ogmcpToken";
+const TOKEN = "ogremcpToken";
 
 /** The access token `requireToken` accepted for this request, or null. */
 export function currentToken(res: Response): VerifiedToken | null {

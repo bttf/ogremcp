@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 type list []string
