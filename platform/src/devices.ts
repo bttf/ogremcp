@@ -27,7 +27,8 @@ import { currentUser } from "./web-sessions.js";
  *
  * Every approval gets a grant of its own, so each device can be revoked
  * alone (`loadExistingGrant`). `revokeDevice` revokes a device, its grant,
- * and the grant's tokens.
+ * and the grant's tokens. The Devices page (§13.2) lists, renames, and
+ * revokes a user's devices through `api.ts`.
  *
  * A user code that matches no live device code is a miss. Misses are limited
  * per user and for all users together (`MissLimiter`), so no account can
@@ -317,4 +318,98 @@ export async function revokeDevice(pool: Pool, userId: string, deviceUuid: strin
   } finally {
     client.release();
   }
+}
+
+/** The longest name, in characters, a user may give a device on the Devices page (§13.2). */
+export const DEVICE_NAME_MAX_LENGTH = 64;
+
+/** One of a user's devices, as the Devices page lists it (§13.2). */
+export interface DeviceInfo {
+  /** `devices.uuid`. */
+  uuid: string;
+  /** The name the user gave it, or null: the page shows one made from `os` and `approved_at`. */
+  name: string | null;
+  /** `client.os` of its latest upload (§8.3). Null until its first upload. */
+  os: string | null;
+  /** `client.bridge_version` of its latest upload. Null until its first upload. */
+  bridge_version: string | null;
+  /** When the user approved it at `/device`, ISO 8601. */
+  approved_at: string;
+  /** When it last reached ingest, ISO 8601, or null. */
+  last_seen_at: string | null;
+  /**
+   * Whether it no longer holds a live grant: the user revoked it, or its
+   * grant is gone. A bridge that revokes its own refresh token revokes the
+   * grant (`oidc-tokens.ts`), and a grant expires `OAUTH_GRANT_LIFETIME_DAYS`
+   * after approval. Neither sets `revoked_at`, so the grant is looked up here.
+   * A revoked device's tokens are refused.
+   */
+  revoked: boolean;
+}
+
+/**
+ * A device's columns as `DeviceInfo` has them, for `devices d`. The grant is
+ * live while its row exists and has not expired, as `PostgresAdapter.find`
+ * reads it.
+ */
+const DEVICE_INFO = `d.uuid, d.name, d.os, d.bridge_version, d.created_at as approved_at, d.last_seen_at,
+  d.revoked_at is not null or not exists (
+    select 1 from oidc_models g
+     where g.model = 'Grant' and g.oidc_id = d.grant_id and (g.expires_at is null or g.expires_at > now())
+  ) as revoked`;
+
+interface DeviceRow {
+  uuid: string;
+  name: string | null;
+  os: string | null;
+  bridge_version: string | null;
+  approved_at: Date;
+  last_seen_at: Date | null;
+  revoked: boolean;
+}
+
+function deviceInfo(row: DeviceRow): DeviceInfo {
+  return { ...row, approved_at: row.approved_at.toISOString(), last_seen_at: row.last_seen_at?.toISOString() ?? null };
+}
+
+/** The devices of the user of `users.id` `userId`: the live ones, then the revoked ones, each the newest approval first. */
+export async function listDevices(pool: Pool, userId: string): Promise<DeviceInfo[]> {
+  const { rows } = await pool.query<DeviceRow>(`select ${DEVICE_INFO} from devices d where d.user_id = $1 order by revoked, d.id desc`, [userId]);
+  return rows.map(deviceInfo);
+}
+
+/** The device `deviceUuid` of the user of `users.id` `userId`, or null when the user has no such device. */
+export async function findDevice(pool: Pool, userId: string, deviceUuid: string): Promise<DeviceInfo | null> {
+  if (!UUID.test(deviceUuid)) return null;
+  const { rows } = await pool.query<DeviceRow>(`select ${DEVICE_INFO} from devices d where d.uuid = $1 and d.user_id = $2`, [deviceUuid, userId]);
+  return rows[0] === undefined ? null : deviceInfo(rows[0]);
+}
+
+/**
+ * A device name as the user typed it, trimmed. An empty name, or null, is
+ * null: the device goes back to the page's fallback name. Undefined for a
+ * value that is not a string or null, is longer than
+ * `DEVICE_NAME_MAX_LENGTH` characters, or holds a control character.
+ */
+export function deviceName(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  if (name === "") return null;
+  if ([...name].length > DEVICE_NAME_MAX_LENGTH || /\p{Cc}/u.test(name)) return undefined;
+  return name;
+}
+
+/**
+ * Sets the name of the device `deviceUuid` of the user of `users.id`
+ * `userId`, a revoked one too, to a name from `deviceName`. Answers the
+ * device, or null, and changes nothing, when the user has no such device.
+ */
+export async function renameDevice(pool: Pool, userId: string, deviceUuid: string, name: string | null): Promise<DeviceInfo | null> {
+  if (!UUID.test(deviceUuid)) return null;
+  const { rows } = await pool.query<DeviceRow>(
+    `update devices d set name = $3 where d.uuid = $1 and d.user_id = $2 returning ${DEVICE_INFO}`,
+    [deviceUuid, userId, name],
+  );
+  return rows[0] === undefined ? null : deviceInfo(rows[0]);
 }

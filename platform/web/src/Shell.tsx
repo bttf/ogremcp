@@ -8,6 +8,8 @@ import { useSession } from "./session.js";
 const NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Home" },
   { to: "/games", label: "Games" },
+  { to: "/devices", label: "Devices" },
+  { to: "/agents", label: "Connected agents" },
 ];
 
 /**

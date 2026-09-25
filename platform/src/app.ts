@@ -19,8 +19,9 @@ export interface AppOptions {
   auth?: AuthOptions;
   /**
    * The OAuth server (§9), from `createOidcProvider`. Needs `auth`: its
-   * interactions read the web session. With it, `/mcp` and its resource
-   * metadata are served; without it, neither is.
+   * interactions read the web session. With it, `/mcp`, its resource
+   * metadata, and the web UI's Connected agents API are served; without it,
+   * none is.
    */
   oidc?: Provider;
   /** `MCP_ALLOWED_ORIGINS`: the `Origin` values `/mcp` accepts. Default: `defaultMcpAllowedOrigins`. */
@@ -80,7 +81,7 @@ export function createApp({
     app.use(auth.sessions.middleware());
     if (oidc !== undefined) mountOidc(app, oidc, auth.pool);
     app.use(authRouter(auth));
-    app.use(apiRouter({ ...auth, kits }));
+    app.use(apiRouter({ ...auth, kits, oidc }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));

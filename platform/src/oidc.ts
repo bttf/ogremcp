@@ -408,7 +408,7 @@ function redirectHost(redirectUri: unknown): string | null {
  * client's name, or null for another client: a DCR or static client ID is
  * not a URL. The consent page shows it (draft-02 §8.5).
  */
-function clientIdHost(clientId: string): string | null {
+export function clientIdHost(clientId: string): string | null {
   const url = URL.parse(clientId);
   return url?.protocol === "https:" ? url.host : null;
 }
