@@ -1,7 +1,8 @@
 # Bridge releases (§5 Releases, §7, docs/releases.md). Pushing a bridge-v tag
 # publishes: the release job builds the bridge with GoReleaser OSS, signs and
-# notarizes the macOS app, and publishes the Windows binary, the zipped .app,
-# and checksums.txt to the repo's Releases page as "Bridge X.Y.Z".
+# notarizes the macOS app and its disk image, and publishes the Windows
+# binary, the zipped .app, the disk image, and checksums.txt to the repo's
+# Releases page as "Bridge X.Y.Z".
 #
 # A manual run (workflow_dispatch) runs only the dry-run job: a snapshot build,
 # as `make -C bridge dist` does, with an ad hoc signature, no secrets, and a
@@ -137,9 +138,10 @@ jobs:
 
       # docs/releases.md, "A tag build". --skip=validate also turns off
       # GoReleaser's checks that the tree is clean and that HEAD is the tagged
-      # commit, so this step runs both. The universal_binaries post hook signs
-      # and notarizes the app before the checksums are written and anything is
-      # uploaded (.goreleaser.yaml, scripts/macos-app.sh).
+      # commit, so this step runs both. The universal_binaries post hooks sign
+      # and notarize the app and then the disk image before the checksums are
+      # written and anything is uploaded (.goreleaser.yaml,
+      # scripts/macos-app.sh, scripts/macos-dmg.sh).
       - name: Build, sign, and publish
         working-directory: bridge
         env:
@@ -219,5 +221,6 @@ jobs:
         run: |
           grep -q '_windows_amd64\.exe$' checksums.txt
           grep -q '_darwin_all\.app\.zip$' checksums.txt
+          grep -q '_darwin_all\.dmg$' checksums.txt
           echo "A release publishes checksums.txt and the files it lists:"
           cat checksums.txt

@@ -1,6 +1,6 @@
 # Unsigned dev builds of the bridge (§7, docs/releases.md): the Windows binary
-# and the macOS universal binary as a zipped .app, uploaded as workflow
-# artifacts. Runs on pushes to main that touch bridge/, and by hand for any
+# and the macOS universal binary as a zipped .app and in a disk image,
+# uploaded as workflow artifacts. Runs on pushes to main that touch bridge/, and by hand for any
 # branch. Not on PRs: macOS minutes count 10x against the Actions spending
 # limit. It publishes no release, pushes no tag, and signs nothing: tagged,
 # signed releases are .github/workflows/bridge-release.yml.
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build:
-    # The macOS build uses cgo, and scripts/macos-app.sh uses Apple's tools.
+    # The macOS build uses cgo, and the macOS scripts use Apple's tools.
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -43,6 +43,7 @@ jobs:
 
       # scripts/macos-app.sh checks that the macOS binary holds both arm64 and
       # x86_64 and that the .app's ad hoc signature verifies.
+      # scripts/macos-dmg.sh checks the signature of the app in the disk image.
       - name: Build
         run: make -C bridge dist
 
@@ -71,6 +72,14 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           path: bridge/dist/*_darwin_all.app.zip
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: bridge/dist/*_darwin_all.dmg
           archive: false
           if-no-files-found: error
           overwrite: true

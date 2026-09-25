@@ -28,7 +28,8 @@ import (
 // the login, the folder picker, the server (§13.3), and start at login. It
 // logs to a file
 // (package logfile), and returns the exit status. On macOS it needs cgo; see
-// tray_nocgo.go.
+// tray_nocgo.go. On macOS it first offers to move the app to ~/Applications
+// (move_darwin.go).
 //
 // Adapted from bttf/wow-guide@df80260, bridge/cmd/tray/main.go: the log
 // setup, start at login, the shutdown, and the menu loop. Its pairing, config
@@ -63,6 +64,13 @@ func runTray() int {
 		return 1
 	}
 	defer held.Release()
+
+	// §7 Installer: the macOS app lives in ~/Applications. Opened from
+	// anywhere else, it offers to move itself there, and quits once the moved
+	// app starts.
+	if offerMove(logger, stderrLogPath(logPath)) {
+		return 0
+	}
 
 	settings, settingsPath, err := loadSettings()
 	if err != nil {
@@ -112,7 +120,7 @@ func runMenu(logger *slog.Logger, logPath string, ctl *tray.Controller) int {
 	if exe, err := executable(); err != nil {
 		logger.Warn("could not find this program's path; start at login is off", "error", err.Error())
 	} else {
-		m, err := autostart.New([]string{exe}, filepath.Join(filepath.Dir(logPath), "bridge.stderr.log"))
+		m, err := autostart.New([]string{exe}, stderrLogPath(logPath))
 		switch {
 		case err == nil:
 			ctl.Autostart = m
@@ -302,6 +310,12 @@ func setIcon(active bool) {
 	default:
 		systray.SetIcon(tray.Icon(active, 32))
 	}
+}
+
+// stderrLogPath is where the login item has launchd write the app's standard
+// error: beside the log file at logPath.
+func stderrLogPath(logPath string) string {
+	return filepath.Join(filepath.Dir(logPath), "bridge.stderr.log")
 }
 
 // executable is the path of this program with symbolic links resolved, so a
