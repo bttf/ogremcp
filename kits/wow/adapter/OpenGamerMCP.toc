@@ -5,7 +5,7 @@
 ## Title: Open Gamer MCP
 ## Notes: Saves your character's state so your AI agent can give spoiler-free guidance.
 ## Author: red pine software
-## Version: 0.1.0
+## Version: 0.1.1
 ## SavedVariables: OpenGamerMCPDB
 
 # Load order matters: a file reads what earlier files put in the addon table.
