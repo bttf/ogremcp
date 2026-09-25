@@ -9,25 +9,31 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bttf/ogmcp/bridge/internal/auth"
+	"github.com/bttf/ogmcp/bridge/internal/upload"
 )
 
-// fakeAuth approves each login, and fails the keychain save of the first
-// saveFailures saves.
+// fakeAuth approves each login. The keychain saves only once saveOK is set;
+// until then each call tries the save again first, as auth.Client does.
 type fakeAuth struct {
-	mu           sync.Mutex
-	saveFailures int
-	saves        int
+	mu     sync.Mutex
+	saveOK bool
+}
+
+func (f *fakeAuth) setSaveOK() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saveOK = true
 }
 
 func (f *fakeAuth) save() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.saves++
-	if f.saves <= f.saveFailures {
+	if !f.saveOK {
 		return fmt.Errorf("%w: %w", auth.ErrNotSaved, errors.New("the keychain is locked"))
 	}
 	return nil
@@ -43,8 +49,6 @@ func (f *fakeAuth) Login(ctx context.Context, show func(auth.Code)) error {
 	return f.save()
 }
 
-// AccessToken tries the unsaved refresh token's save first, as auth.Client
-// does.
 func (f *fakeAuth) AccessToken(context.Context) (string, error) {
 	if err := f.save(); err != nil {
 		return "", err
@@ -55,62 +59,88 @@ func (f *fakeAuth) AccessToken(context.Context) (string, error) {
 func (f *fakeAuth) Do(*http.Request) (*http.Response, error)       { return nil, errors.New("unused") }
 func (f *fakeAuth) DoUpload(*http.Request) (*http.Response, error) { return nil, errors.New("unused") }
 
-// A login whose keychain save fails keeps its tokens, says so, and saves
-// them on a later try; then the uploads resume and the kits are fetched.
-func TestLoginRetriesTheKeychainSave(t *testing.T) {
-	fake := &fakeAuth{saveFailures: 3}
+// staleUploads is an uploader whose LoginRequired is still set from before
+// the latest login.
+type staleUploads struct{ changed chan struct{} }
+
+func (u staleUploads) Changed() <-chan struct{} { return u.changed }
+func (u staleUploads) Status() upload.Status    { return upload.Status{LoginRequired: true} }
+
+// A login whose keychain save fails keeps its tokens and says so, while
+// uploads resume on them. A stale LoginRequired from the uploader does not
+// end it, a second such login replaces the retry, and once the keychain works
+// the menu says logged in.
+func TestLoginWhenTheKeychainDoesNotSave(t *testing.T) {
+	fake := &fakeAuth{}
 	m := &Model{}
+	m.SetLogin(LoginNeeded)
 	var mu sync.Mutex
-	var logins []Login
-	var notes []string
-	m.Listen(func() {
-		mu.Lock()
-		defer mu.Unlock()
-		s := m.State()
-		if len(logins) == 0 || logins[len(logins)-1] != s.Login {
-			logins = append(logins, s.Login)
-			notes = append(notes, Render(s, time.Now()).Note)
-		}
-	})
 	var opened []string
-	resumed := make(chan struct{}, 2)
+	var resumes atomic.Int32
 	c := &Controller{
-		Auth:      fake,
-		Model:     m,
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Open:      func(url string) error { opened = append(opened, url); return nil },
+		Auth:  fake,
+		Model: m,
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Open: func(url string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			opened = append(opened, url)
+			return nil
+		},
 		SaveRetry: time.Millisecond,
 	}
-	c.resume = func() { resumed <- struct{}{} }
+	c.resume = func() { resumes.Add(1) }
+	uploads := staleUploads{changed: make(chan struct{})}
+	go c.followUploads(t.Context(), uploads)
+	unsavedNote := "Logged in, but the keychain did not save the login. Retrying; until then, quitting logs you out."
 
 	c.Login(t.Context())
-	select {
-	case <-resumed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the uploads did not resume")
+	waitFor(t, "unsaved", func() bool { return m.State().Login == LoginUnsaved })
+	if resumes.Load() != 1 {
+		t.Errorf("%d resumes after the login, want 1", resumes.Load())
 	}
 
+	// A file change while the save is retried. The second send waits until
+	// the first is handled.
+	uploads.changed <- struct{}{}
+	uploads.changed <- struct{}{}
+	if got := m.State().Login; got != LoginUnsaved {
+		t.Errorf("after a file change: login state %v, want LoginUnsaved", got)
+	}
+
+	// A second login whose save fails too.
+	m.SetLogin(LoginNeeded)
+	c.Login(t.Context())
+	waitFor(t, "unsaved again", func() bool { return m.State().Login == LoginUnsaved })
+	if v := m.View(time.Now()); v.Note != unsavedNote || v.Login != "" {
+		t.Errorf("second login: note %q, login item %q", v.Note, v.Login)
+	}
+
+	fake.setSaveOK()
+	waitFor(t, "saved", func() bool { return m.State().Login == LoginDone })
+	waitFor(t, "retry stopped", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return !c.saving && c.saveGen == 2
+	})
+	if n := resumes.Load(); n != 3 {
+		t.Errorf("%d resumes, want 3: one per login, one after the save", n)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if want := []Login{LoginWaiting, LoginUnsaved, LoginDone}; !slices.Equal(logins, want) {
-		t.Errorf("login states %v, want %v", logins, want)
-	}
-	if notes[1] != "Logged in, but the keychain did not save the login. Retrying; until then, quitting logs you out." {
-		t.Errorf("unsaved note %q", notes[1])
-	}
-	if !slices.Equal(opened, []string{"https://ogmcp.example/device?user_code=BCDF-GHJK"}) {
+	want := "https://ogmcp.example/device?user_code=BCDF-GHJK"
+	if !slices.Equal(opened, []string{want, want}) {
 		t.Errorf("opened %q", opened)
 	}
-	// The login's save and two retries failed; the third retry saved.
-	if fake.saves != 4 {
-		t.Errorf("%d saves, want 4", fake.saves)
-	}
-	if s := m.State(); s.Error != "" {
-		t.Errorf("error line %q", s.Error)
-	}
-	select {
-	case <-resumed:
-		t.Error("resumed twice")
-	default:
+}
+
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

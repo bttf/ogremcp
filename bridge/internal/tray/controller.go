@@ -66,8 +66,11 @@ type Controller struct {
 	mu        sync.Mutex
 	loggingIn bool
 	loginURL  string
-	// saving is true while retrySave runs.
-	saving bool
+	// saving is true while a retrySave runs, and stopSave stops it. saveGen
+	// counts the retries started, so one that was replaced leaves saving be.
+	saving   bool
+	stopSave context.CancelFunc
+	saveGen  int
 	// asked holds the kits whose folder picker the locate chain has shown.
 	// It shows it once per kit by itself; ChooseFolder allows it again.
 	asked map[string]bool
@@ -140,8 +143,21 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		c.Model.LoginEnded()
 		c.showErrors("fetch", nil)
 		return
+	case errors.Is(err, auth.ErrNotRead):
+		// Whether the bridge holds a login is unknown. The menu offers a
+		// login, which writes a new one.
+		c.Model.LoginEnded()
+		c.showErrors("fetch", map[string]string{"keychain": "Could not read the login: " + err.Error()})
+		return
 	case errors.Is(err, auth.ErrNotSaved):
-		c.saveFailed(ctx)
+		// A refresh whose new refresh token the keychain did not save.
+		c.mu.Lock()
+		busy := c.saving || c.loggingIn
+		c.mu.Unlock()
+		if !busy {
+			c.Model.SaveFailing()
+			c.startSaveRetry(ctx)
+		}
 		return
 	case err != nil:
 		// Offline, perhaps: the bridge holds a login it could not check.
@@ -150,13 +166,18 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		return
 	}
 	c.Model.LoginKnown()
+	names := map[string]string{}
+	for _, k := range list {
+		names[k.Kit] = cmp.Or(k.Name, k.Kit)
+	}
+	c.Model.SetKitNames(names)
 	errs := map[string]string{}
 	var located []watch.Kit
 	var targets []adapter.Target
 	need := false
 	for _, k := range list {
 		if k.Err != nil {
-			errs["kit|"+k.Kit] = k.Kit + ": " + k.Err.Error()
+			errs["kit|"+k.Kit] = names[k.Kit] + ": " + k.Err.Error()
 			continue
 		}
 		root, err := locate.Root(ctx, k.Manifest.Root, c.Settings.Roots[k.Kit], p.env, kitPrompter{c: c, kit: k.Kit})
@@ -164,7 +185,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			return
 		}
 		if err != nil {
-			errs["locate|"+k.Kit] = k.Kit + ": " + err.Error()
+			errs["locate|"+k.Kit] = names[k.Kit] + ": " + err.Error()
 			p.uploader.CountError(upload.LocateFailed)
 			need = need || canPick(k.Manifest.Root)
 			continue
@@ -201,9 +222,15 @@ func (c *Controller) remember(kit, root string) {
 	}
 }
 
+// uploads is the uploader's status (*upload.Uploader).
+type uploads interface {
+	Changed() <-chan struct{}
+	Status() upload.Status
+}
+
 // followUploads shows the uploader's status: the last upload, a login the
 // server ended, and each instance's error.
-func (c *Controller) followUploads(ctx context.Context, u *upload.Uploader) {
+func (c *Controller) followUploads(ctx context.Context, u uploads) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -212,8 +239,14 @@ func (c *Controller) followUploads(ctx context.Context, u *upload.Uploader) {
 		}
 		st := u.Status()
 		c.Model.SetLastUpload(st.LastUpload)
-		if st.LoginRequired {
-			c.Model.LoginEnded()
+		// LoginRequired stays set until Resume, so it can be older than the
+		// latest login. The login has ended only when the auth client holds
+		// none. While a login's keychain save is retried, AccessToken answers
+		// ErrNotSaved, so the menu keeps saying so.
+		if st.LoginRequired && c.Model.State().Login != LoginNeeded {
+			if _, err := c.Auth.AccessToken(ctx); errors.Is(err, auth.ErrLoginRequired) {
+				c.Model.LoginEnded()
+			}
 		}
 		errs := map[string]string{}
 		for _, in := range st.Instances {
@@ -305,7 +338,7 @@ func (c *Controller) login(ctx context.Context) {
 		c.mu.Lock()
 		c.loginURL = url
 		c.mu.Unlock()
-		c.Model.LoginCode(code.UserCode)
+		c.Model.LoginCode(code.UserCode, code.VerificationURI)
 		c.open(url)
 	})
 	c.mu.Lock()
@@ -317,9 +350,12 @@ func (c *Controller) login(ctx context.Context) {
 		c.loggedIn()
 	case errors.Is(err, auth.ErrNotSaved):
 		// The server approved the login. Package auth keeps its tokens in
-		// memory until a save succeeds.
+		// memory until a save succeeds, and each call tries the save first,
+		// so the uploads and the fetches wait on the save, not on a login.
 		c.Log.Error("logged in, but the keychain did not save the login; trying again", "error", err.Error())
-		c.saveFailed(ctx)
+		c.Model.SetLogin(LoginUnsaved)
+		c.startSaveRetry(ctx)
+		c.resumeAll()
 	case ctx.Err() != nil:
 	default:
 		c.Model.SetLogin(LoginNeeded)
@@ -332,6 +368,11 @@ func (c *Controller) login(ctx context.Context) {
 func (c *Controller) loggedIn() {
 	c.Model.SetLogin(LoginDone)
 	c.showErrors("login", nil)
+	c.resumeAll()
+}
+
+// resumeAll starts the uploads that wait for a login, and fetches the kits.
+func (c *Controller) resumeAll() {
 	c.mu.Lock()
 	resume := c.resume
 	c.mu.Unlock()
@@ -340,22 +381,26 @@ func (c *Controller) loggedIn() {
 	}
 }
 
-// saveFailed shows that the keychain did not save the login, and starts
-// retrySave unless it runs.
-func (c *Controller) saveFailed(ctx context.Context) {
+// startSaveRetry starts retrySave in place of any that runs: the tokens to
+// save are the auth client's latest.
+func (c *Controller) startSaveRetry(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
-	if c.saving {
-		c.mu.Unlock()
-		return
+	if c.stopSave != nil {
+		c.stopSave()
 	}
-	c.saving = true
+	c.saving, c.stopSave = true, cancel
+	c.saveGen++
+	gen := c.saveGen
 	c.mu.Unlock()
-	c.Model.SetLogin(LoginUnsaved)
 	go func() {
 		defer Recover(c.Log)
+		defer cancel()
 		c.retrySave(ctx)
 		c.mu.Lock()
-		c.saving = false
+		if c.saveGen == gen {
+			c.saving, c.stopSave = false, nil
+		}
 		c.mu.Unlock()
 	}()
 }
@@ -363,7 +408,7 @@ func (c *Controller) saveFailed(ctx context.Context) {
 // retrySave tries the keychain save again every SaveRetry, until it
 // succeeds, the server ends the login, or ctx ends. AccessToken saves the
 // unsaved refresh token before anything else, and hands out no token until
-// the save succeeds.
+// the save succeeds. A login that runs keeps its menu state.
 func (c *Controller) retrySave(ctx context.Context) {
 	every := cmp.Or(c.SaveRetry, DefaultSaveRetry)
 	for {
@@ -375,6 +420,10 @@ func (c *Controller) retrySave(ctx context.Context) {
 		case <-t.C:
 		}
 		_, err := c.Auth.AccessToken(ctx)
+		if ctx.Err() != nil {
+			// Replaced by a newer retry, or quitting.
+			return
+		}
 		switch {
 		case errors.Is(err, auth.ErrNotSaved):
 			continue
@@ -387,7 +436,8 @@ func (c *Controller) retrySave(ctx context.Context) {
 			c.Log.Warn("could not refresh the login", "error", err.Error())
 		}
 		c.Log.Info("the keychain saved the login")
-		c.loggedIn()
+		c.Model.LoginSaved()
+		c.resumeAll()
 		return
 	}
 }
@@ -422,9 +472,19 @@ func (c *Controller) readAutostart() {
 		c.Model.SetAutostartBlocked(c.AutostartBlocked)
 		return
 	}
-	on, err := c.Autostart.Enabled()
+	on, current, err := c.Autostart.Enabled()
 	if err != nil {
 		c.Log.Warn("could not read start at login", "error", err.Error())
+	}
+	if on && !current {
+		// The app moved since start at login was turned on, and the login
+		// item starts it from its old place.
+		if err := c.Autostart.Set(true); err != nil {
+			c.Log.Warn("start at login starts the app from its old place; could not change it", "error", err.Error())
+			on = false
+		} else {
+			c.Log.Info("start at login now starts the app from its new place")
+		}
 	}
 	c.Model.SetAutostart(on, err == nil)
 }

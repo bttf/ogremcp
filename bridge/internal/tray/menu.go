@@ -54,8 +54,10 @@ const (
 // State is everything the menu depends on.
 type State struct {
 	Login Login
-	// UserCode is the code of a running login, once the server gave it.
-	UserCode string
+	// UserCode is the code of a running login, once the server gave it, and
+	// LoginPage the page where the user enters it, the web UI's /device.
+	UserCode  string
+	LoginPage string
 	// LastUpload is when the server last took an upload, or zero.
 	LastUpload time.Time
 	// Error is the newest error still current, and ErrorAt when it was
@@ -64,6 +66,9 @@ type State struct {
 	ErrorAt time.Time
 	// Adapters are the adapter folders of the latest syncs.
 	Adapters []adapter.Status
+	// KitNames maps each kit's ID to its display name, such as "World of
+	// Warcraft" (GET /api/v1/kits). A kit without one goes by its ID.
+	KitNames map[string]string
 	// NeedFolder means a kit's game folder was not found, and its manifest
 	// lets the user pick it.
 	NeedFolder bool
@@ -123,7 +128,7 @@ const maxErrorRunes = 120
 func Render(s State, now time.Time) View {
 	v := View{
 		Active:           s.Login == LoginDone,
-		Adapters:         adapterLines(s.Adapters),
+		Adapters:         adapterLines(s.Adapters, s.KitNames),
 		ChooseFolder:     s.NeedFolder,
 		Autostart:        s.Autostart,
 		AutostartTitle:   TitleAutostart,
@@ -140,11 +145,17 @@ func Render(s State, now time.Time) View {
 		v.Login, v.LoginEnabled = "Log in…", true
 	case LoginWaiting:
 		v.Status = "Logging in…"
-		// The page is known once the code is; clicking opens it again.
-		v.Login, v.LoginEnabled = "Open the login page again", s.UserCode != ""
-		v.Note = "Asking the server for a login code…"
-		if s.UserCode != "" {
-			v.Note = "Login code: " + s.UserCode
+		// The page is known once the code is. The browser opens it by
+		// itself; the item opens it again, and the note names it, for when
+		// the browser does not open.
+		v.Login, v.LoginEnabled = "Open the login page", s.UserCode != ""
+		switch {
+		case s.UserCode == "":
+			v.Note = "Asking the server for a login code…"
+		case s.LoginPage == "":
+			v.Note = "Enter code " + s.UserCode + " in your browser"
+		default:
+			v.Note = "Enter code " + s.UserCode + " at " + s.LoginPage
 		}
 	case LoginUnsaved, LoginDone:
 		v.Status = "Last upload: none yet"
@@ -163,40 +174,41 @@ func Render(s State, now time.Time) View {
 }
 
 // adapterLines are the menu's lines about the adapters: per kit, each state
-// the user should know of, or that the adapter is up to date. The bridge
-// knows a game by its kit's ID only, so the lines name the kit, not the game.
-func adapterLines(list []adapter.Status) []string {
+// the user should know of, or that the adapter is up to date. names are the
+// kits' display names.
+func adapterLines(list []adapter.Status, names map[string]string) []string {
 	byKit := map[string][]adapter.Status{}
 	for _, st := range list {
 		byKit[st.Kit] = append(byKit[st.Kit], st)
 	}
 	var lines []string
 	for _, kit := range slices.Sorted(maps.Keys(byKit)) {
+		name := kitName(names, kit)
 		var kitLines []string
 		installed := ""
 		for _, st := range byKit[kit] {
-			var text string
+			var line string
 			switch st.State {
 			case adapter.StateWaiting:
-				text = "Close the game to finish updating"
+				line = "Close " + name + " to finish updating the addon"
 			case adapter.StateRestart:
-				text = "Restart the game to load it"
+				line = "Restart " + name + " to load the addon"
 			case adapter.StateLinked:
-				text = "Updates skipped: its folder is a link"
+				line = name + " addon: updates skipped, its folder is a link"
 			case adapter.StateNotFolder:
-				text = "Not installed: a file is in the way"
+				line = name + " addon: not installed, a file is in its place"
 			case adapter.StateFailed:
-				text = "Update failed"
+				line = name + " addon: update failed"
 			default:
 				installed = cmp.Or(installed, st.Installed)
 				continue
 			}
-			if line := kit + " addon: " + text; !slices.Contains(kitLines, line) {
+			if !slices.Contains(kitLines, line) {
 				kitLines = append(kitLines, line)
 			}
 		}
 		if len(kitLines) == 0 {
-			line := kit + " addon: Up to date"
+			line := name + " addon: up to date"
 			if installed != "" {
 				line += " (" + installed + ")"
 			}
@@ -205,6 +217,11 @@ func adapterLines(list []adapter.Status) []string {
 		lines = append(lines, kitLines...)
 	}
 	return lines[:min(len(lines), MaxAdapterLines)]
+}
+
+// kitName is the display name of kit, or its ID when it has none.
+func kitName(names map[string]string, kit string) string {
+	return cmp.Or(names[kit], kit)
 }
 
 // clock is t as a time of day, with the date when it is not the day of now.
@@ -329,31 +346,42 @@ func (m *Model) setErrors(s *State, group string, errs map[string]string) []stri
 // SetLogin sets the login state and forgets a login's code.
 func (m *Model) SetLogin(l Login) {
 	m.update(func(s *State) []string {
-		s.Login, s.UserCode = l, ""
+		s.Login, s.UserCode, s.LoginPage = l, "", ""
 		return nil
 	})
 }
 
-// LoginCode records the code of the running login.
-func (m *Model) LoginCode(code string) {
+// setUnlessWaiting sets the login state unless a login runs, which sets its
+// own when it ends.
+func (m *Model) setUnlessWaiting(l Login) {
+	m.update(func(s *State) []string {
+		if s.Login != LoginWaiting {
+			s.Login, s.UserCode, s.LoginPage = l, "", ""
+		}
+		return nil
+	})
+}
+
+// LoginCode records the code of the running login and the page where the
+// user enters it.
+func (m *Model) LoginCode(code, page string) {
 	m.update(func(s *State) []string {
 		if s.Login == LoginWaiting {
-			s.UserCode = code
+			s.UserCode, s.LoginPage = code, page
 		}
 		return nil
 	})
 }
 
 // LoginEnded records that the bridge holds no login, or that the server
-// ended it. A login that runs keeps its state.
-func (m *Model) LoginEnded() {
-	m.update(func(s *State) []string {
-		if s.Login != LoginWaiting {
-			s.Login, s.UserCode = LoginNeeded, ""
-		}
-		return nil
-	})
-}
+// ended it.
+func (m *Model) LoginEnded() { m.setUnlessWaiting(LoginNeeded) }
+
+// SaveFailing records that the keychain did not save the bridge's login.
+func (m *Model) SaveFailing() { m.setUnlessWaiting(LoginUnsaved) }
+
+// LoginSaved records that the keychain saved the bridge's login.
+func (m *Model) LoginSaved() { m.setUnlessWaiting(LoginDone) }
 
 // LoginKnown records that the server answered with the bridge's login, or
 // that the bridge holds one it could not check, as when offline.
@@ -363,6 +391,14 @@ func (m *Model) LoginKnown() {
 			s.Login = LoginDone
 		}
 		return nil
+	})
+}
+
+// SetKitNames records the kits' display names.
+func (m *Model) SetKitNames(names map[string]string) {
+	m.update(func(s *State) []string {
+		s.KitNames = names
+		return m.setErrors(s, "adapter", adapterErrors(s.Adapters, s.KitNames))
 	})
 }
 
@@ -379,7 +415,7 @@ func (m *Model) SetLastUpload(t time.Time) {
 func (m *Model) SetAdapters(list []adapter.Status) []string {
 	return m.update(func(s *State) []string {
 		s.Adapters = slices.Clone(list)
-		return m.setErrors(s, "adapter", adapterErrors(s.Adapters))
+		return m.setErrors(s, "adapter", adapterErrors(s.Adapters, s.KitNames))
 	})
 }
 
@@ -397,16 +433,16 @@ func (m *Model) MergeAdapters(list []adapter.Status) []string {
 			}
 		}
 		s.Adapters = merged
-		return m.setErrors(s, "adapter", adapterErrors(s.Adapters))
+		return m.setErrors(s, "adapter", adapterErrors(s.Adapters, s.KitNames))
 	})
 }
 
 // adapterErrors are the errors of the adapter folders whose sync failed.
-func adapterErrors(list []adapter.Status) map[string]string {
+func adapterErrors(list []adapter.Status, names map[string]string) map[string]string {
 	errs := map[string]string{}
 	for _, st := range list {
 		if st.State == adapter.StateFailed && st.Err != nil {
-			errs[st.Kit+"|"+st.Path] = st.Kit + " addon: " + st.Err.Error()
+			errs[st.Kit+"|"+st.Path] = kitName(names, st.Kit) + " addon: " + st.Err.Error()
 		}
 	}
 	return errs

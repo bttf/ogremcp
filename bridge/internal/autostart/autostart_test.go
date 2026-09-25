@@ -2,6 +2,7 @@ package autostart
 
 import (
 	"errors"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -36,5 +37,28 @@ func TestRunValue(t *testing.T) {
 		if got := RunValue(c.args); got != c.want {
 			t.Errorf("RunValue(%q) = %s, want %s", c.args, got, c.want)
 		}
+	}
+}
+
+// A login item written by the app at another place is not current, so the
+// tray writes it again for the app's new place.
+func TestLaunchAgentCurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "LaunchAgents", Label+".plist")
+	old := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Downloads/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"}}
+	moved := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"}}
+	if on, current, err := moved.Enabled(); on || current || err != nil {
+		t.Fatalf("before: %v %v %v", on, current, err)
+	}
+	if err := old.Set(true); err != nil {
+		t.Fatal(err)
+	}
+	if on, current, err := moved.Enabled(); !on || current || err != nil {
+		t.Errorf("written for the old place: %v %v %v", on, current, err)
+	}
+	if err := moved.Set(true); err != nil {
+		t.Fatal(err)
+	}
+	if on, current, err := moved.Enabled(); !on || !current || err != nil {
+		t.Errorf("written again: %v %v %v", on, current, err)
 	}
 }

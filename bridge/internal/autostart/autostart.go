@@ -39,7 +39,10 @@ func Translocated(path string) bool {
 
 // Manager turns starting at login on and off.
 type Manager interface {
-	Enabled() (bool, error)
+	// Enabled reports whether the login item exists, and whether it is the
+	// one Set(true) writes now. An app moved since start at login was turned
+	// on has one that starts the app from its old place.
+	Enabled() (on, current bool, err error)
 	Set(on bool) error
 }
 
@@ -139,13 +142,17 @@ type LaunchAgent struct {
 	Stderr string
 }
 
-// Enabled reports whether the property list file exists.
-func (l LaunchAgent) Enabled() (bool, error) {
-	_, err := os.Stat(l.Path)
+// Enabled reports whether the property list file exists, and whether it
+// holds what Set(true) writes.
+func (l LaunchAgent) Enabled() (on, current bool, err error) {
+	data, err := os.ReadFile(l.Path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
+		return false, false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, false, err
+	}
+	return true, bytes.Equal(data, LaunchAgentPlist(l.Label, l.Args, l.Stderr)), nil
 }
 
 // Set writes or removes the property list file.
@@ -186,10 +193,10 @@ type RunKey struct {
 	Value string
 }
 
-// Enabled reports whether the value exists.
-func (r RunKey) Enabled() (bool, error) {
-	_, ok, err := r.Key.GetString(r.Name)
-	return ok, err
+// Enabled reports whether the value exists, and whether it is Value.
+func (r RunKey) Enabled() (on, current bool, err error) {
+	v, ok, err := r.Key.GetString(r.Name)
+	return ok, ok && v == r.Value, err
 }
 
 // Set writes or removes the value.

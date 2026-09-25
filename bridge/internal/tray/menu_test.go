@@ -20,8 +20,9 @@ func TestRenderStatus(t *testing.T) {
 	}{
 		{"starting", State{Login: LoginChecking}, "Starting… |  |  off"},
 		{"logged out", State{Login: LoginNeeded}, "Not logged in |  | Log in… on"},
-		{"code pending", State{Login: LoginWaiting}, "Logging in… | Asking the server for a login code… | Open the login page again off"},
-		{"code shown", State{Login: LoginWaiting, UserCode: "BCDF-GHJK"}, "Logging in… | Login code: BCDF-GHJK | Open the login page again on"},
+		{"code pending", State{Login: LoginWaiting}, "Logging in… | Asking the server for a login code… | Open the login page off"},
+		{"code shown", State{Login: LoginWaiting, UserCode: "BCDF-GHJK", LoginPage: "https://ogmcp.example/device"},
+			"Logging in… | Enter code BCDF-GHJK at https://ogmcp.example/device | Open the login page on"},
 		{"no upload", State{Login: LoginDone}, "Last upload: none yet |  |  off"},
 		{"upload today", State{Login: LoginDone, LastUpload: now.Add(-time.Hour)}, "Last upload: 17:30 |  |  off"},
 		{"upload yesterday", State{Login: LoginDone, LastUpload: now.Add(-24 * time.Hour)}, "Last upload: Sep 23, 18:30 |  |  off"},
@@ -51,23 +52,28 @@ func TestRenderAdapters(t *testing.T) {
 	st := func(kit, path string, s adapter.State) adapter.Status {
 		return adapter.Status{Kit: kit, Path: path, State: s, Installed: "0.2.0"}
 	}
+	names := map[string]string{"wow": "World of Warcraft"}
 	cases := []struct {
 		list []adapter.Status
 		want []string
 	}{
 		{[]adapter.Status{st("wow", "era", adapter.StateCurrent), st("wow", "retail", adapter.StateInstalled)},
-			[]string{"wow addon: Up to date (0.2.0)"}},
+			[]string{"World of Warcraft addon: up to date (0.2.0)"}},
 		{[]adapter.Status{st("wow", "era", adapter.StateWaiting), st("wow", "retail", adapter.StateCurrent)},
-			[]string{"wow addon: Close the game to finish updating"}},
+			[]string{"Close World of Warcraft to finish updating the addon"}},
 		{[]adapter.Status{st("wow", "era", adapter.StateRestart), st("wow", "retail", adapter.StateRestart)},
-			[]string{"wow addon: Restart the game to load it"}},
+			[]string{"Restart World of Warcraft to load the addon"}},
 		{[]adapter.Status{st("wow", "era", adapter.StateLinked), st("wow", "retail", adapter.StateWaiting)},
-			[]string{"wow addon: Updates skipped: its folder is a link", "wow addon: Close the game to finish updating"}},
+			[]string{"World of Warcraft addon: updates skipped, its folder is a link", "Close World of Warcraft to finish updating the addon"}},
 	}
 	for _, c := range cases {
-		if got := Render(State{Adapters: c.list}, time.Now()).Adapters; !slices.Equal(got, c.want) {
+		if got := Render(State{Adapters: c.list, KitNames: names}, time.Now()).Adapters; !slices.Equal(got, c.want) {
 			t.Errorf("adapters %v:\n got %q\nwant %q", c.list, got, c.want)
 		}
+	}
+	// A server that sends no name: the kit's ID.
+	if got := Render(State{Adapters: cases[1].list}, time.Now()).Adapters; !slices.Equal(got, []string{"Close wow to finish updating the addon"}) {
+		t.Errorf("without a name: %q", got)
 	}
 }
 

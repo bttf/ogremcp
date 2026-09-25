@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os/exec"
 	"runtime"
 
@@ -36,10 +37,11 @@ func trayPlace() string {
 }
 
 // openBrowser hands a URL to the OS to open in the default browser. It does
-// not wait for the browser.
+// not wait for the browser. When the program that opens it fails, it logs
+// that to slog.Default, without the URL, which can hold a login code.
 //
-// Copied from bttf/wow-guide@df80260, bridge/internal/pair/pair.go
-// (OpenBrowser).
+// Adapted from bttf/wow-guide@df80260, bridge/internal/pair/pair.go
+// (OpenBrowser), which did not log the failure.
 func openBrowser(link string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -53,6 +55,10 @@ func openBrowser(link string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait()
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			slog.Warn("could not open the browser", "program", cmd.Path, "error", err.Error())
+		}
+	}()
 	return nil
 }
