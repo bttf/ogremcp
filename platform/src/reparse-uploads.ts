@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 
 import { failureCode } from "./db.js";
-import { decompress, parseUpload, writeSnapshot } from "./ingest.js";
+import { decompress, parseUpload, UNKNOWN_FLAVOR, unknownFlavorLine, writeSnapshot } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
 
 /**
@@ -21,14 +21,22 @@ import type { KitRegistry } from "./kits/registry.js";
  *   the new result.
  * - A `parsed` upload gets its snapshot, or its snapshot is replaced in place
  *   and keeps its uuid. A `failed` or `rejected` upload loses its snapshot.
+ * - An upload newly rejected as "unknown" gets ingest's log line with the
+ *   raw detection facts (§6.3.1).
+ *
+ * A regression, a `parsed` upload whose new parse is `failed` or `rejected`,
+ * is left untouched unless `allowRegressions` is set: one interpreter bug
+ * would otherwise delete the snapshots of every user of the kit.
  *
  * A column or snapshot that already holds the new value is not written, so a
  * second run over the same uploads with the same kits changes nothing.
  *
  * Each upload is re-parsed in its own transaction, which locks its row. An
  * upload that fails (bytes over the cap or not gzip, a kit bug, a database
- * error) is rolled back and reported, and the run goes on. Only one upload's
- * bytes are in memory at a time: the selection is read in pages of ids.
+ * error) is rolled back and reported, and the run goes on. A dry run does
+ * every step and rolls each transaction back, so it counts what a run would.
+ * Only one upload's bytes are in memory at a time: the selection is read in
+ * pages of ids.
  */
 
 /** `uploads.parse_status` (§11). */
@@ -53,41 +61,29 @@ export interface ReparseOptions {
   /** The cap on an upload's uncompressed bytes (§8.3): `IngestSettings.maxBytes`. */
   maxBytes: number;
   selection: UploadSelection;
+  /** Store regressions: `parsed` uploads that now fail or are rejected lose their snapshots. Default false. */
+  allowRegressions?: boolean;
+  /** Roll every upload's transaction back, and log no flavor line. Default false. */
+  dryRun?: boolean;
   /** Upload ids read per query. Default 100. */
   pageSize?: number;
-  /** Receives one line per upload that could not be re-parsed. Default: `console.error`. */
+  /** Receives one JSON line per upload newly rejected as "unknown" (§6.3.1). Default: `console.log`. */
   log?: (line: string) => void;
+  /** Receives one line per upload that could not be re-parsed. Default: `console.error`. */
+  logError?: (line: string) => void;
 }
 
 /**
  * Counts per outcome. `unchanged`: nothing was written. `<before> -> <after>`,
  * e.g. `failed -> parsed`: the parse statuses of an upload that changed.
- * `error`: rolled back and logged. `gone`: deleted since it was selected.
+ * `regressed`: a regression left untouched. `error`: rolled back and logged.
+ * `gone`: deleted since it was selected.
  */
 export type ReparseCounts = Record<string, number>;
 
-/** The selected uploads, counted by kit and parse status, in that order. Reads no bytes. */
-export async function countUploads(
-  pool: Pool,
-  kits: KitRegistry,
-  selection: UploadSelection,
-): Promise<{ kit: string; status: string; count: number }[]> {
-  const { rows } = await pool.query<{ kit: string; parse_status: string; count: string }>(
-    `select kit, parse_status, count(*) as count from uploads where ${SELECTED} group by kit, parse_status order by kit, parse_status`,
-    selectionParams(kits, selection),
-  );
-  return rows.map((row) => ({ kit: row.kit, status: row.parse_status, count: Number(row.count) }));
-}
-
 /** Re-parses the selected uploads that were received before the call, in id order. */
-export async function reparseUploads({
-  pool,
-  kits,
-  maxBytes,
-  selection,
-  pageSize = 100,
-  log = console.error,
-}: ReparseOptions): Promise<ReparseCounts> {
+export async function reparseUploads(options: ReparseOptions): Promise<ReparseCounts> {
+  const { pool, kits, selection, pageSize = 100, logError = console.error } = options;
   const params = selectionParams(kits, selection);
   const counts: ReparseCounts = {};
   // Uploads that arrive during the run were parsed by the same code at ingest.
@@ -104,9 +100,9 @@ export async function reparseUploads({
     for (const { id, uuid } of page.rows) {
       let outcome: string;
       try {
-        outcome = await reparseUpload(pool, kits, maxBytes, id);
+        outcome = await reparseUpload(options, id);
       } catch (err) {
-        log(`reparse: upload ${uuid} not re-parsed: code=${failureCode(err)}`);
+        logError(`reparse: upload ${uuid} not re-parsed: code=${failureCode(err)}`);
         outcome = "error";
       }
       counts[outcome] = (counts[outcome] ?? 0) + 1;
@@ -131,17 +127,29 @@ function selectionParams(kits: KitRegistry, selection: UploadSelection): unknown
 }
 
 /** Re-parses one upload in its own transaction, and answers its outcome (`ReparseCounts`). */
-async function reparseUpload(pool: Pool, kits: KitRegistry, maxBytes: number, id: string): Promise<string> {
+async function reparseUpload(
+  { pool, kits, maxBytes, allowRegressions = false, dryRun = false, log = console.log }: ReparseOptions,
+  id: string,
+): Promise<string> {
   const client = await pool.connect();
   try {
     await client.query("begin");
     const { rows } = await client.query<{
+      uuid: string;
+      user_uuid: string;
       kit: string;
       source_id: string;
       content_gzip: Buffer;
       parse_status: ParseStatus;
+      flavor: string | null;
       received_at: Date;
-    }>("select kit, source_id, content_gzip, parse_status, received_at from uploads where id = $1 for update", [id]);
+    }>(
+      `select up.uuid, us.uuid as user_uuid, up.kit, up.source_id, up.content_gzip, up.parse_status, up.flavor, up.received_at
+         from uploads up join users us on us.id = up.user_id
+        where up.id = $1
+          for update of up`,
+      [id],
+    );
     const row = rows[0];
     if (row === undefined) {
       await client.query("rollback");
@@ -152,6 +160,10 @@ async function reparseUpload(pool: Pool, kits: KitRegistry, maxBytes: number, id
 
     const bytes = await decompress(row.content_gzip, maxBytes);
     const result = parseUpload(kit, row.source_id, bytes, row.received_at);
+    if (row.parse_status === "parsed" && result.status !== "parsed" && !allowRegressions) {
+      await client.query("rollback");
+      return "regressed";
+    }
 
     const upload = await client.query(
       `update uploads
@@ -165,7 +177,10 @@ async function reparseUpload(pool: Pool, kits: KitRegistry, maxBytes: number, id
       result.status === "parsed"
         ? (await writeSnapshot(client, id, result.parsed)) !== null
         : ((await client.query("delete from snapshots where upload_id = $1", [id])).rowCount ?? 0) > 0;
-    await client.query("commit");
+    await client.query(dryRun ? "rollback" : "commit");
+    if (!dryRun && result.status === "rejected" && result.rejectedFlavor === UNKNOWN_FLAVOR && row.flavor !== UNKNOWN_FLAVOR) {
+      log(unknownFlavorLine(row.user_uuid, kit, row.uuid, result.parsed.unknownFlavor));
+    }
     return (upload.rowCount ?? 0) > 0 || snapshotChanged ? `${row.parse_status} -> ${result.status}` : "unchanged";
   } catch (err) {
     await client.query("rollback").catch(() => {});

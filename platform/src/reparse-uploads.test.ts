@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 
+import { ParseError } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -8,7 +9,7 @@ import { createPool } from "./db.js";
 import { KIT_SOURCES, type Kit, type KitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { migrate } from "./migrations.js";
-import { countUploads, type ParseStatus, reparseUploads, type UploadSelection } from "./reparse-uploads.js";
+import { type ParseStatus, type ReparseOptions, reparseUploads, type UploadSelection } from "./reparse-uploads.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
@@ -32,12 +33,25 @@ function savedVariables(capturedAt: number, client = CLASSIC_ERA_CLIENT): string
 `;
 }
 
-/** The WoW kit, and the same kit under the key `other`, so selection by kit has two to pick from. */
+/**
+ * The WoW kit; the same kit under the key `other`, so selection by kit has two
+ * to pick from; and `broken`, whose interpreter now refuses every upload.
+ */
 function testKits(): KitRegistry {
   const checked = checkKits(KIT_SOURCES)[0];
   if (checked === undefined) throw new Error("no kit");
   const wow: Kit = { key: "wow", name: "World of Warcraft", manifest: checked.manifest, interpreter: checked.source.interpreter, adapter: null };
-  const list = [wow, { ...wow, key: "other" }];
+  const broken: Kit = {
+    ...wow,
+    key: "broken",
+    interpreter: {
+      parse: () => {
+        throw new ParseError("A new interpreter bug refuses this.");
+      },
+      tools: [],
+    },
+  };
+  const list = [wow, { ...wow, key: "other" }, broken];
   return { list: () => list, get: (key) => list.find((kit) => kit.key === key) };
 }
 
@@ -110,29 +124,65 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("re-parse stored uploads (§11)
     return { uploads: uploads.rows, snapshots: snapshots.rows };
   }
 
-  function reparse(selection: UploadSelection = {}) {
-    return reparseUploads({ pool, kits, maxBytes: 5 * 1024 * 1024, selection, pageSize: 2, log: () => {} });
+  /** What the re-parse logged for "unknown" flavors. */
+  const logged: string[] = [];
+
+  function reparse(selection: UploadSelection = {}, options: Pick<ReparseOptions, "allowRegressions" | "dryRun"> = {}) {
+    return reparseUploads({
+      pool,
+      kits,
+      maxBytes: 5 * 1024 * 1024,
+      selection,
+      pageSize: 2,
+      log: (line) => logged.push(line),
+      logError: () => {},
+      ...options,
+    });
   }
 
-  it("stores a failed upload that now parses, rejects an unknown flavor, and changes nothing on a second run", async () => {
-    const failed = await addUpload(savedVariables(CAPTURED_AT), "failed");
-    const unknown = await addUpload(savedVariables(CAPTURED_AT, UNKNOWN_CLIENT), "parsed");
+  /** Stores a snapshot of the parsed upload `uploadId`, as an older kit left it. */
+  async function addSnapshot(uploadId: string): Promise<void> {
     await pool.query(
       `insert into snapshots (user_id, upload_id, kit, flavor, rules, snapshot_at, state)
-       values ($1, $2, 'wow', 'classic_era', '{}', now(), '{}')`,
-      [userId, unknown],
+       values ($1, $2, (select kit from uploads where id = $2), 'classic_era', '{}', now(), '{}')`,
+      [userId, uploadId],
     );
+  }
 
-    expect(await reparse()).toEqual({ "failed -> parsed": 1, "parsed -> rejected": 1 });
+  it("stores a failed upload that now parses, logs a new unknown flavor, and changes nothing on a second run", async () => {
+    const failed = await addUpload(savedVariables(CAPTURED_AT), "failed");
+    const unknown = await addUpload(savedVariables(CAPTURED_AT, UNKNOWN_CLIENT), "rejected");
+    logged.length = 0;
+
+    expect(await reparse()).toEqual({ "failed -> parsed": 1, "rejected -> rejected": 1 });
     const first = await rows();
     expect(first.uploads).toMatchObject([
       { id: failed, kit_version: version, adapter_schema: 1, parse_status: "parsed", parse_error: null, flavor: null },
       { id: unknown, kit_version: version, adapter_schema: 1, parse_status: "rejected", parse_error: null, flavor: "unknown" },
     ]);
     expect(first.snapshots).toMatchObject([{ upload_id: failed, flavor: "classic_era", snapshot_at: new Date(CAPTURED_AT * 1000) }]);
+    expect(logged.map((line) => JSON.parse(line))).toMatchObject([{ kit: "wow", facts: { interface: 20506 } }]);
 
     expect(await reparse()).toEqual({ unchanged: 2 });
     expect(await rows()).toEqual(first);
+    expect(logged).toHaveLength(1);
+  });
+
+  it("leaves a parsed upload whose kit now refuses it untouched, unless regressions are allowed", async () => {
+    const upload = await addUpload(savedVariables(CAPTURED_AT), "parsed", { kit: "broken" });
+    await addSnapshot(upload);
+    const before = await rows();
+
+    expect(await reparse({}, { dryRun: true })).toEqual({ regressed: 1 });
+    expect(await reparse()).toEqual({ regressed: 1 });
+    expect(await rows()).toEqual(before);
+
+    expect(await reparse({}, { allowRegressions: true, dryRun: true })).toEqual({ "parsed -> failed": 1 });
+    expect(await rows()).toEqual(before);
+    expect(await reparse({}, { allowRegressions: true })).toEqual({ "parsed -> failed": 1 });
+    const after = await rows();
+    expect(after.uploads).toMatchObject([{ parse_status: "failed", parse_error: "A new interpreter bug refuses this.", adapter_schema: null }]);
+    expect(after.snapshots).toEqual([]);
   });
 
   it("judges captured_at against received_at, so snapshot_at does not change on a later day", async () => {
@@ -151,7 +201,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("re-parse stored uploads (§11)
     await addUpload(text, "failed", { kit: "other" });
     const selection: UploadSelection = { kits: ["wow"], statuses: ["failed"] };
 
-    expect(await countUploads(pool, kits, selection)).toEqual([{ kit: "wow", status: "failed", count: 1 }]);
+    expect(await reparse(selection, { dryRun: true })).toEqual({ "failed -> parsed": 1 });
     expect(await reparse(selection)).toEqual({ "failed -> parsed": 1 });
     const { uploads } = await rows();
     expect(uploads.map((upload) => [upload.id, upload.parse_status])).toEqual([

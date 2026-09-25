@@ -10,12 +10,15 @@
 //                             failed, or rejected; may repeat
 //   --received-since <time>   only uploads received at or after this time
 //   --received-before <time>  only uploads received before this time
-//   --dry-run                 count the selected uploads by kit and status,
-//                             and write nothing
+//   --allow-regressions       also store regressions: parsed uploads that now
+//                             fail or are rejected lose their snapshots
+//   --dry-run                 re-parse and roll back: count what a run would
+//                             do, and write nothing
 //
 // A time is a date (2026-09-24, UTC midnight) or an RFC 3339 time
 // (2026-09-24T18:02:11Z). Without options it re-parses every upload of every
-// kit in the registry.
+// kit in the registry. Without --allow-regressions, a parsed upload whose
+// new parse fails or is rejected is left as it is and counted as regressed.
 //
 // It writes to the database. It is not part of the deploy: an operator runs
 // it by hand after a build, and against production only with the owner's
@@ -26,15 +29,16 @@
 //
 // The output never holds the URL, a Postgres message, or upload content. An
 // upload that was not re-parsed is reported with its uuid and an error code.
+// An upload newly rejected as "unknown" gets ingest's JSON log line (§6.3.1).
 import { parseArgs } from "node:util";
 
 import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
 import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
-import { countUploads, PARSE_STATUSES, type ParseStatus, reparseUploads, type UploadSelection } from "./reparse-uploads.js";
+import { PARSE_STATUSES, type ParseStatus, reparseUploads, type UploadSelection } from "./reparse-uploads.js";
 
 const USAGE =
-  "usage: reparse [--kit <key>]... [--status parsed|failed|rejected]... [--received-since <time>] [--received-before <time>] [--dry-run]";
+  "usage: reparse [--kit <key>]... [--status parsed|failed|rejected]... [--received-since <time>] [--received-before <time>] [--allow-regressions] [--dry-run]";
 
 /** A date, or an RFC 3339 time. */
 const TIME = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2}))?$/;
@@ -60,6 +64,7 @@ function readArgs() {
         status: { type: "string", multiple: true },
         "received-since": { type: "string" },
         "received-before": { type: "string" },
+        "allow-regressions": { type: "boolean" },
         "dry-run": { type: "boolean" },
       },
     }).values;
@@ -106,22 +111,23 @@ const pool = createPool({
   log: (line) => console.error(`reparse: ${line}`),
 });
 try {
-  if (values["dry-run"]) {
-    const groups = await countUploads(pool, kits, selection);
-    for (const { kit, status, count } of groups) console.log(`reparse: ${kit} ${status} ${count}`);
-    const total = groups.reduce((sum, group) => sum + group.count, 0);
-    console.log(`reparse: dry run, ${total} upload(s) would be re-parsed`);
-  } else {
-    const used = (selection.kits ?? kits.list().map((kit) => kit.key)).map((key) => `${key} ${kits.get(key)?.manifest.version}`);
-    console.log(`reparse: kits ${used.join(", ")}`);
-    const counts = await reparseUploads({ pool, kits, maxBytes: config.ingest.maxBytes, selection });
-    for (const [outcome, count] of Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))) {
-      console.log(`reparse: ${outcome} ${count}`);
-    }
-    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    console.log(`reparse: ${total} upload(s) selected`);
-    if ((counts["error"] ?? 0) > 0) process.exitCode = 1;
+  const dryRun = values["dry-run"] === true;
+  const used = (selection.kits ?? kits.list().map((kit) => kit.key)).map((key) => `${key} ${kits.get(key)?.manifest.version}`);
+  console.log(`reparse: kits ${used.join(", ")}${dryRun ? " (dry run: nothing is written)" : ""}`);
+  const counts = await reparseUploads({
+    pool,
+    kits,
+    maxBytes: config.ingest.maxBytes,
+    selection,
+    allowRegressions: values["allow-regressions"] === true,
+    dryRun,
+  });
+  for (const [outcome, count] of Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`reparse: ${outcome} ${count}`);
   }
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  console.log(`reparse: ${total} upload(s) selected`);
+  if ((counts["error"] ?? 0) > 0) process.exitCode = 1;
 } catch (err) {
   console.error(`reparse: failed: code=${failureCode(err)}`);
   process.exitCode = 1;

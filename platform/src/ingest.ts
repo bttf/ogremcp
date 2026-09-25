@@ -479,7 +479,7 @@ async function store(
     await touchDevice(client, device, meta, true);
     await client.query("commit");
     if (result.status === "rejected") {
-      if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
+      if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device.userUuid, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
       return { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } };
     }
     if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: result.parseError ?? "" } };
@@ -566,18 +566,18 @@ export async function writeSnapshot(client: PoolClient, uploadId: string, parsed
 }
 
 /** The flavor an interpreter returns for a payload that maps to no flavor (§6.3.1). */
-const UNKNOWN_FLAVOR = "unknown";
+export const UNKNOWN_FLAVOR = "unknown";
 
 /**
  * The log line for an upload whose flavor is "unknown": why, with the raw
  * detection facts, as JSON (§6.3.1, §16). The user's uuid is its only user
- * identifier.
+ * identifier. The re-parse command writes it too.
  */
-function unknownFlavorLine(device: Device, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): string {
+export function unknownFlavorLine(userUuid: string, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): string {
   return JSON.stringify({
     level: "warn",
     message: "ingest: unsupported_flavor for an unknown flavor",
-    user_uuid: device.userUuid,
+    user_uuid: userUuid,
     upload_uuid: uploadUuid,
     kit: kit.key,
     reason: unknown?.reason ?? null,
