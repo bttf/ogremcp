@@ -18,6 +18,7 @@ import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
 import { DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
+import { NO_TOOL_CALL_CAPS } from "./usage.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,6 +46,7 @@ describe("loadConfig", () => {
       toolContext: DEFAULT_TOOL_CONTEXT,
       firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
       searchCache: DEFAULT_SEARCH_CACHE,
+      toolCallCaps: NO_TOOL_CALL_CAPS,
       bridgeDownloadUrl: null,
       logLevel: "info",
       production: false,
@@ -140,6 +142,12 @@ describe("loadConfig", () => {
       "https://agent.example/client.json",
     ]);
     expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
+  });
+
+  it("reads the daily tool-call caps per tier, each unset being no cap and each at most a Postgres integer (§14)", () => {
+    expect(loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "50" }).toolCallCaps).toEqual({ free: 50, paid: null });
+    expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_PAID: "0" })).toThrow("TOOL_CALLS_PER_DAY_PAID must be a whole number of 1 or more");
+    expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "2147483648" })).toThrow("TOOL_CALLS_PER_DAY_FREE must be at most 2147483647");
   });
 
   it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {
