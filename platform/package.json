@@ -16,6 +16,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.1",
     "@ogmcp/kit-wow": "workspace:*",
     "@ogmcp/sdk": "workspace:*",
     "ajv": "^8.20.0",

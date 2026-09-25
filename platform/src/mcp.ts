@@ -1,7 +1,13 @@
-import express, { type RequestHandler, type Response, type Router } from "express";
+import { readFileSync } from "node:fs";
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import express, { type ErrorRequestHandler, type RequestHandler, type Response, type Router } from "express";
 import type Provider from "oidc-provider";
 
-import { requireToken, resourcesOf } from "./oidc-tokens.js";
+import { failureCode } from "./db.js";
+import { currentToken, requireToken, resourcesOf, type VerifiedToken } from "./oidc-tokens.js";
 
 /**
  * Discovery for the MCP endpoint and the checks in front of it (§9).
@@ -18,12 +24,15 @@ import { requireToken, resourcesOf } from "./oidc-tokens.js";
  *   rebinding. Then the access token must be for this resource and carry
  *   `read` (`requireToken`). A request without one gets 401 with the
  *   challenge of RFC 9728 §5.1, which points at the metadata.
+ * - Then MCP Streamable HTTP, stateless (§9, D12). Each POST gets a new
+ *   server and a new transport, and one JSON body back. There is no
+ *   `Mcp-Session-Id` and no stream, so no `notifications/tools/list_changed`.
+ *   GET, which would open a stream, and DELETE, which would end a session,
+ *   get 405, as does every method other than POST. The body is at most
+ *   `MAX_MCP_BODY_BYTES`. Every error on the route is a JSON-RPC error.
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
- *
- * The MCP server itself is RED-325. Until then, a request with a valid token
- * gets 501.
  *
  * Adapted from `cloud/src/mcp.ts` in bttf/wow-guide@df80260.
  */
@@ -39,6 +48,9 @@ export const MCP_RESOURCE_METADATA_PATH = `${RESOURCE_METADATA_PATH}${MCP_PATH}`
 
 /** Agents get `read`, which covers every v1 MCP tool (§9). */
 export const MCP_SCOPES = ["read"] as const;
+
+/** The largest request body on `/mcp`, in bytes. A request to this server is a few hundred bytes. */
+export const MAX_MCP_BODY_BYTES = 64 * 1024;
 
 /**
  * The web origins of the §9 target clients. Their requests to `/mcp` can
@@ -68,6 +80,8 @@ export interface McpOptions {
    * exact origin. Default: `defaultMcpAllowedOrigins(publicBaseUrl)`.
    */
   allowedOrigins?: readonly string[];
+  /** Receives one line per request that failed with an error. Default: `console.error`. */
+  log?: (line: string) => void;
 }
 
 /** The resource identifier of the MCP endpoint (RFC 8707, RFC 9728): what tokens for it are asked for. */
@@ -89,8 +103,43 @@ function sendRpcError(res: Response, status: number, code: number, message: stri
   res.status(status).json({ jsonrpc: "2.0", error: { code, message }, id: null });
 }
 
+/** The platform package's version. `../package.json` is `platform/package.json` from both `src/` and `dist/`. */
+function platformVersion(): string {
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+  if (typeof version !== "string") throw new Error("platform/package.json has no version");
+  return version;
+}
+
+/** What the server tells a client about itself at `initialize`. */
+const SERVER_INFO = { name: "ogmcp", version: platformVersion() };
+
+/**
+ * The MCP server of one request to `/mcp`, for the agent whose access token
+ * `requireRead` accepted: `agent.userUuid` is the user. Stateless (D12): the
+ * server lives for one request, so the tool list is computed per request
+ * (§10.2), and its `tools` capability does not claim `listChanged`.
+ *
+ * It is the SDK's low-level `Server`, not `McpServer`: a kit's `ToolDef`
+ * carries a JSON Schema (§6.2), and `McpServer` takes zod schemas only and
+ * always claims `listChanged`.
+ *
+ * The tool list is empty for now. RED-326 lists and calls the tools of the
+ * user's enabled games here, and RED-331 sets the server's `instructions`
+ * (§10.5).
+ */
+function createMcpServer(agent: VerifiedToken): Server {
+  const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
+  const tools: Tool[] = [];
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
+  server.setRequestHandler(CallToolRequestSchema, () => {
+    throw new McpError(ErrorCode.InvalidParams, "Unknown tool");
+  });
+  return server;
+}
+
 export function mcpRouter(options: McpOptions): Router {
   const router = express.Router();
+  const log = options.log ?? console.error;
   const base = new URL(options.publicBaseUrl);
   const metadataUrl = `${base.origin}${MCP_RESOURCE_METADATA_PATH}`;
   const metadata = resourceMetadata(options);
@@ -148,11 +197,51 @@ export function mcpRouter(options: McpOptions): Router {
     challenge: { resource_metadata: metadataUrl },
   });
 
-  // RED-325 serves MCP here.
-  const notImplemented: RequestHandler = (_req, res) => {
-    sendRpcError(res, 501, -32000, "Not implemented yet");
+  // Stateless (D12): there is no stream for GET to open and no session for
+  // DELETE to end. After the token check, so that an agent without a token
+  // gets the challenge whatever its method.
+  const onlyPost: RequestHandler = (req, res, next) => {
+    if (req.method === "POST") return next();
+    res.set("Allow", "POST");
+    sendRpcError(res, 405, -32000, "Method not allowed");
   };
 
-  router.all(MCP_PATH, checkHost, checkOrigin, requireRead, notImplemented);
+  // No compressed bodies: the limit then bounds what is parsed.
+  const parseBody = express.json({ limit: MAX_MCP_BODY_BYTES, type: "application/json", inflate: false });
+
+  // A new server and transport per request (D12). The transport answers with
+  // one JSON body and no session ID. It refuses a POST that does not accept
+  // both JSON and an event stream (406), or is not JSON (415), as the spec
+  // requires.
+  const serve: RequestHandler = async (req, res) => {
+    const agent = currentToken(res);
+    if (agent === null) throw new Error("no access token");
+    const server = createMcpServer(agent);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+      maxRequestBodySize: MAX_MCP_BODY_BYTES,
+    });
+    res.once("close", () => {
+      server.close().catch(() => {});
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  };
+
+  // JSON-RPC errors, never the app's plain text. A body error's message
+  // quotes the body, so only its type and status are read. Anything else is
+  // logged by its code alone, as the app's handler does.
+  const rpcErrors: ErrorRequestHandler = (err: unknown, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const { type, status } = (err ?? {}) as { type?: unknown; status?: unknown };
+    if (type === "entity.parse.failed") return sendRpcError(res, 400, -32700, "Parse error");
+    if (type === "entity.too.large") return sendRpcError(res, 413, -32600, "Request too large");
+    if (typeof status === "number" && status >= 400 && status < 500) return sendRpcError(res, status, -32600, "Invalid request");
+    log(`request failed: ${req.method} ${req.path} code=${failureCode(err)}`);
+    sendRpcError(res, 500, -32603, "Internal error");
+  };
+
+  router.all(MCP_PATH, checkHost, checkOrigin, requireRead, onlyPost, parseBody, serve, rpcErrors);
   return router;
 }
