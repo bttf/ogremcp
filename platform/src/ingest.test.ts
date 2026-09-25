@@ -9,14 +9,15 @@ import { gzipSync } from "node:zlib";
 
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { BRIDGE_CLIENT_ID, createDevice } from "./devices.js";
+import { createEventRecorder } from "./events.js";
 import { DEFAULT_INGEST, type IngestAnswer, type IngestMeta, type IngestSettings } from "./ingest.js";
 import { writeAdapterZips } from "./kits/adapter.js";
-import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
+import { KIT_SOURCES, type Kit, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
@@ -88,14 +89,16 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   const logged: string[] = [];
 
   /** Serves the app with the ingest limits `ingest`, and answers its base URL. */
-  async function serve(ingest: IngestSettings): Promise<string> {
+  async function serve(ingest: IngestSettings, registry = kits): Promise<string> {
     const app = createApp({
       health: { checkDatabase: () => Promise.resolve() },
       auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
       oidc: provider,
-      kits,
+      kits: registry,
       ingest,
       ingestLog: (line) => logged.push(line),
+      events: createEventRecorder({ pool }),
+      log: () => {},
     });
     const server = createServer(app).listen(0, "127.0.0.1");
     servers.push(server);
@@ -190,12 +193,22 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     form.append("file", new Blob([new Uint8Array(gz)]), "OpenGamerMCP.lua.gz");
     const res = await fetch(`${to}/api/v1/ingest`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: form });
     const text = await res.text();
-    return { res, body: text === "" ? null : (JSON.parse(text) as IngestAnswer) };
+    const json = res.headers.get("content-type")?.startsWith("application/json") === true;
+    return { res, body: json ? (JSON.parse(text) as IngestAnswer) : null };
   }
 
   async function uploadsOf(deviceId: string | null) {
     const { rows } = await pool.query<Record<string, unknown>>("select * from uploads where device_id = $1 order by id", [deviceId]);
     return rows;
+  }
+
+  /** The device's events rows (§16.1), once there are `count` of them, oldest first. */
+  async function eventsOf(deviceId: string | null, count: number) {
+    return vi.waitFor(async () => {
+      const { rows } = await pool.query<Record<string, unknown>>("select * from events where device_id = $1 order by occurred_at, id", [deviceId]);
+      expect(rows).toHaveLength(count);
+      return rows;
+    });
   }
 
   async function deviceRow(deviceId: string | null) {
@@ -268,6 +281,67 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const wrongSha = await post(accessToken, { ...noStamp, meta: { ...noStamp.meta, sha256: sha256("other") } });
     expect(wrongSha.res.status).toBe(400);
     expect(wrongSha.body?.status).toBe("bad_request");
+  });
+
+  it("records one event per answer, with what it knew of the upload by then, and none for bad_request (§16.1)", async () => {
+    const user = await newUser();
+    const { accessToken, deviceId } = await token(user);
+    const good = upload(savedVariables(CAPTURED_AT));
+    const tbc = upload(savedVariables(CAPTURED_AT, "Hellfire Peninsula", `{ ["project_id"] = 5, ["interface"] = 20506 }`));
+    const statuses = [
+      await post(accessToken, good),
+      await post(accessToken, good),
+      await post(accessToken, upload("OpenGamerMCPDB = os.exit()")),
+      await post(accessToken, tbc),
+      await post(accessToken, upload(savedVariables(CAPTURED_AT), { kit: "nope" })),
+      await post(accessToken, { ...good, meta: { ...good.meta, pad: "x".repeat(20_000) } as IngestMeta }),
+    ].map(({ body }) => body?.status);
+    expect(statuses).toEqual(["stored", "duplicate", "parse_error", "unsupported_flavor", "bad_request", "too_large"]);
+
+    const rows = await eventsOf(deviceId, 5);
+    const version = kits.get("wow")?.manifest.version;
+    const client = { bridge_version: "0.1.0", os: "windows", client_errors: { locate_failed: 0, upload_failed: 2 } };
+    expect(rows.map((row) => [row["status"], row["parse_status"], row["flavor"], row["adapter_schema"], row["kit"], row["kit_version"]])).toEqual([
+      ["stored", "parsed", "classic_era", 1, "wow", version],
+      ["duplicate", null, null, null, "wow", version],
+      ["parse_error", "failed", null, null, "wow", version],
+      ["unsupported_flavor", "rejected", "tbc_classic", 1, "wow", version],
+      // Refused before meta was read: nothing of it.
+      ["too_large", null, null, null, null, null],
+    ]);
+    for (const row of rows.slice(0, 4)) {
+      expect(row).toMatchObject({ kind: "ingest", user_id: user.id, device_id: deviceId, latency_ms: expect.any(Number), ...client });
+    }
+    expect(rows[4]).toMatchObject({ user_id: user.id, bridge_version: null, os: null, client_errors: null, agent_client: null, tool: null });
+  });
+
+  it("records an interpreter crash as an error event, and answers 500", async () => {
+    const wow = kits.get("wow");
+    if (wow === undefined) throw new Error("no wow kit");
+    const crashing: Kit = {
+      ...wow,
+      interpreter: {
+        ...wow.interpreter,
+        parse: () => {
+          throw new TypeError("a kit bug");
+        },
+      },
+    };
+    const crashBase = await serve(DEFAULT_INGEST, { list: () => [crashing], get: (key) => (key === "wow" ? crashing : undefined) });
+    const { accessToken, deviceId } = await token(await newUser());
+
+    const res = await post(accessToken, upload(savedVariables(CAPTURED_AT)), crashBase);
+    expect(res.res.status).toBe(500);
+    expect(await uploadsOf(deviceId)).toHaveLength(0);
+    const [row] = await eventsOf(deviceId, 1);
+    expect(row).toMatchObject({
+      status: "error",
+      kit: "wow",
+      kit_version: wow.manifest.version,
+      parse_status: null,
+      adapter_schema: null,
+      bridge_version: "0.1.0",
+    });
   });
 
   it("answers a gzip bomb with too_large and stores nothing", async () => {
@@ -431,5 +505,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect(third.res.status).toBe(429);
     expect(third.body?.status).toBe("rate_limited");
     expect(await uploadsOf(deviceId)).toHaveLength(2);
+    // No row for rate_limited: a looping device would grow the table.
+    const events = await eventsOf(deviceId, 2);
+    expect(events.map((row) => row["status"])).toEqual(["stored", "stored"]);
   });
 });

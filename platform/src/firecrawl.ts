@@ -83,11 +83,25 @@ export function failureLevel(err: FirecrawlError): "warn" | "error" {
   return err.reason === "http" && err.status !== undefined && err.status !== 429 && err.status < 500 ? "error" : "warn";
 }
 
-/** The web hits of a search for `query`, at most `limit`. Throws a `FirecrawlError` on any failure. */
-export async function firecrawlSearch(options: FirecrawlOptions, query: string, limit: number): Promise<FirecrawlHit[]> {
-  const hits = webHits(await post(options, FIRECRAWL_SEARCH_URL, { query, limit, sources: ["web"] }));
+/** A successful search's answer. */
+export interface FirecrawlSearchAnswer {
+  hits: FirecrawlHit[];
+  /** The answer's `creditsUsed`, or null when it has none. */
+  creditsUsed: number | null;
+}
+
+/** The web hits of a search for `query`, at most `limit`, and its cost. Throws a `FirecrawlError` on any failure. */
+export async function firecrawlSearch(options: FirecrawlOptions, query: string, limit: number): Promise<FirecrawlSearchAnswer> {
+  const json = await post(options, FIRECRAWL_SEARCH_URL, { query, limit, sources: ["web"] });
+  const hits = webHits(json);
   if (hits === null) throw new FirecrawlError("response");
-  return hits;
+  return { hits, creditsUsed: creditsUsed(json) };
+}
+
+/** A successful search answer's `creditsUsed`, when it is a whole number of 0 or more. */
+function creditsUsed(json: unknown): number | null {
+  const credits = isObject(json) ? json["creditsUsed"] : undefined;
+  return Number.isSafeInteger(credits) && (credits as number) >= 0 ? (credits as number) : null;
 }
 
 /**
