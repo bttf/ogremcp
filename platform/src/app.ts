@@ -53,7 +53,10 @@ export interface AppOptions {
   fetchPage?: PageFetch | null;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
-  /** The `INGEST_` names: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
+  /**
+   * The `INGEST_` and `DEVICES_PER_USER_` names: the ingest endpoint's limits
+   * (§8.3, §14). Default: `DEFAULT_INGEST`.
+   */
   ingest?: IngestSettings;
   /** The ingest endpoint's log (`IngestOptions.log`). */
   ingestLog?: (line: string) => void;

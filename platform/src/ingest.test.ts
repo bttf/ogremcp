@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
-import { BRIDGE_CLIENT_ID, createDevice } from "./devices.js";
+import { BRIDGE_CLIENT_ID, createDevice, revokeDevice } from "./devices.js";
 import { createEventRecorder } from "./events.js";
 import { DEFAULT_INGEST, type IngestAnswer, type IngestMeta, type IngestSettings } from "./ingest.js";
 import { writeAdapterZips } from "./kits/adapter.js";
@@ -485,6 +485,82 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     );
     expect(rows.find((row) => row.uuid === fromAlice.body?.snapshot_uuid)).toMatchObject({ user_id: alice.id, device_id: aliceToken.deviceId });
     expect(rows.find((row) => row.uuid === fromBob.body?.snapshot_uuid)).toMatchObject({ user_id: bob.id, device_id: bobToken.deviceId });
+  });
+
+  async function newUserOf(tier: "free" | "paid"): Promise<{ id: string; uuid: string }> {
+    const user = await newUser();
+    await pool.query("update users set tier = $2 where id = $1", [user.id, tier]);
+    return user;
+  }
+
+  /** The devices of `user` that have claimed an upload slot (§8.3). */
+  async function claimed(user: { id: string }): Promise<string[]> {
+    const { rows } = await pool.query<{ id: string }>("select id from devices where user_id = $1 and first_stored_at is not null order by id", [user.id]);
+    return rows.map((row) => row.id);
+  }
+
+  it("gives a free user's upload slot to the first device with a stored upload, until it is revoked (§8.3, §14)", async () => {
+    const user = await newUserOf("free");
+    const a = await token(user);
+    const b = await token(user);
+    const good = upload(savedVariables(CAPTURED_AT));
+
+    // A failed parse claims no slot, so the other device's stored upload takes it.
+    expect((await post(a.accessToken, upload("OpenGamerMCPDB = os.exit()"))).res.status).toBe(422);
+    expect((await post(b.accessToken, good)).res.status).toBe(201);
+    expect(await claimed(user)).toEqual([b.deviceId]);
+
+    const refused = await post(a.accessToken, upload(savedVariables(CAPTURED_AT, "Westfall")));
+    expect(refused.res.status).toBe(403);
+    expect(refused.body).toEqual({
+      status: "device_limit",
+      message: `Another of your bridges uploads for this account. To upload from this one, revoke the other on the Devices page: ${ISSUER}/devices`,
+    });
+    expect(await uploadsOf(a.deviceId)).toHaveLength(1);
+    expect((await eventsOf(a.deviceId, 2)).map((row) => row["status"])).toEqual(["parse_error", "device_limit"]);
+
+    const { rows } = await pool.query<{ uuid: string }>("select uuid from devices where id = $1", [b.deviceId]);
+    expect(await revokeDevice(pool, user.id, rows[0]?.uuid ?? "")).toBe(true);
+    expect((await post(a.accessToken, good)).res.status).toBe(201);
+    expect(await claimed(user)).toEqual([a.deviceId, b.deviceId]);
+  });
+
+  it("frees the slot of a device whose grant is gone (§8.3)", async () => {
+    const user = await newUserOf("free");
+    const a = await token(user);
+    const b = await token(user);
+    const good = upload(savedVariables(CAPTURED_AT));
+    expect((await post(a.accessToken, good)).res.status).toBe(201);
+    expect((await post(b.accessToken, good)).res.status).toBe(403);
+
+    // As a bridge that revokes its own refresh token leaves it: the device row not revoked, its grant deleted.
+    await pool.query("delete from oidc_models where model = 'Grant' and oidc_id = (select grant_id from devices where id = $1)", [a.deviceId]);
+    expect((await post(b.accessToken, good)).res.status).toBe(201);
+  });
+
+  it("does not limit a paid user when DEVICES_PER_USER_PAID is unset, and applies a downgrade to the next upload (§14)", async () => {
+    const user = await newUserOf("paid");
+    const a = await token(user);
+    const b = await token(user);
+    expect((await post(a.accessToken, upload(savedVariables(CAPTURED_AT)))).res.status).toBe(201);
+    expect((await post(b.accessToken, upload(savedVariables(CAPTURED_AT)))).res.status).toBe(201);
+
+    // The downgrade deletes no device. The one that claimed its slot last is past the limit.
+    await pool.query("update users set tier = 'free' where id = $1", [user.id]);
+    expect((await post(b.accessToken, upload(savedVariables(CAPTURED_AT, "Westfall")))).res.status).toBe(403);
+    expect((await post(a.accessToken, upload(savedVariables(CAPTURED_AT, "Westfall")))).res.status).toBe(201);
+  });
+
+  it("gives the slot to one of two devices whose first uploads race (§8.3)", async () => {
+    const good = upload(savedVariables(CAPTURED_AT));
+    // A few rounds, since a race does not always overlap.
+    for (let round = 0; round < 3; round++) {
+      const user = await newUserOf("free");
+      const [a, b] = [await token(user), await token(user)];
+      const statuses = await Promise.all([post(a.accessToken, good), post(b.accessToken, good)]);
+      expect(statuses.map(({ res }) => res.status).sort()).toEqual([201, 403]);
+      expect(await claimed(user)).toHaveLength(1);
+    }
   });
 
   it("answers rate_limited with Retry-After over the limit of an instance, and over the limit of the device", async () => {

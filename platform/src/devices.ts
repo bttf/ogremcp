@@ -348,15 +348,21 @@ export interface DeviceInfo {
 }
 
 /**
- * A device's columns as `DeviceInfo` has them, for `devices d`. The grant is
- * live while its row exists and has not expired, as `PostgresAdapter.find`
- * reads it.
+ * A condition that holds while the device `alias` (a `devices` row) is live:
+ * not revoked, and its grant's row exists and has not expired, as
+ * `PostgresAdapter.find` reads it (`DeviceInfo.revoked`). The Devices page and
+ * the ingest device limit (§8.3) share it.
  */
-const DEVICE_INFO = `d.uuid, d.name, d.os, d.bridge_version, d.created_at as approved_at, d.last_seen_at,
-  d.revoked_at is not null or not exists (
+export function liveDeviceSql(alias: string): string {
+  return `(${alias}.revoked_at is null and exists (
     select 1 from oidc_models g
-     where g.model = 'Grant' and g.oidc_id = d.grant_id and (g.expires_at is null or g.expires_at > now())
-  ) as revoked`;
+     where g.model = 'Grant' and g.oidc_id = ${alias}.grant_id and (g.expires_at is null or g.expires_at > now())
+  ))`;
+}
+
+/** A device's columns as `DeviceInfo` has them, for `devices d`. */
+const DEVICE_INFO = `d.uuid, d.name, d.os, d.bridge_version, d.created_at as approved_at, d.last_seen_at,
+  not ${liveDeviceSql("d")} as revoked`;
 
 interface DeviceRow {
   uuid: string;
