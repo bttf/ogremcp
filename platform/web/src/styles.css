@@ -314,3 +314,110 @@ code {
   opacity: 0.6;
   cursor: default;
 }
+
+/* Devices and Connected agents */
+
+.og-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.og-card {
+  padding: 16px 20px;
+  border: 1px solid var(--og-line);
+  border-radius: 8px;
+}
+
+.og-card--revoked {
+  color: var(--og-dim);
+}
+
+.og-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.og-card h2 {
+  margin: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.og-card p {
+  margin: 12px 0 0;
+}
+
+.og-card p[role="alert"] {
+  color: var(--og-error);
+}
+
+.og-card strong {
+  overflow-wrap: anywhere;
+}
+
+.og-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--og-line);
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.og-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+}
+
+.og-facts dt {
+  color: var(--og-dim);
+}
+
+.og-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.og-card__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 16px;
+  font-weight: 600;
+}
+
+.og-card__form input {
+  max-width: 360px;
+  padding: 8px 10px;
+  border: 1px solid var(--og-line);
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 400;
+}
+
+.og-hint {
+  color: var(--og-dim);
+}
+
+.og-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.og-card__actions button {
+  min-width: 120px;
+  border: 1px solid var(--og-ink);
+  cursor: pointer;
+}
+
+.og-card__actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
