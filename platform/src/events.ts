@@ -46,6 +46,8 @@ export interface ToolCallEvent {
   error: ToolCallError | null;
   /** When the snapshot the call returned was captured, or null. */
   snapshotAt: Date | null;
+  /** The uuid of the snapshot whose state a kit tool call returned, or null. `report_issue` names it (§16.2). */
+  snapshotUuid: string | null;
   cacheHit: boolean | null;
   searchCredits: number | null;
 }
@@ -137,6 +139,7 @@ const COLUMNS = [
   "query",
   "error",
   "snapshot_age_seconds",
+  "snapshot_uuid",
   "cache_hit",
   "search_credits",
   "device_id",
@@ -174,6 +177,7 @@ function row(event: RecordedEvent): Row {
       query: event.query,
       error: event.error,
       snapshot_age_seconds: event.snapshotAt === null ? null : int((event.occurredAt.getTime() - event.snapshotAt.getTime()) / 1000),
+      snapshot_uuid: event.snapshotUuid,
       cache_hit: event.cacheHit,
       search_credits: event.searchCredits,
     };

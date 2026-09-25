@@ -41,7 +41,10 @@ export interface AppOptions {
    * served, and `/mcp` lists no kit tool.
    */
   kits?: KitRegistry;
-  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`, `FETCH_PAGE_MAX_CHARS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /**
+   * The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`,
+   * `FETCH_PAGE_MAX_CHARS`, `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
+   */
   toolContext?: ToolContextSettings;
   /** Game-scoped search for `search_game_info` (§12), or null without `FIRECRAWL_API_KEY`. Default: null. */
   search?: ScopedSearch | null;

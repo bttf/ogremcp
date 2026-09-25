@@ -25,6 +25,7 @@ import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
+import { reportIssue } from "./report-issue.js";
 import { searchGameInfo } from "./search-game-info.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -50,8 +51,10 @@ const FETCH_GAME_PAGE = {
   inputSchema: fetchGamePage.inputSchema,
   annotations: fetchGamePage.annotations,
 };
+/** `report_issue` as `tools/list` lists it, for every user (§10.3). */
+const REPORT_ISSUE = { name: reportIssue.name, description: reportIssue.description, inputSchema: reportIssue.inputSchema, annotations: reportIssue.annotations };
 /** The platform tools, as `tools/list` lists them. */
-const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO, FETCH_GAME_PAGE];
+const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO, FETCH_GAME_PAGE, REPORT_ISSUE];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
