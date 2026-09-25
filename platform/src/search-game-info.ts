@@ -1,4 +1,4 @@
-import type { ToolResult } from "@ogmcp/sdk";
+import { jsonResult, type ToolResult, userError } from "@ogmcp/sdk";
 
 import { FirecrawlError } from "./firecrawl.js";
 import type { Kit } from "./kits/registry.js";
@@ -14,12 +14,11 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * flavor. The scope is that flavor's `search` prefixes (§6.1), and the
  * search is `ScopedSearch` (`search.ts`).
  *
- * User-facing conditions are `isError` results (§10.5): a bad argument or a
- * game that is not enabled, with a plain-language message; `no_sources` for
- * a flavor with an empty scope; `search_unavailable` without
- * `FIRECRAWL_API_KEY`, or when Firecrawl fails (429, 5xx, timeout). The last
- * two carry `{ error, message }` as `structuredContent` and the same JSON as
- * text. There is no separate search cap (§12).
+ * User-facing conditions are `userError` results (§10.5), each with a
+ * plain-language message: a bad argument, a game that is not enabled,
+ * `no_sources` for a flavor with an empty scope, and `search_unavailable`
+ * without `FIRECRAWL_API_KEY` or when Firecrawl fails (429, 5xx, timeout).
+ * There is no separate search cap (§12).
  *
  * The description carries no game text, and nothing from a result goes into
  * a description or instructions (§10.5).
@@ -83,12 +82,12 @@ export const searchGameInfo: PlatformTool = {
     if (flavor === null || config === undefined) return noSources(kit, flavor);
     const scope = searchScope(kit.key, flavor, config.search);
     if (scope.prefixes.length === 0) return noSources(kit, flavor);
-    if (ctx.search === null) return conditionResult("search_unavailable", NOT_SET_UP_MESSAGE);
+    if (ctx.search === null) return userError(NOT_SET_UP_MESSAGE);
     let results: SearchHit[];
     try {
       results = await ctx.search(scope, input.query);
     } catch (err) {
-      if (err instanceof FirecrawlError) return conditionResult("search_unavailable", UNAVAILABLE_MESSAGE);
+      if (err instanceof FirecrawlError) return userError(UNAVAILABLE_MESSAGE);
       throw err;
     }
     return jsonResult({
@@ -135,23 +134,8 @@ function firstSupported(kit: Kit): string | null {
   return Object.entries(kit.manifest.flavors).find(([, config]) => config.status === "supported")?.[0] ?? null;
 }
 
-/** `structuredContent` plus the same JSON as a text block (§10.5). */
-function jsonResult(data: { [key: string]: unknown }): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
-}
-
-/** A user-facing condition: an `isError` result with a plain-language message (§10.5). */
-function userError(message: string): ToolResult {
-  return { isError: true, content: [{ type: "text", text: message }] };
-}
-
 /** `no_sources`: the flavor has no vetted sources, so the agent says it can't verify (§12). */
 function noSources(kit: Kit, flavor: string | null): ToolResult {
   const what = flavor === null ? kit.name : `${kit.name} (${flavor})`;
-  return conditionResult("no_sources", `${what} has no vetted search sources yet. Tell the player you can't verify game facts for it, rather than guess.`);
-}
-
-/** A user-facing condition with a code, such as `no_sources`: `userError`, with `{ error, message }` as JSON. */
-function conditionResult(error: "no_sources" | "search_unavailable", message: string): ToolResult {
-  return { ...jsonResult({ error, message }), isError: true };
+  return userError(`${what} has no vetted search sources yet. Tell the player you can't verify game facts for it, rather than guess.`);
 }

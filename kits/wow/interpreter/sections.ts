@@ -30,20 +30,23 @@ type RecentPath = NonNullable<WowState["recent_path"]>;
  * The `sections` of `state`, each built for the agent, keyed by section. A
  * section the adapter left out is null. `flavor` is the snapshot's.
  */
-export function buildSections(state: WowState, flavor: string, sections: readonly Section[]): { [key: string]: unknown } {
+export function buildSections(state: WowState, flavor: string, sections: readonly Section[]): BuiltSections {
   const built: { [key: string]: unknown } = {};
   for (const section of sections) built[section] = BUILDERS[section](state, flavor);
-  return built;
+  return built as BuiltSections;
 }
 
-const BUILDERS: { [S in Section]: (state: WowState, flavor: string) => unknown } = {
+const BUILDERS = {
   character: ({ character }) => character && buildCharacter(character),
   location: ({ location }) => location && buildLocation(location),
   quests: ({ quests }) => quests,
   inventory: ({ inventory, character }) => inventory && buildInventory(inventory, character?.level ?? null),
   skills: ({ skills }, flavor) => skills && buildSkills(skills, flavor),
   recent_path: ({ recent_path }) => recent_path && buildRecentPath(recent_path),
-};
+} satisfies { [S in Section]: (state: WowState, flavor: string) => unknown };
+
+/** What `buildSections` returns: each requested section, as its builder makes it. */
+export type BuiltSections = { [S in Section]?: ReturnType<(typeof BUILDERS)[S]> };
 
 function buildCharacter({ copper, ...character }: Character) {
   const { xp_percent } = character;

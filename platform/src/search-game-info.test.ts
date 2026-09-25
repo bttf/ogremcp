@@ -55,21 +55,17 @@ describe("search_game_info (§10.3, §12)", () => {
   it("answers no_sources for a flavor with an empty scope, and search_unavailable without a key", async () => {
     const { search, calls } = stubSearch();
     const none = await call({ game: "wow", query: "hogger", flavor: "forever" }, search);
-    expect(none.isError).toBe(true);
-    expect(none.structuredContent).toMatchObject({ error: "no_sources" });
-    expect(JSON.parse(none.content[0]?.text ?? "")).toEqual(none.structuredContent);
+    expect(none).toEqual({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^World of Warcraft \(forever\) has no vetted search sources yet\./) }] });
     expect(calls).toEqual([]);
 
     const noKey = await call({ game: "wow", query: "hogger", flavor: "classic_era" }, null);
-    expect(noKey.isError).toBe(true);
-    expect(noKey.structuredContent).toEqual({ error: "search_unavailable", message: NOT_SET_UP_MESSAGE });
+    expect(noKey).toEqual({ isError: true, content: [{ type: "text", text: NOT_SET_UP_MESSAGE }] });
   });
 
   it("answers search_unavailable when Firecrawl answers 429", async () => {
     const fetch = (async () => new Response("{}", { status: 429 })) as typeof globalThis.fetch;
     const result = await call({ game: "wow", query: "hogger", flavor: "classic_era" }, firecrawlScopedSearch({ apiKey: "test-key", timeoutMs: 5000, fetch }));
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toEqual({ error: "search_unavailable", message: UNAVAILABLE_MESSAGE });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: UNAVAILABLE_MESSAGE }] });
   });
 
   it("is read-only and open-world (§10.5)", () => {
@@ -136,7 +132,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("search_game_info's default fla
 
     // Played Forever last: its empty scope.
     const forever = await player("classic_era", "forever");
-    expect((await tools.call(forever, "search_game_info", query))?.structuredContent).toMatchObject({ error: "no_sources" });
+    const none = await tools.call(forever, "search_game_info", query);
+    expect(none?.isError).toBe(true);
+    expect(none?.content[0]?.text).toMatch(/^World of Warcraft \(forever\) has no vetted search sources yet\./);
     const era = await tools.call(forever, "search_game_info", { ...query, flavor: "classic_era" });
     expect(era?.structuredContent).toMatchObject({ flavor: "classic_era", results: [HIT] });
     expect(calls).toHaveLength(2);

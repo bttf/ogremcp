@@ -29,8 +29,9 @@ export type TextContent = { type: "text"; text: string };
 
 /**
  * A tool call's result (§10.5): `structuredContent` plus the same JSON as a
- * text block in `content`. User-facing conditions (paid-only, no snapshot
- * yet) set `isError: true` with a plain-language message.
+ * text block in `content` (`jsonResult`). User-facing conditions (paid-only,
+ * no snapshot yet) set `isError: true` with a plain-language message
+ * (`userError`).
  */
 export type ToolResult = {
   content: TextContent[];

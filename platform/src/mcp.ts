@@ -129,11 +129,11 @@ const SERVER_INFO = { name: "ogmcp", version: platformVersion() };
  * carries a JSON Schema (§6.2), and `McpServer` takes zod schemas only and
  * always claims `listChanged`.
  *
- * `tools/call` of a tool the user does not have, an unknown name or a tool of
- * a game the user has not enabled, is a protocol error. The SDK sends a
- * thrown error's message to the client, and a Postgres error's message can
- * repeat a row, so any other error is logged by its code alone and sent as
- * "Internal error".
+ * `tools/call` of an unknown tool name is a protocol error. A tool of a game
+ * the user has not enabled gets an `isError` result instead (§10.5,
+ * `tool-envelope.ts`). The SDK sends a thrown error's message to the client,
+ * and a Postgres error's message can repeat a row, so any other error is
+ * logged by its code alone and sent as "Internal error".
  *
  * RED-331 sets the server's `instructions` (§10.5).
  */

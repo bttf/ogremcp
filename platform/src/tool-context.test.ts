@@ -82,7 +82,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     await user.add(at(11), "classic_era", ZOELA);
     const ctx = await contextOf(user.uuid);
 
-    expect(Object.keys(ctx).sort()).toEqual(["history", "latest", "user"]);
+    expect(Object.keys(ctx).sort()).toEqual(["history", "latest", "maxResultBytes", "user"]);
     expect(ctx.user).toEqual({ uuid: user.uuid, tier: "free" });
     expect(await ctx.latest({})).toEqual({
       snapshotAt: at(12),
