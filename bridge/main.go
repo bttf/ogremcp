@@ -1,5 +1,5 @@
 // Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
-// Until the tray UI (P5), it has three development commands:
+// Until the tray UI (P5), it has four development commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
@@ -10,6 +10,11 @@
 //	    -watch      keep running, fetch and locate again every refresh
 //	                interval, and watch the kits' sources (§7): print each
 //	                settled change of a source instance
+//	bridge adapter  fetch and locate as bridge kits does, install or update
+//	                each kit's adapter (§7), and print the outcome at each
+//	                adapter folder. Takes -root, and -watch, which syncs every
+//	                refresh interval and applies an update staged while the
+//	                game ran once it exits
 //	bridge run      log in if the bridge is not, and then as bridge kits
 //	                -watch, but upload each settled change (§8.3) instead of
 //	                printing it. Takes -root. Logs in again when the server
@@ -61,13 +66,18 @@ func main() {
 			fmt.Fprintln(os.Stderr, "bridge kits:", err)
 			os.Exit(1)
 		}
+	case "adapter":
+		if err := syncAdapters(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bridge adapter:", err)
+			os.Exit(1)
+		}
 	case "run":
 		if err := run(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "bridge run:", err)
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch] | bridge run [-root DIR]")
+		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch] | bridge run [-root DIR]")
 		os.Exit(2)
 	}
 }
