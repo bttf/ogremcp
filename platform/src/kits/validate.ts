@@ -37,7 +37,8 @@ const GLOB = /[*?[\]]/;
 
 /**
  * Checks every kit: its manifest against the SDK schema, its kit key and
- * `tool_prefix` against every other kit's (§6.1), its tool count against
+ * `tool_prefix` against every other kit's, each flavor's `mixed` prefixes
+ * against its `search` prefixes (§6.1), its tool count against
  * `MAX_KIT_TOOLS` (§10.2), and each tool's full name with `checkKitToolName`
  * and against every other kit tool's (§10.1). Throws on the first problem,
  * naming the kit.
@@ -67,6 +68,13 @@ export function checkKits(sources: readonly KitSource[]): CheckedKit[] {
       );
     }
     byPrefix.set(manifest.tool_prefix, source.package);
+
+    for (const [flavor, config] of Object.entries(manifest.flavors)) {
+      const stray = config.mixed?.find((prefix) => !config.search.includes(prefix));
+      if (stray !== undefined) {
+        throw new Error(`${source.package}: flavors.${flavor}.mixed has "${stray}", which is not in flavors.${flavor}.search (§6.1).`);
+      }
+    }
 
     const tools = source.interpreter.tools;
     if (tools.length > MAX_KIT_TOOLS) {
