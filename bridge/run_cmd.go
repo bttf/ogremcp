@@ -37,15 +37,11 @@ func run(args []string) error {
 		}
 		prompter = folderFlag(dir)
 	}
-	client, base, err := newClient()
+	settings, path, err := loadSettings()
 	if err != nil {
 		return err
 	}
-	path, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-	settings, err := config.Load(path)
+	client, base, err := newClient(settings)
 	if err != nil {
 		return err
 	}

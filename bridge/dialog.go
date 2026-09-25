@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/ncruces/zenity"
+
+	"github.com/bttf/ogmcp/bridge/internal/auth"
+	"github.com/bttf/ogmcp/bridge/internal/config"
 )
 
 // pickFolder shows the OS's folder picker, titled title: an open panel on
@@ -20,6 +25,61 @@ func pickFolder(ctx context.Context, title string) (string, error) {
 		return "", nil
 	}
 	return dir, err
+}
+
+// serverTitle is the title of the server dialogs.
+const serverTitle = "Open Gamer MCP server"
+
+// askServer asks for the server in a text dialog that starts with current,
+// the server in use, and confirms the change. It is the tray's
+// Controller.AskServer (§13.3). An empty entry means the hosted service. An
+// entry that auth.ParseBaseURL refuses is shown, and asked for again. It
+// returns false when the user cancels or enters the server in use. While
+// OGMCP_BASE_URL is set, which overrides server_url, it says so and returns
+// false.
+func askServer(ctx context.Context, current string) (string, bool, error) {
+	if os.Getenv(config.EnvServerURL) != "" {
+		err := zenity.Info(config.EnvServerURL+" sets the server, "+current+". To choose the server here, remove "+config.EnvServerURL+" and start the bridge again.",
+			zenity.Title(serverTitle), zenity.Context(ctx))
+		return "", false, ignoreCancel(err)
+	}
+	text := current
+	for {
+		entry, err := zenity.Entry("The bridge uploads to "+current+".\n\nTo use your own server, enter its address, such as https://ogmcp.example.com. Leave it empty to use the hosted service.",
+			zenity.Title(serverTitle), zenity.EntryText(text), zenity.Context(ctx))
+		if err != nil {
+			return "", false, ignoreCancel(err)
+		}
+		text = strings.TrimSpace(entry)
+		value, base := "", config.DefaultServerURL
+		if text != "" {
+			if base, err = auth.ParseBaseURL(text); err != nil {
+				msg := err.Error()
+				if err := zenity.Error(strings.ToUpper(msg[:1])+msg[1:], zenity.Title(serverTitle), zenity.Context(ctx)); ignoreCancel(err) != nil {
+					return "", false, err
+				}
+				continue
+			}
+			value = base
+		}
+		if base == current {
+			return "", false, nil
+		}
+		err = zenity.Question("Change the server to "+base+"?\n\nThe bridge stops uploading to "+current+" and uses its login for "+base+". If it has none, the menu asks you to log in. The login for "+current+" stays saved, so changing back needs no new login.",
+			zenity.Title(serverTitle), zenity.OKLabel("Change"), zenity.Context(ctx))
+		if err != nil {
+			return "", false, ignoreCancel(err)
+		}
+		return value, true, nil
+	}
+}
+
+// ignoreCancel is err, or nil when the user canceled the dialog.
+func ignoreCancel(err error) error {
+	if errors.Is(err, zenity.ErrCanceled) {
+		return nil
+	}
+	return err
 }
 
 // alert shows text in a message box, for a tray app that cannot start and has

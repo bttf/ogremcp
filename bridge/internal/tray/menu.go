@@ -110,6 +110,7 @@ type View struct {
 // Menu item titles that do not change.
 const (
 	TitleChooseFolder = "Choose the game folder…"
+	TitleServer       = "Server…"
 	TitleAutostart    = "Start at login"
 	TitleQuit         = "Quit Open Gamer MCP"
 	// TitleMoveApp replaces TitleAutostart for an app that macOS runs from a
@@ -393,6 +394,17 @@ func (m *Model) LoginKnown() {
 		if s.Login == LoginChecking {
 			s.Login = LoginDone
 		}
+		return nil
+	})
+}
+
+// NewServer forgets what belongs to the old server when the server changes:
+// the login, the last upload, the errors, the kits, and their adapters. Start
+// at login stays.
+func (m *Model) NewServer() {
+	m.update(func(s *State) []string {
+		*s = State{Autostart: s.Autostart, AutostartAvailable: s.AutostartAvailable, AutostartBlocked: s.AutostartBlocked}
+		m.errs = nil
 		return nil
 	})
 }
