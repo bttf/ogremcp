@@ -225,6 +225,43 @@ local function CollectCharacter()
 end
 
 -- Section: location ----------------------------------------------------------
+--
+-- zone is the name of the zone map that map_id lies in, read with
+-- C_Map.GetMapInfo, which both clients have
+-- (bttf/wow-guide@df80260:docs/api-probe.md). The map decides because
+-- GetRealZoneText can briefly name a building while the map ID stays the same
+-- (bttf/wow-guide@df80260:addon/Storage.lua, ZoneChanged). In Classic Era it
+-- named the inn at a login inside one (RED-290). A zone map is a map of type
+-- Zone. A micro map, such as a mine, is part of the zone of its parent map,
+-- so its zone is the parent's. Where no zone map is found, as on a dungeon or
+-- continent map, in an instance, or when the map info is unreadable, zone is
+-- GetRealZoneText().
+
+local ZONE_MAP = {
+	-- Enum.UIMapType values (MapConstantsDocumentation.lua in
+	-- Ketho/wow-ui-source-vanilla, branch classic_era, and in
+	-- Ketho/wow-ui-source-forever).
+	ZONE = 3,
+	MICRO = 5,
+	-- Most maps read for one zone name, which stops a loop of parents.
+	MAX_READS = 5,
+}
+
+-- ZoneName returns the name of the zone map that mapID is or lies in, or nil
+-- when there is none or it is unreadable.
+local function ZoneName(mapID)
+	for _ = 1, ZONE_MAP.MAX_READS do
+		local info = mapID and ReadTable(Api("C_Map.GetMapInfo", mapID))
+		local mapType = ReadInteger(PlainField(info, "mapType"))
+		if mapType == ZONE_MAP.ZONE then
+			return ReadName(PlainField(info, "name"))
+		elseif mapType ~= ZONE_MAP.MICRO then
+			return nil
+		end
+		mapID = ReadInteger(PlainField(info, "parentMapID"), 1)
+	end
+	return nil
+end
 
 local function CollectLocation()
 	local loc = {}
@@ -246,7 +283,7 @@ local function CollectLocation()
 			end
 		end
 	end
-	loc.zone = ReadString(Api("GetRealZoneText"))
+	loc.zone = ZoneName(loc.map_id) or ReadString(Api("GetRealZoneText"))
 	loc.subzone = ReadString(Api("GetSubZoneText"))
 	loc.facing = ReadNumber(Api("GetPlayerFacing"), 0, 2 * math.pi)
 	loc.in_instance = ReadBoolean((Api("IsInInstance")))
@@ -666,6 +703,7 @@ ns.ApiEither = ApiEither
 ns.NameFromLink = NameFromLink
 ns.Now = Now
 ns.CollectCharacter = CollectCharacter
+ns.ZoneName = ZoneName
 ns.CollectLocation = CollectLocation
 ns.InCombat = InCombat
 ns.CollectQuests = CollectQuests
