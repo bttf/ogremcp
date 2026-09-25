@@ -325,7 +325,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect(logged.map((line) => JSON.parse(line) as unknown)).toEqual([
       {
         level: "warn",
-        message: expect.any(String),
+        time: expect.any(String),
+        msg: expect.any(String),
+        request_id: expect.any(String),
+        route: "/api/v1/ingest",
         user_uuid: user.uuid,
         upload_uuid: rows[1]?.["uuid"],
         kit: "wow",

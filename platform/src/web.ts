@@ -1,5 +1,7 @@
 import express, { type Request, type Response, type Router } from "express";
 
+import { setRoute } from "./log.js";
+
 /**
  * Paths the service owns. A page load of one, or of a path under one, never
  * gets the web app: it goes on to the route that owns it, or to the 404.
@@ -61,6 +63,9 @@ function wantsHtml(req: Request): boolean {
  * next one. A page load's answer is also `private`: the web session
  * middleware can add a renewed cookie to it, which no shared cache may keep.
  *
+ * Their log lines name no path, which can hold an ID such as `/consent/:uid`'s:
+ * the route is `(web file)` or `(web page)`.
+ *
  * Adapted from `cloud/src/web.ts` in bttf/wow-guide@df80260.
  */
 export function webFiles(root: string): Router {
@@ -69,6 +74,7 @@ export function webFiles(root: string): Router {
     express.static(root, {
       index: false,
       setHeaders: (res: Response, path: string) => {
+        setRoute("(web file)");
         res.set(WEB_HEADERS);
         const hashed = /[\\/]assets[\\/][^\\/]+$/.test(path);
         res.set("Cache-Control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
@@ -83,6 +89,7 @@ export function webPages(root: string): Router {
   router.use((req, res, next) => {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
     if (isServicePath(req.path) || !wantsHtml(req)) return next();
+    setRoute("(web page)");
     res.set(WEB_HEADERS);
     res.set("Cache-Control", "private, no-cache");
     res.sendFile("index.html", { root }, (err) => {

@@ -8,6 +8,7 @@ import { failureCode } from "./db.js";
 import { type HealthOptions, healthRouter } from "./health.js";
 import type { IngestSettings } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
+import { logger, requestLog } from "./log.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
 import { securityHeaders } from "./security-headers.js";
@@ -53,7 +54,7 @@ export interface AppOptions {
    * `req.ip` and `req.protocol` the client's. Default 0: no proxy trusted.
    */
   trustProxyHops?: number;
-  /** Receives one line per request that failed with an error. Default: `console.error`. */
+  /** Receives one line per request that failed with an error. Default: `logger.error`. */
   log?: (line: string) => void;
 }
 
@@ -71,12 +72,14 @@ export function createApp({
   ingestLog,
   https = false,
   trustProxyHops = 0,
-  log = console.error,
+  log = logger.error,
 }: AppOptions): Express {
   if (oidc !== undefined && auth === undefined) throw new Error("the OAuth server needs the web sessions of `auth`");
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxyHops);
+  // First, so that every response has a request ID and an access line (§16).
+  app.use(requestLog({ trustEdgeRequestId: trustProxyHops > 0 }));
   app.use(securityHeaders({ https }));
   // Before the web session lookup, so that /health/live never reaches it.
   app.use(healthRouter(health));
@@ -104,18 +107,19 @@ export function createApp({
 /**
  * Answers a request that failed with a plain 500, or with the 4xx status the
  * error carries. The log line holds a code only (`failureCode`): a Postgres
- * message can repeat a row. Express's own handler would log the message and,
- * outside production, send the stack.
+ * message can repeat a row. Its route and request ID come from the request's
+ * context (`log.ts`), not the path, which can hold IDs. Express's own handler
+ * would log the message and, outside production, send the stack.
  */
 function errorHandler(log: (line: string) => void): ErrorRequestHandler {
-  return (err: unknown, req, res, next) => {
+  return (err: unknown, _req, res, next) => {
     if (res.headersSent) return next(err);
     const status = (err as { status?: unknown } | null)?.status;
     if (typeof status === "number" && status >= 400 && status < 500) {
       res.status(status).type("text/plain").send("Bad request.");
       return;
     }
-    log(`request failed: ${req.method} ${req.path} code=${failureCode(err)}`);
+    log(`request failed: code=${failureCode(err)}`);
     res.status(500).type("text/plain").send("Something went wrong. Try again.");
   };
 }

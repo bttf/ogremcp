@@ -3,6 +3,7 @@ import type Provider from "oidc-provider";
 import { type Configuration, errors, type KoaContextWithOIDC } from "oidc-provider";
 
 import { BRIDGE_CLIENT_ID } from "./devices.js";
+import { setUserUuid } from "./log.js";
 
 /**
  * The scopes, audiences, and token lifetimes of the OAuth server (§8.1, §9),
@@ -198,6 +199,7 @@ const BEARER = /^Bearer +([A-Za-z0-9._~+/-]+=*) *$/i;
  *
  * Every challenge ends with the `challenge` params and `scope`. DPoP is off,
  * and a DPoP-bound token would be refused: this checks bearer tokens only.
+ * An accepted token's user is named in the request's log lines.
  */
 export function requireToken({ provider, resource, scope, challenge = {} }: RequireTokenOptions): RequestHandler {
   function deny(res: Response, status: 401 | 403, error?: "invalid_token" | "insufficient_scope", description?: string): void {
@@ -238,6 +240,7 @@ export function requireToken({ provider, resource, scope, challenge = {} }: Requ
       scopes: [...token.scopes],
     };
     res.locals[TOKEN] = verified;
+    setUserUuid(verified.userUuid);
     next();
   };
 }
