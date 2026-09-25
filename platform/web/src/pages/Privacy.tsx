@@ -14,8 +14,9 @@ export const PRIVACY_UPDATED = "September 25, 2026";
  * (`account.ts`), search and page fetches (`search.ts`, `pages.ts`,
  * `search-cache.ts`), the cleanup of expired sign-ins and tokens
  * (`auth-cleanup.ts`), and the log (`log.ts`). Paid retention is described,
- * but the public beta has only the free tier (§19.1 D5). Change it, and
- * `PRIVACY_UPDATED`, when they change.
+ * but the public beta has only the free tier (§19.1 D5). The operator, the
+ * no-sale statement, and Railway's request logs are the owner's decisions
+ * (2026-09-25, RED-236). Change it, and `PRIVACY_UPDATED`, when they change.
  *
  * Adapted from `web/src/pages/Privacy.tsx` in bttf/wow-guide@df80260.
  */
@@ -23,8 +24,9 @@ export function Privacy() {
   return (
     <LegalPage title="Privacy policy" updated={PRIVACY_UPDATED}>
       <p>
-        Ogre MCP has three parts: an addon in your game, the bridge app on your computer, and this service, which your AI agent
-        connects to. This page says what each part collects, who else receives it, how long it is kept, and how to delete it.
+        Ogre MCP is run by Red Pine Software. It has three parts: an addon in your game, the bridge app on your computer, and this
+        service, which your AI agent connects to. This page says what each part collects, who else receives it, how long it is kept,
+        and how to delete it.
       </p>
       <p>It describes the hosted service. Someone who runs their own server can change the limits below.</p>
 
@@ -131,6 +133,7 @@ export function Privacy() {
           provider's own terms and privacy policy cover what happens to it there.
         </li>
       </ul>
+      <p>We do not sell your data or use it for advertising.</p>
 
       <h2>How long it is kept</h2>
       <p>There is no paid tier yet, so every account is on the free tier.</p>
@@ -177,7 +180,11 @@ export function Privacy() {
       <p>
         The service writes its logs as JSON lines, which Railway stores. Each request writes one line with the method, the route, the
         status, and the time taken. When you are signed in, or the request comes from your bridge or agent, the line also holds your
-        account's random ID. No line holds a token, a cookie, search text, or a page address.
+        account's random ID. No line holds an IP address, a token, a cookie, search text, or a page address.
+      </p>
+      <p>
+        Railway, which hosts the service, keeps its own request logs. They can include IP addresses and are kept under Railway's
+        retention.
       </p>
 
       <h2>Cookies</h2>
