@@ -13,7 +13,7 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in auth-cleanup.test.ts are skipped");
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("expired auth row cleanup against Postgres (§11)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   const lines: string[] = [];
