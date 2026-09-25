@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
-import express, { type ErrorRequestHandler, type RequestHandler, type Response, type Router } from "express";
+import express, { type ErrorRequestHandler, type Request, type RequestHandler, type Response, type Router } from "express";
 import type Provider from "oidc-provider";
 
 import { failureCode } from "./db.js";
@@ -33,6 +33,9 @@ import type { ToolRegistry } from "./tools.js";
  *   GET, which would open a stream, and DELETE, which would end a session,
  *   get 405, as does every method other than POST. The body is at most
  *   `MAX_MCP_BODY_BYTES`. Every error on the route is a JSON-RPC error.
+ * - A POST past the token check that gets a 4xx is logged, with the fixed
+ *   text of the refusal and nothing of the request but its MCP method and
+ *   `MCP-Protocol-Version` (`logRefusal`).
  * - `tools/list` and `tools/call` serve the tools of the token's user, from
  *   the tool registry (`tools.ts`, §10). A call's events row names the
  *   token's OAuth client as the agent client (§16).
@@ -109,6 +112,79 @@ function resourceMetadata({ publicBaseUrl, provider }: Pick<McpOptions, "publicB
 
 function sendRpcError(res: Response, status: number, code: number, message: string): void {
   res.status(status).json({ jsonrpc: "2.0", error: { code, message }, id: null });
+}
+
+/** The client-to-server methods of MCP 2025-11-25 and 2026-07-28: the ones a refusal's log line names. */
+const LOGGED_METHODS: ReadonlySet<string> = new Set([
+  "initialize",
+  "notifications/initialized",
+  "server/discover",
+  "ping",
+  "tools/list",
+  "tools/call",
+  "resources/list",
+  "resources/templates/list",
+  "resources/read",
+  "resources/subscribe",
+  "resources/unsubscribe",
+  "subscriptions/listen",
+  "prompts/list",
+  "prompts/get",
+  "completion/complete",
+  "logging/setLevel",
+  "tasks/get",
+  "tasks/list",
+  "tasks/result",
+  "tasks/update",
+  "tasks/cancel",
+  "notifications/cancelled",
+  "notifications/progress",
+  "notifications/roots/list_changed",
+  "notifications/tasks/status",
+]);
+
+/** Every MCP protocol version is a date. */
+const PROTOCOL_VERSION = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The fixed text of each 4xx the SDK's transport can send a POST
+ * (`WebStandardStreamableHTTPServerTransport`, SDK 1.30.1). Two of them go
+ * on after `: ` with a value, the protocol version the client sent or a
+ * size, which the log leaves out.
+ */
+const SDK_REFUSALS: readonly string[] = [
+  "Not Acceptable: Client must accept both application/json and text/event-stream",
+  "Unsupported Media Type: Content-Type must be application/json",
+  "Payload Too Large",
+  "Parse error: Invalid JSON",
+  "Invalid Request: Batch must not exceed 100 messages",
+  "Parse error: Invalid JSON-RPC message",
+  "Session not found",
+  "Invalid Request: Only one initialization request is allowed",
+  "Bad Request: Unsupported protocol version",
+];
+
+/** The entry of `SDK_REFUSALS` that the transport's error message is, or `other`. */
+function sdkRefusal(message: string | undefined): string {
+  return SDK_REFUSALS.find((fixed) => message === fixed || message?.startsWith(`${fixed}: `) === true) ?? "other";
+}
+
+/**
+ * Logs a POST that the transport or `rpcErrors` refused with a 4xx (RED-360):
+ * the status, the refusal's fixed text, the JSON-RPC method when it is in
+ * `LOGGED_METHODS`, and `MCP-Protocol-Version` when it is a date. Nothing else
+ * of the request. 401 and 403 are the token check's answers and are not logged.
+ */
+function logRefusal(req: Request, status: number, reason: string): void {
+  if (status < 400 || status >= 500 || status === 401 || status === 403) return;
+  const method = (req.body as { method?: unknown } | undefined)?.method;
+  const version = req.get("mcp-protocol-version");
+  logger.warn("MCP request refused", {
+    status,
+    reason,
+    method: typeof method === "string" && LOGGED_METHODS.has(method) ? method : "other",
+    protocol_version: version === undefined ? "absent" : PROTOCOL_VERSION.test(version) ? version : "other",
+  });
 }
 
 /** The platform package's version. `../package.json` is `platform/package.json` from both `src/` and `dist/`. */
@@ -236,11 +312,16 @@ export function mcpRouter(options: McpOptions): Router {
   // A new server and transport per request (D12). The transport answers with
   // one JSON body and no session ID. It refuses a POST that does not accept
   // both JSON and an event stream (406), or is not JSON (415), as the spec
-  // requires.
+  // requires. It reports each refusal to the server's `onerror` before it
+  // answers, and has written the status when `handleRequest` returns.
   const serve: RequestHandler = async (req, res) => {
     const agent = currentToken(res);
     if (agent === null) throw new Error("no access token");
     const server = createMcpServer(agent, options.tools, log);
+    let refusal: string | undefined;
+    server.onerror = (err) => {
+      refusal ??= err.message;
+    };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -251,17 +332,24 @@ export function mcpRouter(options: McpOptions): Router {
     });
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+    logRefusal(req, res.statusCode, sdkRefusal(refusal));
   };
+
+  // A refusal of the route's own, logged as the transport's are.
+  function refuse(req: Request, res: Response, status: number, code: number, message: string): void {
+    logRefusal(req, status, message);
+    sendRpcError(res, status, code, message);
+  }
 
   // JSON-RPC errors, never the app's plain text. A body error's message
   // quotes the body, so only its type and status are read. Anything else is
   // logged by its code alone, as the app's handler does.
-  const rpcErrors: ErrorRequestHandler = (err: unknown, _req, res, next) => {
+  const rpcErrors: ErrorRequestHandler = (err: unknown, req, res, next) => {
     if (res.headersSent) return next(err);
     const { type, status } = (err ?? {}) as { type?: unknown; status?: unknown };
-    if (type === "entity.parse.failed") return sendRpcError(res, 400, -32700, "Parse error");
-    if (type === "entity.too.large") return sendRpcError(res, 413, -32600, "Request too large");
-    if (typeof status === "number" && status >= 400 && status < 500) return sendRpcError(res, status, -32600, "Invalid request");
+    if (type === "entity.parse.failed") return refuse(req, res, 400, -32700, "Parse error");
+    if (type === "entity.too.large") return refuse(req, res, 413, -32600, "Request too large");
+    if (typeof status === "number" && status >= 400 && status < 500) return refuse(req, res, status, -32600, "Invalid request");
     log(`request failed: code=${failureCode(err)}`);
     sendRpcError(res, 500, -32603, "Internal error");
   };

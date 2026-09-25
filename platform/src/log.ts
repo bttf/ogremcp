@@ -16,10 +16,11 @@ import type { Request, RequestHandler } from "express";
  * fields from `AsyncLocalStorage`, without passing them along.
  *
  * No line holds a header, a cookie, a query string, a request body, an
- * authorization code, or a token. The access line has the method, the
- * matched route's pattern (never the path, which can hold IDs), the status,
- * and the duration. Callers log codes and counts, never a message that can
- * repeat a row (`failureCode`).
+ * authorization code, or a token. One exception: `/mcp`'s refusal line holds
+ * `MCP-Protocol-Version` when it is a date (`mcp.ts`). The access line has
+ * the method, the matched route's pattern (never the path, which can hold
+ * IDs), the status, and the duration. Callers log codes and counts, never a
+ * message that can repeat a row (`failureCode`).
  *
  * Every line goes to stdout, errors too: Railway marks each stderr line an
  * error whatever its `level`.
