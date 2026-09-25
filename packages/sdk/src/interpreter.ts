@@ -31,7 +31,11 @@ export interface UnknownFlavor {
   facts: Record<string, unknown> | null;
 }
 
-/** What `Interpreter.parse` returns for one upload. */
+/**
+ * What `Interpreter.parse` returns for one upload. No string in it, key or
+ * value, holds U+0000, because Postgres refuses U+0000 in `text` and `jsonb`
+ * (§11).
+ */
 export interface Parsed<State> {
   /** Mapped from the adapter's detection facts (§6.3.1). */
   flavor: string;

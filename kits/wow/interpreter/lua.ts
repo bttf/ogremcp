@@ -9,8 +9,9 @@
 // It reads bytes, not text. A Lua string is a byte string and a decimal escape
 // (\ddd) names one byte, so a string is decoded as UTF-8 once its bytes are
 // complete. Invalid UTF-8 becomes U+FFFD, as in the prototype's reader
-// (bttf/wow-guide@df80260:bridge/internal/extract/extract.go). An unknown
-// escape yields the escaped byte, as Lua 5.1 does.
+// (bttf/wow-guide@df80260:bridge/internal/extract/extract.go). So does U+0000,
+// in any string form and in keys, because Postgres refuses it in text and
+// jsonb (§11). An unknown escape yields the escaped byte, as Lua 5.1 does.
 //
 // Tables become JSON values. A table whose keys are exactly 1 to n becomes an
 // array. Any other table becomes an object with string keys: a number key is
@@ -266,10 +267,10 @@ class Reader {
         const end = this.pos;
         this.pos++;
         if (!escaped) {
-          return this.decoder.decode(this.bytes.subarray(run, end));
+          return this.string(this.bytes.subarray(run, end));
         }
         length = this.append(length, run, end);
-        return this.decoder.decode(this.buffer.subarray(0, length));
+        return this.string(this.buffer.subarray(0, length));
       }
       if (c === -1) {
         throw this.unexpected();
@@ -289,6 +290,15 @@ class Reader {
       this.buffer[length++] = byte;
       run = this.pos;
     }
+  }
+
+  /**
+   * Decodes the bytes of a quoted or long string, as a value or a key.
+   * Invalid UTF-8 and U+0000 become U+FFFD. A name holds neither: only ASCII
+   * letters, digits, and "_".
+   */
+  private string(bytes: Uint8Array): string {
+    return this.decoder.decode(bytes).replaceAll("\0", "\uFFFD");
   }
 
   /** Copies the file's bytes from `start` to `end` into the buffer at `length`. */
@@ -377,7 +387,7 @@ class Reader {
           n++;
         }
         if (n === level && this.peek(1 + n) === RBRACKET) {
-          const text = this.decoder.decode(this.bytes.subarray(start, this.pos));
+          const text = this.string(this.bytes.subarray(start, this.pos));
           this.pos += level + 2;
           return text;
         }
