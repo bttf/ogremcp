@@ -22,9 +22,9 @@ import { UserFacingError } from "./tool-context.js";
  *   message (`userError`), not protocol errors, so the agent relays them: a
  *   `UserFacingError`, such as `ToolContext`'s for an unknown character, and
  *   a call to a tool of a game the user has turned off (`gameOffResult`),
- *   which a client can still list until a new chat (§10.2). Cap reached,
- *   paid-only, no sources, and search unavailable (§12, §14) will use
- *   `userError` too.
+ *   which a client can still list until a new chat (§10.2). So are cap
+ *   reached (`capReachedResult` in `usage.ts`, §14), no sources, and search
+ *   unavailable (§12). Paid-only will be too.
  * - Any other error becomes `TOOL_FAILED_MESSAGE`, and a log line with the
  *   tool's name and the error's code alone: its message can hold user data.
  *
@@ -58,6 +58,8 @@ export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] a
  * - `out_of_scope`: fetch_game_page's URL, or the page's final URL, is
  *   outside the game's scopes (§12, §16.1 scope misses).
  * - `not_found`: fetch_game_page's page is a 404.
+ * - `cap_reached`: the user's daily tool calls reached the tier's cap, and
+ *   the tool did not run (§14, §16.1 cap hits).
  */
 export type ToolCallError =
   | "user_error"
@@ -68,7 +70,8 @@ export type ToolCallError =
   | "no_sources"
   | "search_unavailable"
   | "out_of_scope"
-  | "not_found";
+  | "not_found"
+  | "cap_reached";
 
 /** What a call answers, and why it is an error, or null when it is not one. */
 export interface ToolAnswer {

@@ -144,6 +144,11 @@ logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecr
 // connection a request needs.
 const events = createEventRecorder({ pool: createEventsPool({ url: config.databaseUrl }) });
 
+// The daily tool-call caps (§14). The calls are counted in usage_daily with
+// or without them.
+const caps = config.toolCallCaps;
+logger.info(`tool calls per day: free ${caps.free ?? "no cap"}, paid ${caps.paid ?? "no cap"}`);
+
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
@@ -161,6 +166,7 @@ const app = createApp({
   bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
   events,
+  toolCallCaps: caps,
   https,
   trustProxyHops: config.trustProxyHops,
 });
