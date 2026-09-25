@@ -11,7 +11,9 @@ import { Games } from "./pages/Games.js";
 import { GetStarted } from "./pages/GetStarted.js";
 import { Home } from "./pages/Home.js";
 import { NotFound } from "./pages/NotFound.js";
+import { Privacy } from "./pages/Privacy.js";
 import { SignIn } from "./pages/SignIn.js";
+import { Terms } from "./pages/Terms.js";
 import { RequireSession } from "./RequireSession.js";
 import { Shell } from "./Shell.js";
 
@@ -29,6 +31,9 @@ export const routes: RouteObject[] = [
       { path: "/consent/:uid", element: <Consent /> },
       // Not under RequireSession either: a signed-out browser comes back with its code.
       { path: "/device", element: <Device /> },
+      // Public: anyone reads them before signing in, and Google's OAuth consent screen links to them (§13.2).
+      { path: "/privacy", element: <Privacy /> },
+      { path: "/terms", element: <Terms /> },
       {
         element: <RequireSession />,
         children: [

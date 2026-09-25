@@ -46,11 +46,11 @@ afterEach(() => {
 async function serve(
   pool: Pool,
   bridgeDownloadUrl?: string,
-  limits: Pick<AppOptions, "ingest" | "toolCallCaps" | "retention"> = {},
+  options: Pick<AppOptions, "ingest" | "toolCallCaps" | "retention" | "contactEmail"> = {},
 ): Promise<string> {
   const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
   const auth = { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: BASE };
-  const app = createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits, bridgeDownloadUrl, ...limits });
+  const app = createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits, bridgeDownloadUrl, ...options });
   server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -64,6 +64,16 @@ describe("without a web session", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ error: "signed_out" });
+  });
+
+  it("GET /api/v1/contact answers the contact email, or null when none is configured (§13.2)", async () => {
+    const withEmail = await serve({} as Pool, undefined, { contactEmail: "privacy@ogremcp.example" });
+    expect(await (await fetch(`${withEmail}/api/v1/contact`)).json()).toEqual({ email: "privacy@ogremcp.example" });
+    server?.close();
+    const without = await serve({} as Pool);
+    const res = await fetch(`${without}/api/v1/contact`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ email: null });
   });
 
   it("GET /api/v1/setup answers 401", async () => {

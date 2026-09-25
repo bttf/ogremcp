@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useSearchParams } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 
 import { PROVIDER_LABELS, PROVIDERS, type Provider, useSession } from "../session.js";
 
@@ -34,7 +34,7 @@ function useConfiguredProviders(): readonly Provider[] | null {
  * when it is a path on this service: an OAuth interaction sends a signed-out
  * browser here that way (§9), and so does one that must sign in again. A
  * provider without credentials on this server gets a plain sentence instead
- * of a link.
+ * of a link. The page links to the Privacy and Terms pages (§13.2).
  *
  * Adapted from `web/src/pages/Login.tsx` in bttf/wow-guide@df80260.
  */
@@ -69,6 +69,9 @@ export function SignIn() {
           </li>
         ))}
       </ul>
+      <p className="og-signin__legal">
+        Read the <Link to="/privacy">Privacy policy</Link> and the <Link to="/terms">Terms of use</Link>.
+      </p>
     </>
   );
 }

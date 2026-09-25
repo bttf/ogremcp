@@ -55,6 +55,8 @@ export interface AppOptions {
   fetchPage?: PageFetch | null;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
+  /** `CONTACT_EMAIL`, for `auth`'s web UI (§13.2). Default: none. */
+  contactEmail?: string | null;
   /**
    * The `INGEST_` and `DEVICES_PER_USER_` names: the ingest endpoint's limits
    * (§8.3, §14). Default: `DEFAULT_INGEST`.
@@ -110,6 +112,7 @@ export function createApp({
   search,
   fetchPage,
   bridgeDownloadUrl,
+  contactEmail,
   ingest,
   ingestLog,
   events,
@@ -153,7 +156,7 @@ export function createApp({
       toolCallCaps: toolCallCaps ?? NO_TOOL_CALL_CAPS,
       freeRetentionDays: retention.freeRetentionDays,
     };
-    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl, tierLimits }));
+    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl, contactEmail, tierLimits }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));

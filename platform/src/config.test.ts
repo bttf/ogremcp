@@ -50,6 +50,7 @@ describe("loadConfig", () => {
       toolCallCaps: NO_TOOL_CALL_CAPS,
       retention: DEFAULT_RETENTION,
       bridgeDownloadUrl: null,
+      contactEmail: null,
       adminUserUuids: [],
       logLevel: "info",
       production: false,
@@ -169,6 +170,13 @@ describe("loadConfig", () => {
     expect(config.bridgeDownloadUrl).toBe("https://downloads.example/ogremcp-bridge");
     for (const bad of ["javascript:alert(1)", "http://downloads.example/ogremcp-bridge", "downloads.example"]) {
       expect(() => loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: bad })).toThrow("BRIDGE_DOWNLOAD_URL must be an https URL");
+    }
+  });
+
+  it("reads CONTACT_EMAIL as a plain email address", () => {
+    expect(loadConfig({ DATABASE_URL: url, CONTACT_EMAIL: " privacy@ogremcp.example " }).contactEmail).toBe("privacy@ogremcp.example");
+    for (const bad of ["privacy", "privacy@example", "a b@example.com", "privacy@example.com?subject=x", "javascript:alert(1)@x.com"]) {
+      expect(() => loadConfig({ DATABASE_URL: url, CONTACT_EMAIL: bad })).toThrow("CONTACT_EMAIL must be an email address");
     }
   });
 

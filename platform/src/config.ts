@@ -128,6 +128,12 @@ export interface Config {
    */
   bridgeDownloadUrl: string | null;
   /**
+   * `CONTACT_EMAIL`: the address the Privacy and Terms pages give for
+   * questions (§13.2), or null when it is unset. The pages then say contact
+   * details are coming soon.
+   */
+  contactEmail: string | null;
+  /**
    * `ADMIN_USER_UUIDS`: the `users.uuid` of each user who may open `/admin`
    * (§13.2, `admin.ts`), in lower case. Empty when it is unset: nobody may.
    */
@@ -372,6 +378,20 @@ function bridgeDownloadUrl(value: string | undefined): string | null {
   return url.href;
 }
 
+/**
+ * A plain email address: no spaces, quotes, `%`, `?`, or `#`. The web UI puts
+ * it in a `mailto:` link, where those would change the link.
+ */
+const EMAIL = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+
+/** `CONTACT_EMAIL`, as a plain email address of at most 254 characters. */
+function contactEmail(value: string | undefined): string | null {
+  const raw = (value ?? "").trim();
+  if (raw === "") return null;
+  if (raw.length > 254 || !EMAIL.test(raw)) throw new Error("CONTACT_EMAIL must be an email address, such as privacy@example.com");
+  return raw;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
@@ -499,6 +519,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       downgradeGraceDays: positiveInt("DOWNGRADE_GRACE_DAYS", env["DOWNGRADE_GRACE_DAYS"], DEFAULT_RETENTION.downgradeGraceDays, MAX_DAYS),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
+    contactEmail: contactEmail(env["CONTACT_EMAIL"]),
     adminUserUuids: adminUserUuids(env["ADMIN_USER_UUIDS"]),
     logLevel: logLevel(env["LOG_LEVEL"]),
     production: env["NODE_ENV"] === "production",

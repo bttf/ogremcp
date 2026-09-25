@@ -27,6 +27,8 @@ export interface ApiOptions {
   oidc?: Provider;
   /** `BRIDGE_DOWNLOAD_URL`. Left out or null, `GET /api/v1/setup` answers null for it. */
   bridgeDownloadUrl?: string | null;
+  /** `CONTACT_EMAIL`. Left out or null, `GET /api/v1/contact` answers null for it. */
+  contactEmail?: string | null;
   /** The limits `GET /api/v1/account` reports. */
   tierLimits: TierLimits;
 }
@@ -60,6 +62,12 @@ export interface Setup {
   mcp_url: string;
   /** `BRIDGE_DOWNLOAD_URL`, or null when the bridge has no download yet. */
   bridge_download_url: string | null;
+}
+
+/** What `GET /api/v1/contact` answers: the contact of the Privacy and Terms pages (§13.2). */
+export interface Contact {
+  /** `CONTACT_EMAIL`, or null when it is unset. */
+  email: string | null;
 }
 
 /** What `GET /api/v1/account` answers: the signed-in user's tier and what applies to it (§13.2, §14). */
@@ -96,6 +104,8 @@ export interface Game {
  * - `GET /api/v1/sign-in-providers`: the providers this server has
  *   credentials for, so the Sign in page can say which are off. Their
  *   `/auth/<provider>` routes answer 503.
+ * - `GET /api/v1/contact`: the `Contact` of the Privacy and Terms pages,
+ *   which anyone may read.
  * - `GET /api/v1/setup`: the `Setup` links, for the signed-in user.
  * - `GET /api/v1/games`: `{ games: Game[] }`, every first-class kit in
  *   registry order, for the signed-in user.
@@ -126,9 +136,9 @@ export interface Game {
  * is not one of the signed-in user's devices or agent grants. The bridge's
  * grants are devices, never agents.
  *
- * The routes but `me` and `sign-in-providers` answer 401 `signed_out` without
- * a web session. Every route that changes something needs this site's
- * `Origin`. Any other path under `/api` answers a JSON 404.
+ * The routes but `me`, `sign-in-providers`, and `contact` answer 401
+ * `signed_out` without a web session. Every route that changes something
+ * needs this site's `Origin`. Any other path under `/api` answers a JSON 404.
  */
 export function apiRouter({
   pool,
@@ -138,6 +148,7 @@ export function apiRouter({
   kits,
   oidc,
   bridgeDownloadUrl = null,
+  contactEmail = null,
   tierLimits,
 }: ApiOptions): Router {
   const router = express.Router();
@@ -165,6 +176,11 @@ export function apiRouter({
 
   router.get("/api/v1/sign-in-providers", (_req, res) => {
     res.json({ providers: (["google", "discord"] as const).filter((name) => providers[name] !== null) });
+  });
+
+  router.get("/api/v1/contact", (_req, res) => {
+    const contact: Contact = { email: contactEmail };
+    res.json(contact);
   });
 
   router.get("/api/v1/setup", (_req, res) => {

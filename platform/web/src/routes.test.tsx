@@ -47,8 +47,11 @@ it("sends a signed-out user to the Sign in page, which links to each configured 
   await vi.waitFor(() => expect(container.querySelector("h1")?.textContent).toBe("Sign in"));
   expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/signin");
   await vi.waitFor(() => expect(container.textContent).toContain("Sign-in with Discord is not configured on this server."));
-  const links = [...container.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]);
+  const links = [...container.querySelectorAll(".og-signin a")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(links).toEqual([["Continue with Google", "/auth/google"]]);
+  // The page links to the Privacy and Terms pages (§13.2).
+  const legal = [...container.querySelectorAll(".og-signin__legal a")].map((a) => a.getAttribute("href"));
+  expect(legal).toEqual(["/privacy", "/terms"]);
   // The signed-in navigation and Sign out are not shown.
   expect(container.querySelector("nav")).toBeNull();
   expect(container.querySelector("form")).toBeNull();
@@ -71,8 +74,8 @@ it("passes the Sign in page's return_to on to each provider", async () => {
     </SessionProvider>,
   );
 
-  await vi.waitFor(() => expect(container.querySelectorAll("a")).toHaveLength(2));
-  expect([...container.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([
+  await vi.waitFor(() => expect(container.querySelectorAll(".og-signin a")).toHaveLength(2));
+  expect([...container.querySelectorAll(".og-signin a")].map((a) => a.getAttribute("href"))).toEqual([
     "/auth/google?return_to=%2Finteraction%2Fabc",
     "/auth/discord?return_to=%2Finteraction%2Fabc",
   ]);
