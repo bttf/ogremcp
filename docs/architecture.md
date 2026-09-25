@@ -154,7 +154,7 @@ ogmcp/
   },
   "adapter": {
     "install": "_*_/Interface/AddOns/OpenGamerMCP",
-    "process": ["Wow*.exe", "World of Warcraft*"]
+    "process": ["WowClassic*.exe", "Wow.exe", "Wow-64.exe", "WowT.exe", "WowT-64.exe", "WowB.exe", "WowB-64.exe", "World of Warcraft*"]
   },
   "sources": [{
     "id": "savedvariables",
@@ -178,7 +178,8 @@ ogmcp/
 - `root.locate`: an ordered chain for the game's install folder. Try each entry; if none resolves, `prompt` the user with a folder picker. Remember the result per device. Only `path` (OS variables and globs) and `prompt` are implemented; `steam` is `[later]`. Variables: `{PROGRAM_FILES_X86}` and `{HOME}`. Add more only when a kit needs them.
 - `root.verify`: a glob that must match under a candidate root for it to count. Catches a wrong folder pick.
 - `adapter.install`: where the bridge installs the adapter, relative to root. Globs expand to each existing match (here, each flavor folder). Omit it for adapter-less kits.
-- `adapter.process`: globs for the game's process names. The bridge applies adapter updates only while none is running (§7). Take the exact names from the prototype.
+- `adapter.process`: globs for the game's process names, matched case-insensitively. The bridge applies adapter updates only while none is running (§7). The WoW list avoids `Wow*.exe`, which also matches the WowUp addon manager (`WowUp.exe`), often left open in the tray.
+- **Globs** in manifest paths and process names support only `*`, which matches within one path segment. `?`, `[`, `/`, and `\` are rejected in process names. Relative paths may not be absolute or contain `..`, and every resolved path must stay inside the game root.
 - `sources[].path`: relative to root; globs allowed. Each match is a **source instance**, and the bridge watches all of them. **Flavor comes from the payload, never the folder name.**
 - `sources[].type`: only `file` is implemented. It's an enum, so `log_tail` (§15), `http_listen`, and `http_poll` are additive later. `format`: only `text`.
 - `trigger: on_change`: upload after writes settle (§7).
@@ -336,6 +337,8 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Adapter install/update:** after login, at each start, and on the same periodic timer as glob re-resolution, fetch manifests and adapters for enabled kits from the platform (§8.2; interpreters stay server-side). Update when the platform's version is newer; never downgrade.
   - **Never under a running game.** Replacing files under a running client can load a mix of old and new files on `/reload`. If a process matching `adapter.process` (§6.1) is running, stage the update and apply it after the game exits; the tray says "Close WoW to finish updating". A first install can happen any time, because a brand-new addon folder isn't loaded until the client restarts; the tray says so.
   - **Crash-safe and zip-safe:** verify the zip's sha256, extract into a temp folder beside the target (rejecting absolute paths, `..`, and links), then swap by rename. The old folder stays until the swap succeeds.
+  - **Links:** the bridge follows folder links on the install path, so a linked `Interface/AddOns` works. If the adapter folder itself is a link (a developer's checkout), the bridge never replaces or removes it and the tray says updates are skipped. Owner decision, 2026-09-24.
+  - **Disabled kits:** the bridge leaves a disabled kit's addon installed, stops updating it, and never deletes it.
 - **Installer:** installs the bridge only, per-user, so self-update never needs admin rights. Windows: Inno Setup into `%LOCALAPPDATA%`. macOS: a notarized `.app` in a `.dmg`, installed to `~/Applications`, not the usual drag to `/Applications`. If it's launched from anywhere else (the dmg, Downloads), it offers to move itself there.
 - **Signing:** Windows via Azure Trusted Signing; macOS via Developer ID signing plus notarization. Neither is ready: Apple Developer Program enrollment is unconfirmed and no signing secrets are in CI yet (§19.1 D6).
 - **Self-update:** check GitHub Releases for `bridge-v` tags only (§5). Verify the checksum and a detached signature (e.g. an ed25519 key embedded in the binary), then install. **Windows:** swap the binary. **macOS:** replace the whole `.app` bundle, then relaunch; swapping the binary inside a signed, notarized bundle breaks its signature.
@@ -406,7 +409,7 @@ Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 - **Dedup key:** `(device, kit, source_id, instance)`. A duplicate still updates the device's last-seen time.
 - **Kits:** ingest accepts any kit in the registry, enabled on the Games page or not.
 - `meta.mtime` is optional. Without it, `snapshot_at` falls back to receipt time (§6.2).
-- **Rate limit:** per device, for abuse protection (proposed: 1 upload per 5 s per instance, small burst).
+- **Rate limit:** per device, for abuse protection: per instance (proposed: 1 upload per 5 s, burst 3) and across the device's instances (proposed: 30 per minute, burst 10), so a device can't bypass the limit with new `instance` values.
 
 ### 8.4 Server → bridge `[later]`
 
