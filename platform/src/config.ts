@@ -76,6 +76,12 @@ export interface Config {
    * returns (§6.2, `tool-context.ts`). Unset, `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
+  /**
+   * `BRIDGE_DOWNLOAD_URL`: where the Get started page sends people to
+   * download the bridge (§7, §13.2), or null when it is unset. The page then
+   * says the download is not available yet.
+   */
+  bridgeDownloadUrl: string | null;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -273,6 +279,18 @@ function cimdTrustedClientIds(value: string | undefined): readonly string[] {
 }
 
 /**
+ * `BRIDGE_DOWNLOAD_URL`, as an https URL. The web UI puts it in a link, so
+ * any other scheme, such as `javascript:`, is refused.
+ */
+function bridgeDownloadUrl(value: string | undefined): string | null {
+  const raw = (value ?? "").trim();
+  if (raw === "") return null;
+  const url = URL.parse(raw);
+  if (url?.protocol !== "https:") throw new Error("BRIDGE_DOWNLOAD_URL must be an https URL");
+  return url.href;
+}
+
+/**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
  * only store (§11). The sign-in providers are optional: without one, its
@@ -347,6 +365,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     toolContext: {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
     },
+    bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     production: env["NODE_ENV"] === "production",
   };
 }

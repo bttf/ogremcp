@@ -130,6 +130,7 @@ const app = createApp({
   mcpAllowedOrigins: config.mcpAllowedOrigins,
   webRoot,
   kits,
+  bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
   https,
   trustProxyHops: config.trustProxyHops,

@@ -33,6 +33,8 @@ export interface AppOptions {
    * `oidc`, the bridge's kit endpoints (§8.2). Left out, neither is served.
    */
   kits?: KitRegistry;
+  /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
+  bridgeDownloadUrl?: string | null;
   /** The `INGEST_` names: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
   ingest?: IngestSettings;
   /** The ingest endpoint's log (`IngestOptions.log`). */
@@ -57,6 +59,7 @@ export function createApp({
   mcpAllowedOrigins,
   webRoot,
   kits,
+  bridgeDownloadUrl,
   ingest,
   ingestLog,
   https = false,
@@ -81,7 +84,7 @@ export function createApp({
     app.use(auth.sessions.middleware());
     if (oidc !== undefined) mountOidc(app, oidc, auth.pool);
     app.use(authRouter(auth));
-    app.use(apiRouter({ ...auth, kits, oidc }));
+    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));

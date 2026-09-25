@@ -16,7 +16,7 @@ export interface Agent {
 }
 
 /** The user's agent grants, or null when the service did not answer them. */
-async function loadAgents(): Promise<Agent[] | null> {
+export async function loadAgents(): Promise<Agent[] | null> {
   try {
     const res = await fetch("/api/v1/agents", { headers: { Accept: "application/json" } });
     if (!res.ok) return null;
