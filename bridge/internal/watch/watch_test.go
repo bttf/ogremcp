@@ -311,6 +311,42 @@ func TestOtherFilesAreIgnored(t *testing.T) {
 	h.none()
 }
 
+// Blizzard's UI reset renames the WTF folder, and WoW makes a new one. The
+// watch of the old SavedVariables folder moves with it, so the rescan starts
+// one on the new folder.
+func TestRescanFollowsARenamedAncestor(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := savedVariables(root, "_classic_era_", "ACCOUNT1")
+	path := filepath.Join(dir, "OpenGamerMCP.lua")
+	write(t, path, "v1")
+	h := start(t, root)
+	h.advance(debounce)
+	h.next()
+
+	wtf := filepath.Join(root, "_classic_era_", "WTF")
+	if err := os.Rename(wtf, wtf+"_old"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, path, "v2")
+	h.advance(interval)
+	h.advance(debounce)
+	if got := h.next(); got.Path != path {
+		t.Errorf("change = %+v", got)
+	}
+	h.none()
+
+	// The new folder's watch reports writes.
+	h.mark()
+	write(t, path, "v3")
+	h.seen(dir, path)
+	h.advance(debounce)
+	if got := h.next(); got.Path != path {
+		t.Errorf("change = %+v", got)
+	}
+	h.none()
+}
+
 func TestRescanFindsNewFolders(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

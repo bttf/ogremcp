@@ -16,10 +16,12 @@
 // while the bridge runs. The watcher resolves the globs again at start, after
 // each SetKits, and every interval (§7, proposed 5 min; package config). It
 // drops the watch of each folder that no longer matches, and starts one for
-// each new folder. A matching file already in a newly watched folder counts
-// as changed, since it may have been written before the watch started. So
-// every instance counts as changed at start; the platform ignores an upload
-// whose bytes it already has (§8.3).
+// each new folder, and again for a folder whose path now names another
+// folder. A matching file already in a newly watched folder counts as
+// changed, since it may have been written before the watch started. So every
+// instance counts as changed at start, and after fsnotify reports that it
+// lost events; the platform ignores an upload whose bytes it already has
+// (§8.3).
 //
 // # Changes
 //
@@ -37,6 +39,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -108,8 +111,9 @@ type Watcher struct {
 	kits    []Kit
 	watches map[watchKey]*watch
 	byDir   map[string][]*watch
-	// dirs holds the folders fsw watches.
-	dirs    map[string]bool
+	// dirs holds the folders fsw watches, each as it was when its watch
+	// started.
+	dirs    map[string]os.FileInfo
 	pending map[instKey]*pending
 	due     chan *pending
 	tick    chan struct{}
@@ -194,7 +198,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	w.fsw = fsw
 	w.watches = map[watchKey]*watch{}
 	w.byDir = map[string][]*watch{}
-	w.dirs = map[string]bool{}
+	w.dirs = map[string]os.FileInfo{}
 	w.pending = map[instKey]*pending{}
 	w.due = make(chan *pending)
 	w.tick = make(chan struct{})
@@ -224,6 +228,12 @@ func (w *Watcher) Run(ctx context.Context) error {
 			w.event(ev)
 		case err := <-fsw.Errors:
 			w.log.Warn("file watcher error", "error", err)
+			if errors.Is(err, fsnotify.ErrEventOverflow) {
+				// Events were lost: count every instance as changed.
+				for _, wt := range w.watches {
+					w.scheduleExisting(wt)
+				}
+			}
 		case p := <-w.due:
 			// A timer that fired before it was restarted is not the
 			// pending one.
@@ -352,32 +362,46 @@ func (w *Watcher) rescan() {
 		wanted[key.dir] = true
 	}
 
-	// fsnotify drops the watch of a folder that is removed or renamed.
+	// fsnotify drops the watch of a folder that is removed or renamed. A
+	// watch follows its folder, so when an ancestor is renamed, as when WoW's
+	// WTF folder is renamed to reset the UI, the path can name a new folder
+	// that the watch does not see. That watch starts again.
 	listed := map[string]bool{}
 	for _, dir := range w.fsw.WatchList() {
 		listed[dir] = true
 	}
 	changed := false
-	for dir := range w.dirs {
-		if listed[dir] && !wanted[dir] {
+	for dir, was := range w.dirs {
+		keep := listed[dir] && wanted[dir]
+		if keep {
+			now, err := os.Stat(dir)
+			keep = err == nil && os.SameFile(was, now)
+		}
+		if listed[dir] && !keep {
 			w.fsw.Remove(dir)
 		}
-		if !listed[dir] || !wanted[dir] {
+		if !keep {
 			delete(w.dirs, dir)
 			changed = true
 		}
 	}
 	added := map[string]bool{}
 	for _, dir := range slices.Sorted(maps.Keys(wanted)) {
-		if w.dirs[dir] {
+		if w.dirs[dir] != nil {
 			continue
 		}
-		if err := w.fsw.Add(dir); err != nil {
+		// Stat comes first: if the folder is replaced before Add, the next
+		// rescan finds that the watch is not on the folder Stat saw.
+		info, err := os.Stat(dir)
+		if err == nil {
+			err = w.fsw.Add(dir)
+		}
+		if err != nil {
 			w.warnOnce("add\x00"+dir, "cannot watch a folder", "error", err)
 			continue
 		}
 		delete(w.warned, "add\x00"+dir)
-		w.dirs[dir] = true
+		w.dirs[dir] = info
 		added[dir] = true
 		changed = true
 	}
@@ -386,7 +410,7 @@ func (w *Watcher) rescan() {
 	w.watches = map[watchKey]*watch{}
 	w.byDir = map[string][]*watch{}
 	for key, wt := range want {
-		if !w.dirs[key.dir] {
+		if w.dirs[key.dir] == nil {
 			continue
 		}
 		w.watches[key] = wt
