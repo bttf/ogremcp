@@ -1,0 +1,22 @@
+# The build context of docker/Dockerfile. BuildKit reads this file in place of
+# a root .dockerignore. Only what the build reads: the workspace files and the
+# three TypeScript packages. Never env files or keys, the host's node_modules
+# or build output, or git history.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!packages
+!kits
+!platform
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.p8
+**/.DS_Store

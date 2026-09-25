@@ -1,0 +1,71 @@
+# The self-host image (§13.3, docs/self-host.md): build it on each PR that can
+# change it, start it with docker-compose.yml, and check that it answers. It
+# pushes the image nowhere. Publishing waits on the registry and the repo going
+# public (docs/releases.md). No secrets: the .env it writes holds a throwaway
+# database password and OAuth keys, and is never kept.
+name: Self-host image
+
+on:
+  pull_request:
+    paths:
+      - docker/**
+      - docker-compose.yml
+      - selfhost.env.example
+      - packages/**
+      - kits/**
+      - platform/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.json
+      - .github/workflows/self-host-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-host-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # docker-compose.yml needs .env before any command, and the OAuth keys
+      # come from the image, so the keys are appended after the build.
+      - name: Write .env
+        run: |
+          umask 077
+          cp selfhost.env.example .env
+          sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env
+
+      - name: Build the image
+        run: docker compose build
+
+      - name: Generate OAuth keys
+        run: docker compose run --rm --no-deps -T ogmcp node platform/dist/gen-oidc-keys.js >> .env
+
+      - name: Start postgres and ogmcp
+        run: docker compose up --detach --wait --wait-timeout 120
+
+      # §11: the service applied the migrations before it started. /health
+      # also checks the database; the discovery document needs the OAuth keys.
+      - name: Check the service answers
+        run: |
+          docker compose logs ogmcp | grep -F "migrate: applied"
+          curl -fsS http://localhost:4790/health
+          curl -fsS -o /dev/null http://localhost:4790/.well-known/openid-configuration
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color
+
+      - name: Remove the containers and the volume
+        if: always()
+        run: docker compose down --volumes
