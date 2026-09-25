@@ -1,5 +1,5 @@
 // Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
-// Until the tray UI (P5), it has two development commands:
+// Until the tray UI (P5), it has three development commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
@@ -9,6 +9,10 @@
 //	                is skipped
 //	    -watch      keep running, and fetch and locate again every refresh
 //	                interval
+//	bridge adapter  as bridge kits, and install or update each kit's adapter
+//	                (§7) and print the outcome at each adapter folder. Takes
+//	                -root, and -watch, which also applies an update staged
+//	                while the game ran once it exits
 //
 // The server is OGMCP_BASE_URL, or the development default below. The game
 // folders and the refresh interval are in the settings file (package config).
@@ -53,8 +57,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "bridge kits:", err)
 			os.Exit(1)
 		}
+	case "adapter":
+		if err := syncAdapters(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bridge adapter:", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch]")
+		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch]")
 		os.Exit(2)
 	}
 }
