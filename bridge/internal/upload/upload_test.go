@@ -144,7 +144,7 @@ func (s *server) got() []upload {
 // doer is auth.Client's side of a 401: it ends the login.
 type doer struct{ c *http.Client }
 
-func (d doer) Do(req *http.Request) (*http.Response, error) {
+func (d doer) DoUpload(req *http.Request) (*http.Response, error) {
 	res, err := d.c.Do(req)
 	if err == nil && res.StatusCode == http.StatusUnauthorized {
 		res.Body.Close()
@@ -234,6 +234,65 @@ func TestStoredThenDuplicate(t *testing.T) {
 	}
 	if in := instance(u, c); in.Err != "" || in.Pending {
 		t.Errorf("status: %+v", in)
+	}
+}
+
+func TestCountersResetWhenTheServerKeepsARow(t *testing.T) {
+	s := newServer(t)
+	var sent []int
+	s.setRefuse(func(n int, w http.ResponseWriter, r *http.Request) bool {
+		up, err := read(r)
+		if err != nil {
+			t.Error(err)
+		}
+		s.mu.Lock()
+		sent = append(sent, up.meta.Client.Errors[LocateFailed])
+		s.mu.Unlock()
+		switch n {
+		case 1:
+			reply(w, http.StatusUnprocessableEntity, "parse_error", "OpenGamerMCP.lua could not be read.")
+		case 2:
+			reply(w, http.StatusOK, "duplicate", "")
+		default:
+			reply(w, http.StatusCreated, "stored", "")
+		}
+		return true
+	})
+	u := start(t, s)
+	dir := t.TempDir()
+	for i, count := range []bool{true, true, false} {
+		if count {
+			u.CountError(LocateFailed)
+		}
+		c := change(t, dir, "OpenGamerMCP.lua", "a", []byte{byte(i)})
+		u.Add(c)
+		waitFor(t, "the upload", func() bool { return s.count() == i+1 && !instance(u, c).Pending })
+	}
+	// parse_error kept a row and reset the count; duplicate kept none.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fmt.Sprint(sent) != "[1 1 1]" {
+		t.Errorf("locate_failed sent: %v", sent)
+	}
+}
+
+func TestDeadlineScalesWithTheBody(t *testing.T) {
+	s := newServer(t)
+	s.setRefuse(func(n int, w http.ResponseWriter, r *http.Request) bool {
+		// A slow uplink: the body takes longer than the base deadline.
+		time.Sleep(400 * time.Millisecond)
+		return false
+	})
+	u := start(t, s)
+	u.attemptBase = 100 * time.Millisecond
+	u.attemptRate = 256 << 10
+	data := make([]byte, 256<<10)
+	rand.NewChaCha8([32]byte{}).Read(data)
+	c := change(t, t.TempDir(), "OpenGamerMCP.lua", "a", data)
+	u.Add(c)
+	waitFor(t, "the upload", func() bool { return len(s.got()) == 1 })
+	if n := s.count(); n != 1 {
+		t.Errorf("%d requests", n)
 	}
 }
 

@@ -10,7 +10,8 @@
 // part first, and then the file, gzip-compressed, as the `file` part. The
 // server checks its rate limit as soon as `meta` arrives, and reads no more
 // of a request it refuses. A file over the cap is not sent; it counts as a
-// too_large answer.
+// too_large answer. An attempt's deadline is 30 s plus the body's time at
+// 16 KB/s, so a large file on a slow uplink can finish.
 //
 // # Offline
 //
@@ -42,9 +43,9 @@
 // # Error counters
 //
 // meta.client.errors counts the bridge's errors since the last upload the
-// server stored (§8.3, §16.1): CountError adds one. A duplicate does not
-// reset them, since the server keeps the counts only with an upload it
-// stores.
+// server kept as a row, which holds the counts (§8.3, §16.1): stored,
+// parse_error, or unsupported_flavor. CountError adds one. A duplicate or a
+// refusal keeps no row, so it does not reset them.
 //
 // The backoff and the Retry-After reading are adapted from
 // bttf/wow-guide@df80260, bridge/internal/ingest/ingest.go, and the retry
@@ -85,11 +86,18 @@ const (
 	maxRetryAfter = 10 * time.Minute
 )
 
-// Doer sends a request to the bridge API with an access token. It is an
-// *auth.Client, which returns auth.ErrLoginRequired when the server refuses
-// the login.
+// An attempt's deadline is attemptBase, plus the body's time at attemptRate
+// bytes per second, a slow uplink.
+const (
+	attemptBase = 30 * time.Second
+	attemptRate = 16 << 10
+)
+
+// Doer sends an upload to the bridge API with an access token, bounded by
+// the request's context only. It is an *auth.Client, which returns
+// auth.ErrLoginRequired when the server refuses the login.
 type Doer interface {
-	Do(req *http.Request) (*http.Response, error)
+	DoUpload(req *http.Request) (*http.Response, error)
 }
 
 // Status is what the tray shows (§7).
@@ -138,6 +146,8 @@ type Uploader struct {
 	baseDelay     time.Duration
 	maxDelay      time.Duration
 	maxRetryAfter time.Duration
+	attemptBase   time.Duration
+	attemptRate   int
 	jitter        func() float64
 	now           func() time.Time
 
@@ -187,6 +197,8 @@ func New(base string, api Doer, version string, maxBytes int64, log *slog.Logger
 		baseDelay:     baseDelay,
 		maxDelay:      maxDelay,
 		maxRetryAfter: maxRetryAfter,
+		attemptBase:   attemptBase,
+		attemptRate:   attemptRate,
 		jitter:        rand.Float64,
 		now:           time.Now,
 		wake:          make(chan struct{}, 1),
@@ -337,15 +349,15 @@ func (u *Uploader) finish(k key, seq uint64, sent map[string]int, res result) {
 	defer signal(u.changed)
 	e := u.entries[k]
 	now := u.now()
+	if keptRow(res.status) {
+		for name, n := range sent {
+			u.counts[name] -= n
+		}
+	}
 	settled := true
 	switch res.action {
 	case taken:
 		u.lastUpload = now
-		if res.status == "stored" {
-			for name, n := range sent {
-				u.counts[name] -= n
-			}
-		}
 		u.log.Info("uploaded", u.attrs(k, "status", res.status)...)
 		u.setErr(k, e, "", now)
 	case refused:
@@ -381,6 +393,12 @@ func (u *Uploader) finish(k key, seq uint64, sent map[string]int, res result) {
 			e.pending = false
 		}
 	}
+}
+
+// keptRow reports whether the server kept an upload with status as a row,
+// with its meta.client.errors (§8.3).
+func keptRow(status string) bool {
+	return status == "stored" || status == "parse_error" || status == "unsupported_flavor"
 }
 
 // setErr sets the error of an instance, and logs a new one.

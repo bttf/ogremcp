@@ -106,13 +106,16 @@ func (u *Uploader) attempt(ctx context.Context, c watch.Change, counts map[strin
 	if err != nil {
 		return result{action: refused, message: "Could not build the upload: " + err.Error()}
 	}
+	// The deadline covers the whole attempt, the answer included.
+	ctx, cancel := context.WithTimeout(ctx, u.attemptBase+time.Duration(len(body))*time.Second/time.Duration(u.attemptRate))
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.url, bytes.NewReader(body))
 	if err != nil {
 		return result{action: refused, message: "Could not build the upload: " + err.Error()}
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
-	res, err := u.api.Do(req)
+	res, err := u.api.DoUpload(req)
 	if errors.Is(err, auth.ErrLoginRequired) {
 		return result{action: login}
 	}
