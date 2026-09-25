@@ -53,9 +53,22 @@ export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] a
  * - `too_large`: a kit tool result over the size cap.
  * - `no_envelope_field`: a kit tool result without an envelope field.
  * - `failed`: the handler threw an error that is not user-facing.
- * - `no_sources` and `search_unavailable`: search_game_info's (§12).
+ * - `no_sources` and `search_unavailable`: search_game_info's and
+ *   fetch_game_page's (§12).
+ * - `out_of_scope`: fetch_game_page's URL, or the page's final URL, is
+ *   outside the game's scopes (§12, §16.1 scope misses).
+ * - `not_found`: fetch_game_page's page is a 404.
  */
-export type ToolCallError = "user_error" | "game_off" | "too_large" | "no_envelope_field" | "failed" | "no_sources" | "search_unavailable";
+export type ToolCallError =
+  | "user_error"
+  | "game_off"
+  | "too_large"
+  | "no_envelope_field"
+  | "failed"
+  | "no_sources"
+  | "search_unavailable"
+  | "out_of_scope"
+  | "not_found";
 
 /** What a call answers, and why it is an error, or null when it is not one. */
 export interface ToolAnswer {

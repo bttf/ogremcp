@@ -7,6 +7,7 @@ import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
+import { DEFAULT_SEARCH_CACHE, type SearchCacheSettings } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
@@ -95,6 +96,13 @@ export interface Config {
    */
   firecrawl: { apiKey: string | null; timeoutMs: number };
   /**
+   * `SEARCH_CACHE_TTL_DAYS` and `SEARCH_CACHE_EMPTY_TTL_MINUTES`, in
+   * milliseconds: how long the shared cache keeps a search or page, and an
+   * empty answer (§12, `search-cache.ts`). Each one unset is
+   * `DEFAULT_SEARCH_CACHE`'s.
+   */
+  searchCache: SearchCacheSettings;
+  /**
    * `BRIDGE_DOWNLOAD_URL`: where the Get started page sends people to
    * download the bridge (§7, §13.2), or null when it is unset. The page then
    * says the download is not available yet.
@@ -136,7 +144,8 @@ export const DEFAULT_TRUST_PROXY_HOPS = 0;
 export const DEFAULT_WEB_SESSION_LIFETIME_DAYS = 30;
 export const DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS = 15;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 const DAY_SECONDS = 24 * 60 * 60;
 
 function positiveInt(name: string, value: string | undefined, fallback: number): number {
@@ -401,6 +410,11 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     firecrawl: {
       apiKey: (env["FIRECRAWL_API_KEY"] ?? "").trim() || null,
       timeoutMs: positiveInt("FIRECRAWL_TIMEOUT_MS", env["FIRECRAWL_TIMEOUT_MS"], DEFAULT_FIRECRAWL_TIMEOUT_MS),
+    },
+    searchCache: {
+      ttlMs: positiveInt("SEARCH_CACHE_TTL_DAYS", env["SEARCH_CACHE_TTL_DAYS"], DEFAULT_SEARCH_CACHE.ttlMs / DAY_MS) * DAY_MS,
+      emptyTtlMs:
+        positiveInt("SEARCH_CACHE_EMPTY_TTL_MINUTES", env["SEARCH_CACHE_EMPTY_TTL_MINUTES"], DEFAULT_SEARCH_CACHE.emptyTtlMs / MINUTE_MS) * MINUTE_MS,
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     logLevel: logLevel(env["LOG_LEVEL"]),

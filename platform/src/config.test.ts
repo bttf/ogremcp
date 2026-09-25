@@ -16,6 +16,7 @@ import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
+import { DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,6 +44,7 @@ describe("loadConfig", () => {
       ingest: DEFAULT_INGEST,
       toolContext: DEFAULT_TOOL_CONTEXT,
       firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
+      searchCache: DEFAULT_SEARCH_CACHE,
       bridgeDownloadUrl: null,
       logLevel: "info",
       production: false,
