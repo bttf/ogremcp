@@ -6,13 +6,12 @@ import { deleteAccount, deleteUserData } from "./account.js";
 import { listAgentGrants, revokeAgentGrant } from "./agents.js";
 import { deviceName, findDevice, listDevices, renameDevice, revokeDevice } from "./devices.js";
 import type { ProviderName } from "./identities.js";
-import { DEFAULT_INGEST, type DeviceLimits } from "./ingest.js";
+import type { DeviceLimits } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
 import { mcpResource } from "./mcp.js";
-import { DEFAULT_RETENTION } from "./retention.js";
 import { requireSameOrigin } from "./same-origin.js";
 import type { SignInProviders } from "./sign-in-providers.js";
-import { NO_TOOL_CALL_CAPS, type ToolCallCaps } from "./usage.js";
+import type { ToolCallCaps } from "./usage.js";
 import { currentUser, type WebSessions } from "./web-sessions.js";
 
 export interface ApiOptions {
@@ -28,8 +27,8 @@ export interface ApiOptions {
   oidc?: Provider;
   /** `BRIDGE_DOWNLOAD_URL`. Left out or null, `GET /api/v1/setup` answers null for it. */
   bridgeDownloadUrl?: string | null;
-  /** The limits `GET /api/v1/account` reports. Default: `DEFAULT_TIER_LIMITS`. */
-  tierLimits?: TierLimits;
+  /** The limits `GET /api/v1/account` reports. */
+  tierLimits: TierLimits;
 }
 
 /**
@@ -46,13 +45,6 @@ export interface TierLimits {
   /** `FREE_RETENTION_DAYS`. Null is forever. */
   freeRetentionDays: number | null;
 }
-
-/** Each limit's default, as `config.ts` has it when its name is unset. */
-export const DEFAULT_TIER_LIMITS: TierLimits = {
-  devicesPerUser: DEFAULT_INGEST.devicesPerUser,
-  toolCallCaps: NO_TOOL_CALL_CAPS,
-  freeRetentionDays: DEFAULT_RETENTION.freeRetentionDays,
-};
 
 /** What `GET /api/v1/me` answers for a signed-in user. */
 export interface Me {
@@ -146,7 +138,7 @@ export function apiRouter({
   kits,
   oidc,
   bridgeDownloadUrl = null,
-  tierLimits = DEFAULT_TIER_LIMITS,
+  tierLimits,
 }: ApiOptions): Router {
   const router = express.Router();
 
