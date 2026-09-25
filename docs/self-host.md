@@ -102,10 +102,12 @@ setting lasts across restarts and applies when the bridge starts at login.
 
 - macOS and Windows: open the bridge's menu, choose **Server…**, enter the
   URL, and confirm. An empty entry goes back to the hosted service.
-- macOS, from a shell: quit the bridge, then run
+- macOS, from a shell: quit the bridge, then run the app's binary. The
+  installer puts the app in `~/Applications`; change the path if it is
+  elsewhere.
 
   ```sh
-  "/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge" server set https://ogmcp.example.com
+  "$HOME/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge" server set https://ogmcp.example.com
   ```
 
   `server reset` goes back to the hosted service, and `server` alone prints

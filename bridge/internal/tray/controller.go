@@ -542,7 +542,8 @@ func (c *Controller) retrySave(ctx context.Context) {
 }
 
 // ChangeServer asks the user for a new server (AskServer) and changes to it
-// (SetServer). The menu calls it. It shows one question at a time.
+// (SetServer). The menu calls it. It shows one question at a time. The
+// server it shows as current is the one a pending change goes to.
 func (c *Controller) ChangeServer(ctx context.Context) {
 	c.mu.Lock()
 	if c.asking || c.AskServer == nil {
@@ -551,6 +552,9 @@ func (c *Controller) ChangeServer(ctx context.Context) {
 	}
 	c.asking = true
 	current := c.Base
+	if c.next != nil {
+		current = c.next.base
+	}
 	c.mu.Unlock()
 	c.showErrors("server", nil)
 	go func() {

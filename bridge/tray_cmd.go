@@ -17,6 +17,7 @@ import (
 	"fyne.io/systray"
 
 	"github.com/bttf/ogmcp/bridge/internal/autostart"
+	"github.com/bttf/ogmcp/bridge/internal/config"
 	"github.com/bttf/ogmcp/bridge/internal/lock"
 	"github.com/bttf/ogmcp/bridge/internal/logfile"
 	"github.com/bttf/ogmcp/bridge/internal/tray"
@@ -71,10 +72,18 @@ func runTray() int {
 	}
 	client, base, err := newClient(settings)
 	if err != nil {
-		// A server_url the bridge refuses: it does not fall back to the
+		// A server URL the bridge refuses: it does not fall back to the
 		// hosted service.
 		logger.Error("could not start", "error", err.Error())
-		alert("Open Gamer MCP could not start: " + err.Error())
+		msg := "Open Gamer MCP could not start: " + err.Error()
+		if os.Getenv(config.EnvServerURL) == "" {
+			cmd := "ogmcp-bridge"
+			if exe, err := executable(); err == nil {
+				cmd = `"` + exe + `"`
+			}
+			msg += "\n\nCorrect server_url in " + settingsPath + ", or run " + cmd + " server reset to use the hosted service."
+		}
+		alert(msg)
 		return 1
 	}
 	return runMenu(logger, logPath, &tray.Controller{
