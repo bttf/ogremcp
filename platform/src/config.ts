@@ -73,7 +73,9 @@ export interface Config {
   ingest: IngestSettings;
   /**
    * `HISTORY_MAX_SNAPSHOTS`: the most snapshots a kit tool's history read
-   * returns (§6.2, `tool-context.ts`). Unset, `DEFAULT_TOOL_CONTEXT`'s.
+   * returns (§6.2, `tool-context.ts`). `LIST_GAMES_CHARACTERS`: the most
+   * recent characters `list_games` returns per game (§10.3,
+   * `list-games.ts`). Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
   /**
@@ -364,6 +366,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     },
     toolContext: {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
+      listGamesCharacters: positiveInt("LIST_GAMES_CHARACTERS", env["LIST_GAMES_CHARACTERS"], DEFAULT_TOOL_CONTEXT.listGamesCharacters),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     production: env["NODE_ENV"] === "production",
