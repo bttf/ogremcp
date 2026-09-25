@@ -52,8 +52,9 @@ export interface ToolContextSettings {
   maxHistoryLimit: number;
   /**
    * `TOOL_RESULT_MAX_BYTES`: the most UTF-8 bytes one copy of a kit tool
-   * result's JSON may take (§10.5). The handler gets it as `maxResultBytes`
-   * and trims to it; the envelope (`tool-envelope.ts`) checks it.
+   * result's JSON may take (§10.5). The handler gets it as `maxResultBytes`,
+   * less the room of the envelope's `grounding` line, and trims to that; the
+   * envelope (`tool-envelope.ts`) checks the whole result against it.
    */
   maxResultBytes: number;
   /** `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns per game (§10.3). */

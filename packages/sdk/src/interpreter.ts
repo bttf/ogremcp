@@ -116,6 +116,8 @@ export interface ToolContext<State> {
    * take (§10.5, *proposed* config). Over it, the handler trims its result,
    * leaving out what matters least first, and says in the result what it left
    * out. The platform answers a result still over it with a user-facing error.
+   * The value already leaves room for the `grounding` field the platform adds
+   * to the result. A kit does not set that field.
    */
   maxResultBytes: number;
   latest(q: { flavor?: string; character?: string }): Promise<Snapshot<State> | null>;

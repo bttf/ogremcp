@@ -34,7 +34,7 @@ const DESCRIPTION = [
   "The search covers the sources of one flavor (game version): `flavor`, by default the one the player last played.",
   "Write the query as names and keywords, not a question.",
   `Returns up to ${MAX_RESULTS} results, each with a title, URL, and excerpt.`,
-  "Ground every game-fact answer in these results, never in model memory alone. With no sources or no results, say you can't verify it rather than guess.",
+  "Base game facts on these results. The player's state (quest text, objectives) is a source for what it says; before you say where to go, who to see, where something is, or where an item comes from beyond that, call this tool first. Never answer from model memory alone. With no sources or no results, say so rather than guess.",
   "Turn results into friend-style, spoiler-free guidance: directions and landmarks, not coordinates and kill counts.",
   "When `status` is experimental, caveat the answer: its sources may be thin or out of date.",
   "When the realm's `rules` has `fresh`, check that what a result describes is live in the realm's current phase.",

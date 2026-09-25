@@ -12,12 +12,17 @@ import { UserFacingError } from "./tool-context.js";
  *   shape; the envelope checks them. A result without one is a bug in the
  *   kit: the agent gets `TOOL_FAILED_MESSAGE`, and the log a line with the
  *   code `NO_ENVELOPE_FIELD`.
+ * - A kit tool's result that is not an error also gets the top-level field
+ *   `grounding`, `GROUNDING_REMINDER`, added here for every kit, because
+ *   agents read results when they answer. It is platform text, never game
+ *   text: it replaces any `grounding` the kit set.
  * - Its text block is the JSON of its `structuredContent`, made here, so the
  *   two copies are the same whatever the handler put in `content`.
  * - One copy of the JSON is at most `maxResultBytes` (`TOOL_RESULT_MAX_BYTES`,
- *   *proposed*). The kit gets the cap in its `ToolContext` and trims its own
- *   result, because only the kit knows which of its fields matter least. A
- *   result still over the cap becomes `TOO_LARGE_MESSAGE`.
+ *   *proposed*). The kit gets the cap, less the room `grounding` takes
+ *   (`kitResultBytes`), in its `ToolContext` and trims its own result,
+ *   because only the kit knows which of its fields matter least. A result
+ *   still over the cap becomes `TOO_LARGE_MESSAGE`.
  * - User-facing conditions are `isError` results with a plain-language
  *   message (`userError`), not protocol errors, so the agent relays them: a
  *   `UserFacingError`, such as `ToolContext`'s for an unknown character, and
@@ -44,6 +49,18 @@ export const TOO_LARGE_MESSAGE = "The result is too large to send in one call. C
 
 /** The fields of every kit tool result (§10.5). */
 export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] as const;
+
+/** The `grounding` line of every kit tool result that is not an error (§10.5). Platform text only. */
+export const GROUNDING_REMINDER =
+  "Before you state where to go, who to see, where something is, or where an item comes from beyond the quest text, call search_game_info.";
+
+/** The UTF-8 bytes `grounding` adds to a kit tool result's JSON. */
+const GROUNDING_BYTES = utf8Length(`,"grounding":${JSON.stringify(GROUNDING_REMINDER)}`);
+
+/** The size cap a kit trims its result to: `maxResultBytes` less the room `grounding` takes. */
+export function kitResultBytes(maxResultBytes: number): number {
+  return Math.max(0, maxResultBytes - GROUNDING_BYTES);
+}
 
 /**
  * Why a call answered an `isError` result (§16):
@@ -93,13 +110,14 @@ export function kitToolResult(result: ToolResult, tool: string, maxResultBytes: 
     log(`tool call failed: tool=${tool} code=NO_ENVELOPE_FIELD`);
     return { result: userError(TOOL_FAILED_MESSAGE), error: "no_envelope_field" };
   }
-  const text = JSON.stringify(data);
+  const grounded = { ...data, grounding: GROUNDING_REMINDER };
+  const text = JSON.stringify(grounded);
   const bytes = utf8Length(text);
   if (bytes > maxResultBytes) {
     log(`tool result over the size cap: tool=${tool} bytes=${bytes}`);
     return { result: userError(TOO_LARGE_MESSAGE), error: "too_large" };
   }
-  return { result: { content: [{ type: "text", text }], structuredContent: data }, error: null };
+  return { result: { content: [{ type: "text", text }], structuredContent: grounded }, error: null };
 }
 
 /** What a call answers when the handler of `tool` threw `err`. */

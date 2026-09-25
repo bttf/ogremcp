@@ -28,6 +28,7 @@ import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { reportIssue } from "./report-issue.js";
 import { searchGameInfo } from "./search-game-info.js";
+import { GROUNDING_REMINDER } from "./tool-envelope.js";
 import { WebSessions } from "./web-sessions.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -387,6 +388,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       rules: [],
       character: { name: "Zoela", realm: "Testrealm" },
       state: { location: { zone: "Elwynn Forest" } },
+      grounding: GROUNDING_REMINDER,
     });
     const games = (await rpc(port, zoela, "tools/call", { name: "list_games" })) as { result: { structuredContent: { last_active: unknown } } };
     expect(games.result.structuredContent.last_active).toEqual({ game: "wow", flavor: "classic_era", snapshot_at: CAPTURED_AT.toISOString() });
