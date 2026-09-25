@@ -8,6 +8,7 @@ import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";
 import type { Pool, PoolClient } from "pg";
 
+import { liveDeviceSql } from "./devices.js";
 import type { EventRecorder, IngestEvent } from "./events.js";
 import { UploadLimiter } from "./ingest-limit.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
@@ -35,12 +36,18 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *    either: 429
  *    `rate_limited` with `Retry-After` in whole seconds, and nothing of the
  *    `file` part that follows `meta` is buffered. (A `file` part sent before
- *    `meta` is buffered within its limit first, and not decompressed.)
+ *    `meta` is buffered within its limit first, and not decompressed.) Then
+ *    the device limit, as `findDevice` read it: a device without one of its
+ *    user's upload slots gets 403 `device_limit` with a message that says
+ *    how to switch devices, and the `file` part is not read either.
  * 3. `file` is decompressed with an output limit of `maxBytes`, so a gzip
  *    bomb stops there (§8.3). Over it: 413 `too_large`.
- * 4. In one transaction that locks the device row: an upload whose sha256 is
- *    that of the last upload of its `(device, kit, source_id, instance)`
- *    stores nothing and gets 200 `duplicate`. Otherwise the kit's
+ * 4. In one transaction that locks the device row, and then the user's row
+ *    for a device that has not claimed a slot: the device limit is checked
+ *    again under the locks, so two devices cannot claim the last slot at
+ *    once. An upload whose sha256 is that of the last upload of its
+ *    `(device, kit, source_id, instance)` stores nothing and gets 200
+ *    `duplicate`. Otherwise the kit's
  *    interpreter parses it (§6.2, §11), and the upload is stored. A parsed
  *    upload whose flavor the kit manifest's `flavors` registers gets its
  *    snapshot and 201 `stored` with `snapshot_uuid`. Experimental flavors
@@ -55,9 +62,21 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *    `unknownFlavor` reason and raw facts as one JSON line, with the user's
  *    uuid as the only user identifier (§6.3.1).
  *
- * Every request that reaches step 4 sets the device's `last_seen_at`, and
- * its `os` and `bridge_version` when `meta.client` names them. A stored
- * upload also sets `first_upload_at` when it is still null.
+ * Every request that passes the device limit in step 4 sets the device's
+ * `last_seen_at`, and its `os` and `bridge_version` when `meta.client` names
+ * them. A stored upload also sets `first_upload_at` when it is still null,
+ * and one that got a snapshot sets `first_stored_at`, which claims a slot.
+ *
+ * The device limit (§8.3, §14, D10): a user of each tier uploads from at
+ * most `DeviceLimits` devices, one on the free tier. Approval does not depend
+ * on it (§8.1). The user's upload slots go to their live devices in the order
+ * of their first upload that got a snapshot (`devices.first_stored_at`); an
+ * upload that fails to parse or has an unsupported flavor claims none. A
+ * device that is revoked, or whose grant is gone (`liveDeviceSql`), holds
+ * none, so revoking the slot's device frees it. The tier is read on each
+ * request, so a tier change applies to the next upload. A downgrade deletes
+ * no device: the devices that claimed their slots last, past the new limit,
+ * get `device_limit`.
  *
  * A malformed request gets 400 `bad_request` with a short message: a part
  * missing, extra, or of the wrong kind; `meta` that is not JSON or not the
@@ -74,9 +93,12 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  * upload by then: `meta.client`, the kit and its version, and the parse's
  * status, flavor, and adapter schema. `bad_request` and `rate_limited`
  * answers write none, so a device that loops on them cannot grow the table;
- * the access log has them. Nor does a 401, which names no live device. A
- * request that fails with an error in step 4, such as an interpreter crash,
- * writes one with status `error`, and the app answers 500.
+ * the access log has them. Nor does a 401, which names no live device.
+ * `device_limit` answers write one: the rate limit comes first, so a device
+ * that loops on it writes no more rows than one that uploads, and the rows
+ * count how often users meet the limit (§14, §16.1). A request that fails
+ * with an error in step 4, such as an interpreter crash, writes one with
+ * status `error`, and the app answers 500.
  */
 
 /** The ingest limits (*proposed*, §0). `config.ts` reads them from the environment. */
@@ -91,12 +113,24 @@ export interface IngestSettings {
   deviceRatePerMinute: number;
   /** `INGEST_DEVICE_BURST`: uploads of one device, all its instances together, at once (§8.3). */
   deviceBurst: number;
+  /** `DEVICES_PER_USER_FREE` and `DEVICES_PER_USER_PAID`: the device limit (§8.3, §14). */
+  devicesPerUser: DeviceLimits;
+}
+
+/**
+ * The most devices a user of each tier uploads from (§8.3, §14): the number
+ * of the user's upload slots. Null is no limit.
+ */
+export interface DeviceLimits {
+  readonly free: number;
+  readonly paid: number | null;
 }
 
 /**
  * 5 MB of uncompressed bytes (§8.3), as the WoW interpreter counts them.
  * One upload per 5 seconds per instance, after a burst of 3, and one per
- * 2 seconds per device, after a burst of 10 (§8.3).
+ * 2 seconds per device, after a burst of 10 (§8.3). One device on the free
+ * tier, and no limit on the paid tier (§14).
  */
 export const DEFAULT_INGEST: IngestSettings = {
   maxBytes: 5 * 1024 * 1024,
@@ -104,6 +138,7 @@ export const DEFAULT_INGEST: IngestSettings = {
   burst: 3,
   deviceRatePerMinute: 30,
   deviceBurst: 10,
+  devicesPerUser: { free: 1, paid: null },
 };
 
 /** The most bytes the `meta` part may have. The §8.3 JSON is a few hundred. */
@@ -118,12 +153,24 @@ export function maxCompressedBytes(maxBytes: number): number {
   return maxBytes + Math.ceil(maxBytes / 1024) + 1024;
 }
 
-export type IngestStatus = "stored" | "duplicate" | "parse_error" | "unsupported_flavor" | "too_large" | "rate_limited" | "bad_request";
+export type IngestStatus =
+  | "stored"
+  | "duplicate"
+  | "parse_error"
+  | "unsupported_flavor"
+  | "too_large"
+  | "device_limit"
+  | "rate_limited"
+  | "bad_request";
 
 /** The answer's body (§8.3). A 401 has none. */
 export interface IngestAnswer {
   status: IngestStatus;
-  /** For `parse_error`, the interpreter's user-facing message. For `unsupported_flavor`, one that names the game. */
+  /**
+   * For `parse_error`, the interpreter's user-facing message. For
+   * `unsupported_flavor`, one that names the game. For `device_limit`, one
+   * that says how to switch devices.
+   */
   message?: string;
   /** For `stored`. */
   snapshot_uuid?: string;
@@ -180,7 +227,7 @@ const validateMeta = ajv.compile<IngestMeta>({
 
 /** An answer to send. */
 interface Outcome {
-  http: 200 | 201 | 400 | 413 | 422 | 429;
+  http: 200 | 201 | 400 | 403 | 413 | 422 | 429;
   answer: IngestAnswer;
   /** The `Retry-After` header, in whole seconds. */
   retryAfter?: number;
@@ -198,6 +245,20 @@ function rateLimited(seconds: number): Outcome {
   return { http: 429, answer: { status: "rate_limited", message: `Too many uploads of this file. Try again in ${seconds} s.` }, retryAfter: seconds };
 }
 
+/**
+ * The answer to a device past the device limit (§8.3), whose tier has
+ * `limit` slots. The message is the bridge's to show (§7): it says how to
+ * switch devices, on the Devices page (§13.2).
+ */
+function deviceLimited(limit: number, publicBaseUrl: string): Outcome {
+  const page = `the Devices page: ${publicBaseUrl}/devices`;
+  const message =
+    limit === 1
+      ? `Another of your bridges uploads for this account. To upload from this one, revoke the other on ${page}`
+      : `${limit} of your other bridges upload for this account, the most it allows. To upload from this one, revoke one of them on ${page}`;
+  return { http: 403, answer: { status: "device_limit", message } };
+}
+
 const MIB = 1024 * 1024;
 
 function size(bytes: number): string {
@@ -210,6 +271,8 @@ export interface IngestOptions {
   pool: Pool;
   kits: KitRegistry;
   settings: IngestSettings;
+  /** `PUBLIC_BASE_URL`, for the Devices page's address in a `device_limit` message. */
+  publicBaseUrl: string;
   /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log, at `warn`. */
   log?: (line: string) => void;
   /** Where each request's events row goes (§16.1). Default: none, and nothing is recorded. */
@@ -221,6 +284,7 @@ export function ingestHandler({
   pool,
   kits,
   settings,
+  publicBaseUrl,
   log = (line) => writeLine("warn", line),
   events,
 }: IngestOptions): RequestHandler {
@@ -246,12 +310,15 @@ export function ingestHandler({
     };
 
     // The limit's key is in `meta`, so it is taken as `meta` is read, before the file part.
+    // The device limit comes after it, so a device that loops on `device_limit` meets the rate limit.
     const parts = await readParts(req, maxCompressedBytes(settings.maxBytes), (text) => {
       const result = checkMeta(text, kits);
       if ("http" in result) return result;
       checked = result;
       const wait = limiter.take(device.id, uploadKey(device, result));
-      return wait > 0 ? rateLimited(wait) : result;
+      if (wait > 0) return rateLimited(wait);
+      const limit = overLimit(device, settings.devicesPerUser);
+      return limit === null ? result : deviceLimited(limit, publicBaseUrl);
     });
     if ("http" in parts) return finish(parts);
     const meta = parts.meta;
@@ -270,13 +337,14 @@ export function ingestHandler({
 
     let stored: Awaited<ReturnType<typeof store>>;
     try {
-      stored = await store(pool, device, meta, parts.file, bytes, log);
+      stored = await store(pool, device, settings.devicesPerUser, meta, parts.file, bytes, log);
     } catch (err) {
       // An interpreter crash or a database failure. The app's error handler answers 500.
       record("error", null);
       throw err;
     }
     if (stored === null) return refuseDevice(res);
+    if ("overLimit" in stored) return finish(deviceLimited(stored.overLimit, publicBaseUrl));
     finish(stored.outcome, stored.parse);
   };
 }
@@ -332,7 +400,34 @@ function refuseDevice(res: Response): void {
   res.status(401).end();
 }
 
-interface Device {
+/** A device's place in the device limit (§8.3, §14), as `SLOT_COLUMNS` reads it. */
+interface Slot {
+  /** `users.tier`. */
+  tier: keyof DeviceLimits;
+  /** Whether the device has claimed a slot: `first_stored_at` is set. */
+  claimed: boolean;
+  /** How many of the user's other live devices hold a slot ahead of it. */
+  ahead: number;
+}
+
+/**
+ * `Slot`'s columns, for the device `devices me` and its user `users u`.
+ * Slots go in the order of `first_stored_at`, then `id`, and a device without
+ * `first_stored_at` comes after every device with one. Only live devices
+ * (`liveDeviceSql`) hold one. `devices_user` indexes the count.
+ */
+const SLOT_COLUMNS = `u.tier, me.first_stored_at is not null as claimed,
+  (select count(*) from devices h
+    where h.user_id = me.user_id and h.id <> me.id and h.first_stored_at is not null and ${liveDeviceSql("h")}
+      and (h.first_stored_at, h.id) < (coalesce(me.first_stored_at, 'infinity'), me.id))::int as ahead`;
+
+/** The tier's limit when it refuses the device: its slots are all held ahead of it. Null when the device may upload. */
+function overLimit(slot: Slot, limits: DeviceLimits): number | null {
+  const limit = limits[slot.tier];
+  return limit !== null && slot.ahead >= limit ? limit : null;
+}
+
+interface Device extends Slot {
   /** `devices.id`. */
   id: string;
   /** `users.id`. */
@@ -341,14 +436,17 @@ interface Device {
   userUuid: string;
 }
 
-/** The live device of the token's grant and user, or undefined. */
+/** The live device of the token's grant and user, with its place in the device limit, or undefined. */
 async function findDevice(pool: Pool, token: VerifiedToken): Promise<Device | undefined> {
-  const { rows } = await pool.query<{ id: string; user_id: string }>(
-    "select d.id, d.user_id from devices d join users u on u.id = d.user_id where d.grant_id = $1 and u.uuid = $2 and d.revoked_at is null",
+  const { rows } = await pool.query<{ id: string; user_id: string } & Slot>(
+    `select me.id, me.user_id, ${SLOT_COLUMNS}
+       from devices me join users u on u.id = me.user_id
+      where me.grant_id = $1 and u.uuid = $2 and me.revoked_at is null`,
     [token.grantId, token.userUuid],
   );
   const row = rows[0];
-  return row === undefined ? undefined : { id: row.id, userId: row.user_id, userUuid: token.userUuid };
+  if (row === undefined) return undefined;
+  return { id: row.id, userId: row.user_id, userUuid: token.userUuid, tier: row.tier, claimed: row.claimed, ahead: row.ahead };
 }
 
 /**
@@ -481,17 +579,19 @@ function checkMeta(text: string, kits: KitRegistry): CheckedMeta | Outcome {
 
 /**
  * Steps 4 and 5 of the module comment, in one transaction. Answers the
- * outcome and how the upload parsed (null for a duplicate), or null when the
- * device was revoked since `findDevice`.
+ * outcome and how the upload parsed (null for a duplicate); or the tier's
+ * limit, when the device limit refuses the device (`overLimit`); or null when
+ * the device was revoked since `findDevice`.
  */
 async function store(
   pool: Pool,
   device: Device,
+  limits: DeviceLimits,
   meta: CheckedMeta,
   gzipped: Buffer,
   bytes: Buffer,
   log: (line: string) => void,
-): Promise<{ outcome: Outcome; parse: UploadParse | null } | null> {
+): Promise<{ outcome: Outcome; parse: UploadParse | null } | { overLimit: number } | null> {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -501,13 +601,23 @@ async function store(
       await client.query("rollback");
       return null;
     }
+    // A device that has not claimed a slot also locks its user's row, so the user's devices claim slots one at a
+    // time and two cannot both take the last one. The device first, then the user, as the inserts below take them.
+    // `no key update` leaves the key-share locks of foreign keys to the user free.
+    if (!device.claimed) await client.query("select 1 from users where id = $1 for no key update", [device.userId]);
+    const slot = await client.query<Slot>(`select ${SLOT_COLUMNS} from devices me join users u on u.id = me.user_id where me.id = $1`, [device.id]);
+    const limit = slot.rows[0] === undefined ? null : overLimit(slot.rows[0], limits);
+    if (limit !== null) {
+      await client.query("rollback");
+      return { overLimit: limit };
+    }
 
     const last = await client.query<{ sha256: string }>(
       "select sha256 from uploads where device_id = $1 and kit = $2 and source_id = $3 and instance = $4 order by id desc limit 1",
       [device.id, meta.kit.key, meta.sourceId, meta.instance],
     );
     if (last.rows[0]?.sha256 === meta.sha256) {
-      await touchDevice(client, device, meta, false);
+      await touchDevice(client, device, meta, false, false);
       await client.query("commit");
       return { outcome: { http: 200, answer: { status: "duplicate" } }, parse: null };
     }
@@ -546,7 +656,7 @@ async function store(
       if (snapshotUuid === undefined) throw new Error("insert into snapshots returned no row");
     }
 
-    await touchDevice(client, device, meta, true);
+    await touchDevice(client, device, meta, true, snapshotUuid !== undefined);
     await client.query("commit");
     if (result.status === "rejected") {
       if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device.userUuid, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
@@ -656,15 +766,20 @@ export function unknownFlavorLine(userUuid: string, kit: Kit, uploadUuid: string
   });
 }
 
-/** Sets the device's `last_seen_at`, its versions, and, for a stored upload, `first_upload_at` when unset. */
-async function touchDevice(client: PoolClient, device: Device, meta: CheckedMeta, stored: boolean): Promise<void> {
+/**
+ * Sets the device's `last_seen_at` and its versions; for a stored upload,
+ * `first_upload_at` when unset; and for one that got a snapshot,
+ * `first_stored_at` when unset, which claims a slot of the device limit.
+ */
+async function touchDevice(client: PoolClient, device: Device, meta: CheckedMeta, stored: boolean, snapshot: boolean): Promise<void> {
   await client.query(
     `update devices
         set last_seen_at = now(),
             os = coalesce($2, os),
             bridge_version = coalesce($3, bridge_version),
-            first_upload_at = case when $4::boolean then coalesce(first_upload_at, now()) else first_upload_at end
+            first_upload_at = case when $4::boolean then coalesce(first_upload_at, now()) else first_upload_at end,
+            first_stored_at = case when $5::boolean then coalesce(first_stored_at, now()) else first_stored_at end
       where id = $1`,
-    [device.id, meta.os, meta.bridgeVersion, stored],
+    [device.id, meta.os, meta.bridgeVersion, stored, snapshot],
   );
 }

@@ -159,7 +159,7 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
     }),
   );
 
-  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest, log: ingestLog, events }));
+  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest, publicBaseUrl, log: ingestLog, events }));
 
   return router;
 }

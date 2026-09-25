@@ -70,9 +70,11 @@ export interface Config {
   /**
    * `INGEST_MAX_UNCOMPRESSED_BYTES`, the cap on an upload's uncompressed
    * bytes; `INGEST_RATE_PER_MINUTE` and `INGEST_BURST`, the rate limit per
-   * device and source instance; and `INGEST_DEVICE_RATE_PER_MINUTE` and
-   * `INGEST_DEVICE_BURST`, the rate limit per device (§8.3, `ingest.ts`).
-   * Each one unset is `DEFAULT_INGEST`'s.
+   * device and source instance; `INGEST_DEVICE_RATE_PER_MINUTE` and
+   * `INGEST_DEVICE_BURST`, the rate limit per device (§8.3, `ingest.ts`); and
+   * `DEVICES_PER_USER_FREE` and `DEVICES_PER_USER_PAID`, the device limit of
+   * each tier (§8.3, §14). Each one unset is `DEFAULT_INGEST`'s: one device
+   * on the free tier, and no limit on the paid tier.
    */
   ingest: IngestSettings;
   /**
@@ -415,6 +417,10 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
         DEFAULT_INGEST.deviceRatePerMinute,
       ),
       deviceBurst: positiveInt("INGEST_DEVICE_BURST", env["INGEST_DEVICE_BURST"], DEFAULT_INGEST.deviceBurst),
+      devicesPerUser: {
+        free: positiveInt("DEVICES_PER_USER_FREE", env["DEVICES_PER_USER_FREE"], DEFAULT_INGEST.devicesPerUser.free),
+        paid: optionalPositiveInt("DEVICES_PER_USER_PAID", env["DEVICES_PER_USER_PAID"]),
+      },
     },
     toolContext: {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
