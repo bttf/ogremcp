@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogmcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json" with { type: "json" };
-import { EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
+import { describeGetState, EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
 
@@ -67,6 +67,7 @@ it("is described as §10.1 and §10.5 ask", () => {
   }
   const experimental = Object.entries(manifest.flavors).flatMap(([key, { status }]) => (status === "experimental" ? [key] : []));
   expect(EXPERIMENTAL_FLAVORS).toEqual(experimental);
+  expect(describeGetState([])).not.toContain("Experimental");
   expect(tool?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
   expect(tool?.inputSchema.type).toBe("object");
   expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(["sections", "flavor", "character"]);

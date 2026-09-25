@@ -6,7 +6,8 @@ import { PLATFORM_TOOLS } from "./tools.js";
 
 /**
  * The most characters the instructions, or one tool description, may have.
- * Clients truncate long text, and it goes out with every request (§10.5).
+ * The repo's own budget, not a spec value: clients truncate long text, and
+ * it goes out with every request.
  */
 const MAX_TEXT_CHARS = 1200;
 
