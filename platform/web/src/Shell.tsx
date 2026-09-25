@@ -12,6 +12,7 @@ const NAV: readonly { to: string; label: string }[] = [
   { to: "/connect", label: "Connect your agent" },
   { to: "/devices", label: "Devices" },
   { to: "/agents", label: "Connected agents" },
+  { to: "/account", label: "Account" },
 ];
 
 /**

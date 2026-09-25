@@ -1,5 +1,6 @@
 import { type RouteObject, useRoutes } from "react-router";
 
+import { Account } from "./pages/Account.js";
 import { ConnectAgent } from "./pages/ConnectAgent.js";
 import { ConnectedAgents } from "./pages/ConnectedAgents.js";
 import { Consent } from "./pages/Consent.js";
@@ -36,6 +37,7 @@ export const routes: RouteObject[] = [
           { path: "/connect", element: <ConnectAgent /> },
           { path: "/devices", element: <Devices /> },
           { path: "/agents", element: <ConnectedAgents /> },
+          { path: "/account", element: <Account /> },
         ],
       },
       { path: "*", element: <NotFound /> },
