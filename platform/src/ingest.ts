@@ -52,7 +52,8 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *    upload whose flavor the kit manifest's `flavors` registers gets its
  *    snapshot and 201 `stored` with `snapshot_uuid`. Experimental flavors
  *    are registered, so they are stored (D8). A `ParseError` keeps the upload
- *    with `parse_status = 'failed'` for a re-parse, and gets 422
+ *    with `parse_status = 'failed'` for a re-parse, with the adapter schema
+ *    and flavor the interpreter read before it failed (§16.1), and gets 422
  *    `parse_error` with the error's user-facing message.
  * 5. A parsed upload whose flavor is "unknown" or not registered is kept
  *    with `parse_status = 'rejected'` and its `flavor`, so rejections can be
@@ -639,10 +640,10 @@ async function store(
         gzipped,
         meta.mtime,
         meta.kit.manifest.version,
-        result.parsed?.adapterSchema ?? null,
+        result.adapterSchema,
         result.status,
         result.parseError,
-        result.rejectedFlavor,
+        result.flavor,
         meta.errors === null ? null : JSON.stringify(meta.errors),
       ],
     );
@@ -659,7 +660,7 @@ async function store(
     await touchDevice(client, device, meta, true, snapshotUuid !== undefined);
     await client.query("commit");
     if (result.status === "rejected") {
-      if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device.userUuid, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
+      if (result.flavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device.userUuid, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
       return {
         outcome: { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } },
         parse: result,
@@ -677,22 +678,29 @@ async function store(
 
 /**
  * What an upload's bytes parse to (§6.2), with the `uploads` columns that
- * record it (§11): `parse_status`, `parse_error`, and `flavor`.
+ * record it (§11): `parse_status`, `parse_error`, `adapter_schema`, and
+ * `flavor`.
  */
 export type UploadParse =
-  /** A flavor the kit manifest's `flavors` registers. It gets a snapshot. */
-  | { status: "parsed"; parsed: Parsed<unknown>; parseError: null; rejectedFlavor: null }
+  /** A flavor the kit manifest's `flavors` registers. It gets a snapshot, which holds the flavor. */
+  | { status: "parsed"; parsed: Parsed<unknown>; parseError: null; adapterSchema: number; flavor: null }
   /** A flavor that is "unknown" or not registered (§6.3.1). No snapshot. */
-  | { status: "rejected"; parsed: Parsed<unknown>; parseError: null; rejectedFlavor: string }
-  /** The interpreter threw a `ParseError`: its user-facing message. No snapshot. */
-  | { status: "failed"; parsed: null; parseError: string; rejectedFlavor: null };
+  | { status: "rejected"; parsed: Parsed<unknown>; parseError: null; adapterSchema: number; flavor: string }
+  /**
+   * The interpreter threw a `ParseError`: its user-facing message, and the
+   * adapter schema and flavor it read before it failed, or null for each it
+   * had not read (§16.1). No snapshot.
+   */
+  | { status: "failed"; parsed: null; parseError: string; adapterSchema: number | null; flavor: string | null };
 
 /**
  * Parses an upload of the kit's source `sourceId` with the kit's interpreter
  * and checks its flavor against the manifest (§6.1, §8.3). Ingest and the
  * re-parse command (§11) share it. `now` is `ParseOptions.now`: the re-parse
  * passes the upload's receipt time. An error other than `ParseError` is a
- * kit bug, and propagates.
+ * kit bug, and propagates. A `ParseError`'s adapter schema is kept only when
+ * it fits an `integer` column, and its flavor only when it is a snake_case
+ * key of at most `FLAVOR_MAX_LENGTH` characters.
  */
 export function parseUpload(kit: Kit, sourceId: string, bytes: Uint8Array, now?: Date): UploadParse {
   let parsed: Parsed<unknown>;
@@ -700,13 +708,35 @@ export function parseUpload(kit: Kit, sourceId: string, bytes: Uint8Array, now?:
     parsed = kit.interpreter.parse(sourceId, bytes, now === undefined ? undefined : { now });
   } catch (err) {
     if (!(err instanceof ParseError)) throw err;
-    return { status: "failed", parsed: null, parseError: err.message, rejectedFlavor: null };
+    return {
+      status: "failed",
+      parsed: null,
+      parseError: err.message,
+      adapterSchema: intOrNull(err.adapterSchema),
+      flavor: flavorOrNull(err.flavor),
+    };
   }
   // "unknown" is never a key of `flavors` (the SDK's manifest schema).
   if (!Object.hasOwn(kit.manifest.flavors, parsed.flavor)) {
-    return { status: "rejected", parsed, parseError: null, rejectedFlavor: parsed.flavor };
+    return { status: "rejected", parsed, parseError: null, adapterSchema: parsed.adapterSchema, flavor: parsed.flavor };
   }
-  return { status: "parsed", parsed, parseError: null, rejectedFlavor: null };
+  return { status: "parsed", parsed, parseError: null, adapterSchema: parsed.adapterSchema, flavor: null };
+}
+
+/** The longest flavor key a failed parse records. */
+const FLAVOR_MAX_LENGTH = 64;
+
+/** A flavor key: lowercase snake_case, as the SDK's manifest schema has it. "unknown" is one. */
+const FLAVOR_KEY = /^[a-z0-9]+(_[a-z0-9]+)*$/;
+
+/** `value` when it fits an `integer` column, else null. */
+function intOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= -2_147_483_648 && value <= 2_147_483_647 ? value : null;
+}
+
+/** `value` when it is a flavor key of at most `FLAVOR_MAX_LENGTH` characters, else null. */
+function flavorOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length <= FLAVOR_MAX_LENGTH && FLAVOR_KEY.test(value) ? value : null;
 }
 
 /**

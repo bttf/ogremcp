@@ -1,7 +1,7 @@
 // User-facing ParseError messages (docs/architecture.md §6.2, §8.3). The
 // bridge shows them to the player, so every message is clipped to
 // MESSAGE_MAX characters, and text quoted from the upload to QUOTE_MAX.
-import { ParseError } from "@ogmcp/sdk";
+import { ParseError, type ParseErrorFacts } from "@ogmcp/sdk";
 
 export const MESSAGE_MAX = 300;
 export const QUOTE_MAX = 40;
@@ -20,6 +20,7 @@ export function clip(text: string, max: number): string {
   return `${text.slice(0, end)}…`;
 }
 
-export function parseError(message: string): ParseError {
-  return new ParseError(clip(message, MESSAGE_MAX));
+/** A ParseError with `message`, clipped, and the facts read before the failure (§16.1). */
+export function parseError(message: string, facts: ParseErrorFacts = {}): ParseError {
+  return new ParseError(clip(message, MESSAGE_MAX), facts);
 }

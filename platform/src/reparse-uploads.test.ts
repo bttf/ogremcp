@@ -152,18 +152,21 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("re-parse stored uploads (§11)
   it("stores a failed upload that now parses, logs a new unknown flavor, and changes nothing on a second run", async () => {
     const failed = await addUpload(savedVariables(CAPTURED_AT), "failed");
     const unknown = await addUpload(savedVariables(CAPTURED_AT, UNKNOWN_CLIENT), "rejected");
+    const stillFailed = await addUpload(savedVariables(CAPTURED_AT).replace('["zone"] = "Elwynn Forest"', '["zone"] = 5'), "failed");
     logged.length = 0;
 
-    expect(await reparse()).toEqual({ "failed -> parsed": 1, "rejected -> rejected": 1 });
+    expect(await reparse()).toEqual({ "failed -> parsed": 1, "rejected -> rejected": 1, "failed -> failed": 1 });
     const first = await rows();
     expect(first.uploads).toMatchObject([
       { id: failed, kit_version: version, adapter_schema: 1, parse_status: "parsed", parse_error: null, flavor: null },
       { id: unknown, kit_version: version, adapter_schema: 1, parse_status: "rejected", parse_error: null, flavor: "unknown" },
+      // A failure after the schema and the client facts were read records them (§16.1).
+      { id: stillFailed, kit_version: version, adapter_schema: 1, parse_status: "failed", parse_error: expect.any(String), flavor: "classic_era" },
     ]);
     expect(first.snapshots).toMatchObject([{ upload_id: failed, flavor: "classic_era", snapshot_at: new Date(CAPTURED_AT * 1000) }]);
     expect(logged.map((line) => JSON.parse(line))).toMatchObject([{ kit: "wow", facts: { interface: 20506 } }]);
 
-    expect(await reparse()).toEqual({ unchanged: 2 });
+    expect(await reparse()).toEqual({ unchanged: 3 });
     expect(await rows()).toEqual(first);
     expect(logged).toHaveLength(1);
   });

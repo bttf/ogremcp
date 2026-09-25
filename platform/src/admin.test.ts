@@ -76,12 +76,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
       { client_id: DCR_CLIENT, client_name: "Test agent" },
     ]);
 
-    // Ingest: a stored upload, a duplicate, a failed parse, and a rejected flavor, and one before the window.
+    // Ingest: a stored upload, a duplicate, a failed parse before and after its schema and flavor were read, and a
+    // rejected flavor, and one before the window.
     const ingest = { user_id: player.id, device_id: device.id, kind: "ingest", latency_ms: 5, kit: "wow", kit_version: "0.1.0" };
     const client = { bridge_version: "0.1.0", os: "windows" };
     await event({ ...ingest, ...client, occurred_at: at(-300), status: "stored", parse_status: "parsed", adapter_schema: 1, flavor: "classic_era", client_errors: { upload_failed: 2 } });
     await event({ ...ingest, ...client, occurred_at: at(-290), status: "duplicate", client_errors: { upload_failed: 5 } });
     await event({ ...ingest, ...client, occurred_at: at(-280), status: "parse_error", parse_status: "failed", client_errors: { locate_failed: 1 } });
+    await event({ ...ingest, ...client, occurred_at: at(-275), status: "parse_error", parse_status: "failed", adapter_schema: 1, flavor: "classic_era" });
     await event({ ...ingest, ...client, occurred_at: at(-270), status: "unsupported_flavor", parse_status: "rejected", adapter_schema: 1, flavor: "tbc_classic" });
     await event({ ...ingest, occurred_at: at(-10 * 24 * 60), status: "stored", parse_status: "parsed", bridge_version: "0.0.9", os: "darwin" });
 
@@ -155,9 +157,15 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
 
     expect(metrics.window.days).toBe(7);
     expect(metrics.bridges).toEqual([
-      { bridge_version: "0.1.0", os: "windows", devices: 1, requests: 4, errors: { upload_failed: 2, locate_failed: 1 } },
+      { bridge_version: "0.1.0", os: "windows", devices: 1, requests: 5, errors: { upload_failed: 2, locate_failed: 1 } },
     ]);
-    expect(metrics.parses).toEqual([{ kit: "wow", kit_version: "0.1.0", uploads: 3, failed: 1 }]);
+    const parse = { kit: "wow", kit_version: "0.1.0" };
+    expect(metrics.parses).toEqual([
+      { ...parse, version_total: true, adapter_schema: null, flavor: null, uploads: 4, failed: 2 },
+      { ...parse, version_total: false, adapter_schema: null, flavor: null, uploads: 1, failed: 1 },
+      { ...parse, version_total: false, adapter_schema: 1, flavor: "classic_era", uploads: 2, failed: 1 },
+      { ...parse, version_total: false, adapter_schema: 1, flavor: "tbc_classic", uploads: 1, failed: 0 },
+    ]);
     expect(metrics.unsupported_flavors).toEqual([{ kit: "wow", flavor: "tbc_classic", rejections: 1, users: 1 }]);
     expect(metrics.snapshot_age).toEqual([
       { tool: "wow_get_state", reads: 2, p50: expect.closeTo(150), p90: expect.closeTo(190), p99: expect.closeTo(199) },

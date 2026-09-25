@@ -368,6 +368,22 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const snapshots = await pool.query("select 1 from snapshots where upload_id = $1", [rows[0]?.["id"]]);
     expect(snapshots.rowCount).toBe(0);
     expect((await deviceRow(deviceId))["first_upload_at"]).toEqual(expect.any(Date));
+
+    // A failure after the schema and the client facts were read records them (§16.1). A schema that no integer
+    // column holds is left out, and the upload is still kept.
+    const badZone = await post(accessToken, upload(savedVariables(CAPTURED_AT).replace('["zone"] = "Elwynn Forest"', '["zone"] = 5')));
+    expect(badZone.body).toEqual({ status: "parse_error", message: expect.stringContaining("OpenGamerMCPDB.state.location.zone") });
+    const hugeSchema = await post(accessToken, upload(savedVariables(CAPTURED_AT).replace('["schema"] = 1', '["schema"] = 4294967296')));
+    expect(hugeSchema.body).toEqual({ status: "parse_error", message: expect.stringContaining("data format 4294967296") });
+
+    const facts = (row: Record<string, unknown>) => [row["parse_status"], row["adapter_schema"], row["flavor"]];
+    const expected = [
+      ["failed", null, null],
+      ["failed", 1, "classic_era"],
+      ["failed", null, null],
+    ];
+    expect((await uploadsOf(deviceId)).map(facts)).toEqual(expected);
+    expect((await eventsOf(deviceId, 3)).map(facts)).toEqual(expected);
   });
 
   it("keeps an unregistered or unknown flavor's upload without a snapshot, and stores an experimental one", async () => {

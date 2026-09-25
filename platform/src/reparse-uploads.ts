@@ -18,7 +18,8 @@ import type { KitRegistry } from "./kits/registry.js";
  *
  * - The upload's `kit_version` (the manifest's `version` that parsed it),
  *   `adapter_schema`, `parse_status`, `parse_error`, and `flavor` are set to
- *   the new result.
+ *   the new result. A failed parse records the adapter schema and flavor its
+ *   interpreter read before it failed (§16.1).
  * - A `parsed` upload gets its snapshot, or its snapshot is replaced in place
  *   and keeps its uuid. A `failed` or `rejected` upload loses its snapshot.
  * - An upload newly rejected as "unknown" gets ingest's log line with the
@@ -171,14 +172,16 @@ async function reparseUpload(
         where id = $1
           and (kit_version, adapter_schema, parse_status, parse_error, flavor)
               is distinct from ($2::text, $3::integer, $4::text, $5::text, $6::text)`,
-      [id, kit.manifest.version, result.parsed?.adapterSchema ?? null, result.status, result.parseError, result.rejectedFlavor],
+      [id, kit.manifest.version, result.adapterSchema, result.status, result.parseError, result.flavor],
     );
     const snapshotChanged =
       result.status === "parsed"
         ? (await writeSnapshot(client, id, result.parsed)) !== null
         : ((await client.query("delete from snapshots where upload_id = $1", [id])).rowCount ?? 0) > 0;
     await client.query(dryRun ? "rollback" : "commit");
-    if (!dryRun && result.status === "rejected" && result.rejectedFlavor === UNKNOWN_FLAVOR && row.flavor !== UNKNOWN_FLAVOR) {
+    // A failed upload's flavor can be "unknown" too: only a rejection as "unknown" was logged.
+    const wasRejectedUnknown = row.parse_status === "rejected" && row.flavor === UNKNOWN_FLAVOR;
+    if (!dryRun && result.status === "rejected" && result.flavor === UNKNOWN_FLAVOR && !wasRejectedUnknown) {
       log(unknownFlavorLine(row.user_uuid, kit, row.uuid, result.parsed.unknownFlavor));
     }
     return (upload.rowCount ?? 0) > 0 || snapshotChanged ? `${row.parse_status} -> ${result.status}` : "unchanged";

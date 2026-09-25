@@ -10,7 +10,8 @@ export interface Interpreter<State> {
   /**
    * Parses one upload of the source `sourceId`. Pure: no DB or network.
    * Accepts the current adapter schema and the previous one. Throws
-   * `ParseError` on bad or unsupported input.
+   * `ParseError` on bad or unsupported input, with the `ParseErrorFacts` it
+   * read before it failed.
    */
   parse(sourceId: string, bytes: Uint8Array, options?: ParseOptions): Parsed<State>;
   tools: ToolDef<State>[];
@@ -127,14 +128,32 @@ export interface ToolContext<State> {
 }
 
 /**
+ * Facts the interpreter read from an upload before it failed. The platform
+ * stores them with the failed upload, so parse errors can be counted by
+ * adapter schema and flavor (§16.1). Each is absent when the interpreter had
+ * not read it.
+ */
+export interface ParseErrorFacts {
+  /** The upload's adapter schema. An integer. */
+  adapterSchema?: number;
+  /** The flavor its detection facts map to: a flavor key, or "unknown" (§6.3.1). */
+  flavor?: string;
+}
+
+/**
  * Thrown by `Interpreter.parse` on bad or unsupported input. The message is
  * user-facing: the bridge shows it to the player (§6.2, §8.3).
  */
 export class ParseError extends Error {
   override name = "ParseError";
+  // `declare`: an absent fact is no property at all, not one set to undefined.
+  declare readonly adapterSchema?: number;
+  declare readonly flavor?: string;
 
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: ErrorOptions & ParseErrorFacts) {
     super(message, options);
+    if (options?.adapterSchema !== undefined) this.adapterSchema = options.adapterSchema;
+    if (options?.flavor !== undefined) this.flavor = options.flavor;
   }
 }
 

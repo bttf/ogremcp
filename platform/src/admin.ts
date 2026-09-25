@@ -121,23 +121,30 @@ select v.bridge_version, v.os, v.devices, v.requests, coalesce(c.errors, '{}'::j
  order by v.requests desc, v.bridge_version, v.os`;
 
 /**
- * Ingest (§16.1): parsed uploads by kit version. `uploads` counts every
- * parse: parsed, failed, and rejected. A failed parse does not record its
- * adapter schema or flavor yet, so the rate is by kit version only.
+ * Ingest (§16.1): parsed uploads by kit version, and within it by adapter
+ * schema and flavor. `version_total` marks a kit version's own row. A failed
+ * parse counts under the adapter schema and flavor its interpreter read
+ * before it failed, and under null for each it had not read. `uploads`
+ * counts every parse: parsed, failed, and rejected.
  */
 export interface ParseRow {
   kit: string | null;
   kit_version: string | null;
+  version_total: boolean;
+  adapter_schema: number | null;
+  flavor: string | null;
   uploads: number;
   failed: number;
 }
 
 const PARSES_SQL = `
-select kit, kit_version, count(*)::int as uploads, (count(*) filter (where parse_status = 'failed'))::int as failed
+select kit, kit_version, grouping(adapter_schema, flavor) <> 0 as version_total, adapter_schema, flavor,
+       count(*)::int as uploads,
+       (count(*) filter (where parse_status = 'failed'))::int as failed
   from events
  where kind = 'ingest' and tool is null and occurred_at >= $1 and occurred_at < $2 and parse_status is not null
- group by kit, kit_version
- order by kit, kit_version
+ group by grouping sets ((kit, kit_version), (kit, kit_version, adapter_schema, flavor))
+ order by kit, kit_version, grouping(adapter_schema, flavor) desc, adapter_schema nulls first, flavor nulls first
  limit $3`;
 
 /** Ingest (§16.1): `unsupported_flavor` answers by kit and flavor. */

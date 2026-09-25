@@ -71,16 +71,22 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits, now: Da
   if (db === undefined) {
     throw parseError(`${FILE_NAME} holds no Open Gamer MCP data yet. Type /transmit in game to save it.`);
   }
-  checkSchema(typeof db === "object" && !Array.isArray(db) ? db["schema"] : undefined);
+  const table = typeof db === "object" && !Array.isArray(db) ? db : undefined;
+  const adapterSchema = checkSchema(table?.["schema"]);
+
+  // The flavor is detected before the rest is checked, so that a failure
+  // elsewhere records it (§16.1). Client facts that fail their schema give none.
+  const client = dbSchema.shape.client.safeParse(table?.["client"]);
+  const detection = client.success ? detect(client.data) : undefined;
 
   const result = dbSchema.safeParse(db);
   if (!result.success) {
-    throw parseError(describeIssue(result.error));
+    throw parseError(describeIssue(result.error), { adapterSchema, ...(detection && { flavor: detection.flavor }) });
   }
-  const { schema, client, character, captured_at, state } = result.data;
+  const { character, captured_at, state } = result.data;
   // A flavor the manifest does not register is not rejected here: ingest
   // checks the registry (§6.1, §8.3).
-  const { flavor, rules, unknownFlavor } = detect(client);
+  const { flavor, rules, unknownFlavor } = detection ?? detect(result.data.client);
   return {
     flavor,
     rules,
@@ -88,7 +94,7 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits, now: Da
     // The GUID is the character key (§6.3), so a character without one has no key.
     character: character?.guid ? { key: character.guid, name: character.name, realm: character.realm } : null,
     capturedAt: capturedAt(captured_at, now),
-    adapterSchema: schema,
+    adapterSchema,
     state,
   };
 }
@@ -105,21 +111,27 @@ function capturedAt(stamp: number | null, now: Date): Date | null {
   return new Date(stamp * 1000);
 }
 
-function checkSchema(schema: unknown): void {
+/**
+ * The upload's adapter schema, when `parse` accepts it. Otherwise a
+ * ParseError, which records the schema when it is an integer (§16.1).
+ */
+function checkSchema(schema: unknown): number {
   if (typeof schema !== "number" || !Number.isSafeInteger(schema)) {
     throw parseError(`${FILE_NAME} has no data format number. Type /transmit in game to save it again.`);
   }
   if (ACCEPTED_SCHEMAS.includes(schema)) {
-    return;
+    return schema;
   }
   const accepted = `${ACCEPTED_SCHEMAS.length === 1 ? "format" : "formats"} ${ACCEPTED_SCHEMAS.join(" and ")}`;
   if (schema > ADAPTER_SCHEMA) {
     throw parseError(
       `Your Open Gamer MCP addon saves data format ${schema}, and the server reads ${accepted}. The server does not read the newer format yet.`,
+      { adapterSchema: schema },
     );
   }
   throw parseError(
     `Your Open Gamer MCP addon is out of date: it saves data format ${schema}, and the server reads ${accepted}. Update the addon.`,
+    { adapterSchema: schema },
   );
 }
 
