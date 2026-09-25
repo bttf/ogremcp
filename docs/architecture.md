@@ -449,7 +449,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - Tool-selection quality and context cost degrade as the tool list grows, so **consolidate**: a few tools with `sections` params beat many narrow tools.
 - **≤8 tools per kit; aim for 2–3.**
 - **Only tools for the user's enabled games are exposed**, computed per request. A change shows up the next time the client lists tools, which for some clients means a new chat. The stateless transport sends no `notifications/tools/list_changed` (D12).
-- **Paid-only tools are still exposed to free users** and return an upgrade message, so the tool list doesn't change on upgrade.
+- **Paid-only tools are still exposed to free users** and return an upgrade message, so the tool list doesn't change on upgrade. The refusal doesn't count against the daily cap.
 - **Rejected:** a meta-dispatcher (`describe_tools` + `call_tool`). It loses typed args, adds a round trip, and makes every call look the same in approval UIs.
 
 ### 10.3 Platform tools
@@ -466,7 +466,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | Tool | Purpose |
 |---|---|
 | `wow_get_state(sections?, flavor?, character?)` | Latest snapshot. By default, whatever the player last played. `flavor` returns the latest for that flavor; `character` (name or `Name-Realm`) narrows to a specific alt. `sections`: `character`, `location`, `quests`, `inventory`, `skills`, `recent_path` (default: all). For Forever snapshots, notes that `recent_path` covers only the time since the last reload (§6.3.1). |
-| `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). **Paid** (§14). |
+| `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). `sections` defaults to `character` and `location`, because all sections for 20 snapshots would not fit the result cap. **Paid** (§14). |
 
 ### 10.5 Responses and behavior
 
@@ -571,6 +571,7 @@ No snapshot diagnostics pages. Players see their state through their agent.
 ### 13.3 Self-host
 
 - A published Docker image plus `docker-compose.yml` with `postgres` and `ogmcp`. One command. Self-hosters bring their own Firecrawl key. It runs the bundled first-class kits (§6.5).
+- A self-host has no hosted-service limits by default: no retention deletion, no device limit, no tool-call caps. The operator can turn any of them on (owner decision, 2026-09-25).
 
 ## 14. Pricing, limits, billing
 
