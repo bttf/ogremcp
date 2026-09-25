@@ -1,7 +1,7 @@
 /**
- * Token buckets for the rate limits of `oidc-registration.ts` and
- * `devices.ts`. A bucket holds at most `burst` requests and refills at its
- * rate per hour; a request takes one.
+ * Token buckets for the rate limits of `oidc-registration.ts`, `devices.ts`,
+ * and `ingest-limit.ts`. A bucket holds at most `burst` requests and refills
+ * at its rate per hour; a request takes one.
  */
 
 const HOUR_MS = 60 * 60 * 1000;
