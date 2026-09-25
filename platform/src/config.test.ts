@@ -144,9 +144,10 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
   });
 
-  it("reads the daily tool-call caps per tier, each unset being no cap (§14)", () => {
+  it("reads the daily tool-call caps per tier, each unset being no cap and each at most a Postgres integer (§14)", () => {
     expect(loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "50" }).toolCallCaps).toEqual({ free: 50, paid: null });
     expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_PAID: "0" })).toThrow("TOOL_CALLS_PER_DAY_PAID must be a whole number of 1 or more");
+    expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "2147483648" })).toThrow("TOOL_CALLS_PER_DAY_FREE must be at most 2147483647");
   });
 
   it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {

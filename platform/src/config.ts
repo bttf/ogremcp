@@ -155,10 +155,14 @@ const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const DAY_SECONDS = 24 * 60 * 60;
 
+/** The largest Postgres `integer`. A count or cap that reaches the database as one must fit it. */
+const INT_MAX = 2_147_483_647;
+
 function positiveInt(name: string, value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a whole number of 1 or more`);
+  if (n > INT_MAX) throw new Error(`${name} must be at most ${INT_MAX}`);
   return n;
 }
 

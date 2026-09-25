@@ -1,7 +1,10 @@
 import { type ToolResult, userError } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 
+import { failureCode } from "./db.js";
+import { logger } from "./log.js";
 import type { ToolUser } from "./tool-context.js";
+import type { ToolCallError } from "./tool-envelope.js";
 
 /**
  * Daily tool-call caps (§14), on the `usage_daily` table (migration 0010).
@@ -18,12 +21,17 @@ import type { ToolUser } from "./tool-context.js";
  * - At the cap, the call does not run, so it costs no search, and it is not
  *   counted. The agent gets `capReachedResult`: an `isError` result that says
  *   when the count resets, at the next midnight UTC (§10.5).
- * - A call that runs is counted whatever it answers, a failure included. The
- *   count is taken before the tool runs, in the statement that checks the
- *   cap, and a failed call can still have spent search credits.
+ * - A call that fails through the service's fault does not count (owner
+ *   decision, 2026-09-25): once it has its answer, `refund` takes it back
+ *   from the day it was counted on, never below zero. Those are the
+ *   `REFUNDED_ERRORS`. A call that ends in any other error still counts: a
+ *   bad argument, no snapshot yet, `no_sources`, a page not found or out of
+ *   scope.
  * - The check and the count are one upsert on the user's row for the day,
  *   which Postgres runs under the row's lock. Concurrent calls of one user
- *   take turns on it, so a burst never passes the cap: the bound is exact.
+ *   take turns on it, so a burst never passes the cap: the bound is exact. A
+ *   refund only takes back its own call's count, so the calls that stay
+ *   counted never pass the cap either.
  * - Lowering a cap during the day refuses the calls past the new cap at once.
  */
 
@@ -37,8 +45,25 @@ export type ToolCallCaps = { readonly [tier in ToolUser["tier"]]: number | null 
 /** No cap for either tier, until the numbers are measured and set (§14). */
 export const NO_TOOL_CALL_CAPS: ToolCallCaps = { free: null, paid: null };
 
-/** A call refused by the cap. */
+/**
+ * The errors of a call that failed through the service's fault, which
+ * `refund` takes back: search is unavailable, the handler threw, or a kit
+ * tool's result is over the size cap or lacks an envelope field.
+ */
+export const REFUNDED_ERRORS: ReadonlySet<ToolCallError> = new Set(["search_unavailable", "failed", "too_large", "no_envelope_field"]);
+
+/** A call `count` counted, and the UTC date it counted on. */
+export interface CountedCall {
+  kind: "counted";
+  /** `users.id`. */
+  userId: string;
+  /** `YYYY-MM-DD`. */
+  day: string;
+}
+
+/** A call refused by the cap. It was not counted. */
 export interface CapReached {
+  kind: "cap_reached";
   /** The tier's cap. */
   cap: number;
   /** When the count resets: the next midnight UTC. */
@@ -47,11 +72,16 @@ export interface CapReached {
 
 export interface UsageMeter {
   /**
-   * Counts one tool call of `user` on today's UTC date. Null when the call is
-   * counted and may run. When the tier's cap is reached, the call is not
-   * counted and must not run. A database error propagates.
+   * Counts one tool call of `user` on today's UTC date, unless the tier's cap
+   * is reached. A refused call is not counted and must not run. A database
+   * error propagates.
    */
-  count(user: ToolUser): Promise<CapReached | null>;
+  count(user: ToolUser): Promise<CountedCall | CapReached>;
+  /**
+   * Takes a counted call back, never below zero. Never throws: a failed
+   * refund is logged by its code, and the call stays counted.
+   */
+  refund(call: CountedCall): Promise<void>;
 }
 
 export interface UsageMeterOptions {
@@ -61,6 +91,8 @@ export interface UsageMeterOptions {
   caps?: ToolCallCaps;
   /** The clock. Default: the system's. */
   now?: () => Date;
+  /** Receives one line per failed refund. Default: `logger.error`. */
+  log?: (line: string) => void;
 }
 
 /**
@@ -74,14 +106,25 @@ on conflict (user_id, day) do update set tool_calls = u.tool_calls + 1
  where $3::integer is null or u.tool_calls < $3::integer
 returning tool_calls`;
 
-export function createUsageMeter({ pool, caps = NO_TOOL_CALL_CAPS, now = () => new Date() }: UsageMeterOptions): UsageMeter {
+const REFUND_SQL = "update usage_daily set tool_calls = tool_calls - 1 where user_id = $1 and day = $2 and tool_calls > 0";
+
+export function createUsageMeter({ pool, caps = NO_TOOL_CALL_CAPS, now = () => new Date(), log = logger.error }: UsageMeterOptions): UsageMeter {
   return {
     async count(user) {
       const at = now();
+      const day = at.toISOString().slice(0, 10);
       const cap = caps[user.tier];
-      const { rowCount } = await pool.query(COUNT_SQL, [user.id, at.toISOString().slice(0, 10), cap]);
-      if (rowCount === 1 || cap === null) return null;
-      return { cap, resetAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1)) };
+      const { rowCount } = await pool.query(COUNT_SQL, [user.id, day, cap]);
+      if (rowCount === 1 || cap === null) return { kind: "counted", userId: user.id, day };
+      return { kind: "cap_reached", cap, resetAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1)) };
+    },
+
+    async refund({ userId, day }) {
+      try {
+        await pool.query(REFUND_SQL, [userId, day]);
+      } catch (err) {
+        log(`tool call refund failed: code=${failureCode(err)}`);
+      }
     },
   };
 }

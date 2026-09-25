@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import { userError } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -50,16 +51,16 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", 
     return Object.fromEntries(rows.map((row) => [row.day, row.tool_calls]));
   }
 
-  /** A registry with one platform tool, and how many times the tool ran. */
-  function registry(caps: ToolCallCaps, now: Date) {
+  /** A registry with one platform tool, and how many times the tool ran. By default the tool succeeds. */
+  function registry(caps: ToolCallCaps, now: Date, handler?: PlatformTool["handler"]) {
     const runs = { count: 0 };
     const tool: PlatformTool = {
       name: "get_answer",
       description: "",
       inputSchema: { type: "object" },
-      handler: async () => {
+      handler: async (args, ctx) => {
         runs.count += 1;
-        return { content: [{ type: "text", text: "{}" }], structuredContent: {} };
+        return handler?.(args, ctx) ?? { content: [{ type: "text", text: "{}" }], structuredContent: {} };
       },
     };
     const tools = createToolRegistry({
@@ -76,10 +77,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", 
     const meter = createUsageMeter({ pool, now: () => now });
     const [a, b] = [await newUser(), await newUser()];
 
-    for (let i = 0; i < 3; i++) expect(await meter.count(a)).toBeNull();
-    expect(await meter.count(b)).toBeNull();
+    for (let i = 0; i < 3; i++) expect((await meter.count(a)).kind).toBe("counted");
+    expect((await meter.count(b)).kind).toBe("counted");
     now = new Date("2026-09-26T00:00:00.000Z");
-    expect(await meter.count(a)).toBeNull();
+    expect((await meter.count(a)).kind).toBe("counted");
 
     expect(await counts(a)).toEqual({ "2026-09-25": 3, "2026-09-26": 1 });
     expect(await counts(b)).toEqual({ "2026-09-25": 1 });
@@ -123,13 +124,42 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", 
     expect(runs.count).toBe(3);
   });
 
+  it("takes back a call that failed through the service's fault, such as search_unavailable", async () => {
+    const unavailable: PlatformTool["handler"] = async (_args, ctx) => {
+      ctx.event.error = "search_unavailable";
+      return userError("Search is unavailable.");
+    };
+    const { tools, runs } = registry({ free: 1, paid: null }, new Date("2026-09-25T13:45:00Z"), unavailable);
+    const user = await newUser();
+    const caller = { userUuid: user.uuid, clientId: "test-agent" };
+
+    await tools.call(caller, "get_answer", {});
+    await tools.call(caller, "get_answer", {});
+
+    expect(runs.count).toBe(2);
+    expect(await counts(user)).toEqual({ "2026-09-25": 0 });
+  });
+
+  it("counts a call that failed for the player's reason, such as a bad argument", async () => {
+    const { tools, runs } = registry({ free: 1, paid: null }, new Date("2026-09-25T13:45:00Z"), async () => userError("No such character."));
+    const user = await newUser();
+    const caller = { userUuid: user.uuid, clientId: "test-agent" };
+
+    await tools.call(caller, "get_answer", {});
+    const capped = await tools.call(caller, "get_answer", {});
+
+    expect(capped?.content[0]?.text).toMatch(/^The player has used all 1 of today's/);
+    expect(runs.count).toBe(1);
+    expect(await counts(user)).toEqual({ "2026-09-25": 1 });
+  });
+
   it("lets no burst of concurrent calls past the cap", async () => {
     const meter = createUsageMeter({ pool, caps: { free: 5, paid: null } });
     const user = await newUser();
 
     const answers = await Promise.all(Array.from({ length: 30 }, () => meter.count(user)));
 
-    expect(answers.filter((answer) => answer === null)).toHaveLength(5);
+    expect(answers.filter((answer) => answer.kind === "counted")).toHaveLength(5);
     expect(Object.values(await counts(user))).toEqual([5]);
   });
 });

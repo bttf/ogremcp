@@ -14,7 +14,7 @@ import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type SnapshotRef, type ToolContextSettings, type ToolUser } from "./tool-context.js";
 import { errorResult, gameOffResult, kitToolResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
-import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js";
+import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } from "./usage.js";
 
 /**
  * The tool registry: the MCP tools each user may list and call (§10).
@@ -30,8 +30,9 @@ import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js"
  * Each call of a tool the user may call is counted toward the user's daily
  * tool calls before the tool runs (`usage.ts`, §14). A call past the tier's
  * cap does not run and is not counted: it answers `capReachedResult`. A call
- * to a tool of a game the user has turned off runs nothing and is not
- * counted.
+ * that fails through the service's fault, one of `REFUNDED_ERRORS`, is taken
+ * back once it has its answer. A call to a tool of a game the user has turned
+ * off runs nothing and is not counted.
  *
  * Each call of a tool the user may call, or of a tool of a game the user has
  * turned off, writes one events row (`events.ts`, §16) once it has its
@@ -198,10 +199,10 @@ export function createToolRegistry({
       let schema: ToolInputSchema;
       const tool = found.tools.find(({ def }) => def.name === name);
       // Before the tool runs, so that a call past the cap costs nothing (§14).
-      const capped = tool === undefined ? null : await usage.count(user);
-      if (tool !== undefined && capped !== null) {
+      const count = tool === undefined ? null : await usage.count(user);
+      if (tool !== undefined && count?.kind === "cap_reached") {
         schema = tool.def.inputSchema;
-        answer = { result: capReachedResult(capped), error: "cap_reached" };
+        answer = { result: capReachedResult(count), error: "cap_reached" };
       } else if (tool !== undefined) {
         schema = tool.def.inputSchema;
         answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, search, fetchPage, event }, log);
@@ -213,6 +214,9 @@ export function createToolRegistry({
         answer = { result: gameOffResult(off.kit.name), error: "game_off" };
       }
       const snapshotAt = tool?.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
+      const error = answer.error === "user_error" ? (event.error ?? "user_error") : answer.error;
+      // A call that failed through the service's fault does not count (§14).
+      if (count?.kind === "counted" && error !== null && REFUNDED_ERRORS.has(error)) await usage.refund(count);
       events?.record({
         kind: "tool_call",
         userId: user.id,
@@ -223,7 +227,7 @@ export function createToolRegistry({
         sections: knownSections(args, schema),
         flavor: knownFlavor(args, allKits),
         query: event.query ?? null,
-        error: answer.error === "user_error" ? (event.error ?? "user_error") : answer.error,
+        error,
         snapshotAt: answer.error === null ? (snapshotAt ?? null) : null,
         snapshotUuid: answer.error === null ? (event.snapshotUuid ?? null) : null,
         cacheHit: event.cacheHit ?? null,

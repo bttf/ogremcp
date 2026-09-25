@@ -5,7 +5,8 @@
 --
 -- - One row per user and UTC day. A call adds 1 with an upsert that also
 --   checks the cap, in one statement, so concurrent calls cannot pass it.
---   A call the cap refuses adds nothing.
+--   A call the cap refuses adds nothing. A call that fails through the
+--   service's fault takes its 1 back, never below zero.
 -- - users.tier is `free` or `paid` since 0002, and new users are `free`.
 --   This file does not change it.
 -- - Every row belongs to a user, and deleting the user deletes it (§11,

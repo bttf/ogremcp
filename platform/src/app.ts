@@ -113,7 +113,7 @@ export function createApp({
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
     // The registry checks the platform tools' names: a bad one stops the start (§10.1).
-    const usage = createUsageMeter({ pool: auth.pool, caps: toolCallCaps });
+    const usage = createUsageMeter({ pool: auth.pool, caps: toolCallCaps, log });
     const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, fetchPage, log, events, usage });
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
