@@ -7,10 +7,11 @@ import type { SearchUsage } from "./search.js";
  * (`fetch-game-page.ts`).
  *
  * `PageFetch` is the one call to the provider. Its input is the page cache's
- * key (§12): the page's URL, in scope and without its fragment (`pageKey`).
- * Its answer is the page's final URL, unchecked, and the page's text as
- * `pageText` makes it. So the shared cache (`search-cache.ts`) wraps it and
- * stores the answer, and the caller checks the final URL against the game's
+ * key (§12): the page's URL, in scope and without its fragment (`pageKey`),
+ * and the caller's scope. Its answer is the page's final URL, unchecked, and
+ * the page's text as `pageText` makes it. So the shared cache
+ * (`search-cache.ts`) wraps it and stores the answer when the final URL is in
+ * the caller's scope, and the caller checks the final URL against the game's
  * scope on every call, from the cache too.
  *
  * `pageText` removes images and link targets and keeps link text (S3,
@@ -39,9 +40,10 @@ export interface Page {
 
 /**
  * Fetches the page at `url`, a `pageKey` result, and sets what the fetch cost
- * on `usage`. Throws a `FirecrawlError` when the provider fails.
+ * on `usage`. `prefixes` is the caller's scope: the cache stores only a page
+ * whose final URL is in it. Throws a `FirecrawlError` when the provider fails.
  */
-export type PageFetch = (url: string, usage?: SearchUsage) => Promise<Page>;
+export type PageFetch = (url: string, prefixes: readonly string[], usage?: SearchUsage) => Promise<Page>;
 
 /** A page's cache key (S3): the URL, an `inScope` result, without its fragment. Wowhead links carry fragments such as `#comments`. */
 export function pageKey(url: string): string {
@@ -91,7 +93,7 @@ export function pageText(markdown: string): string {
  * reason and status. Never the URL: the line carries the user's uuid.
  */
 export function firecrawlPageFetch(options: FirecrawlOptions): PageFetch {
-  return async (url, usage) => {
+  return async (url, _prefixes, usage) => {
     const started = performance.now();
     let page: FirecrawlPage;
     try {

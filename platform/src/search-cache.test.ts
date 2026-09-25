@@ -69,7 +69,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     const calls: string[] = [];
     return {
       calls,
-      fetchPage: async (url, usage) => {
+      fetchPage: async (url, _prefixes, usage) => {
         calls.push(url);
         if (usage !== undefined) usage.searchCredits = 1;
         return answers[Math.min(calls.length, answers.length) - 1] ?? PAGE;
@@ -129,24 +129,29 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     expect(calls).toHaveLength(2);
   });
 
-  it("answers a page from the cache with the same final URL and text, and does not store a 404", async () => {
+  it("answers a page from the cache with the same final URL and text", async () => {
     const redirected: Page = { ...PAGE, url: "https://www.wowhead.com/classic/npc=448/hogger-the-gnoll" };
     const { fetchPage, calls } = stubFetch(redirected);
     const cached = cachedPageFetch(fetchPage, { pool, now: clock });
     const miss: SearchUsage = {};
-    expect(await cached(PAGE.url, miss)).toEqual(redirected);
+    expect(await cached(PAGE.url, SCOPE.prefixes, miss)).toEqual(redirected);
     expect(miss).toEqual({ cacheHit: false, searchCredits: 1 });
     const hit: SearchUsage = {};
-    expect(await cached(PAGE.url, hit)).toEqual(redirected);
+    expect(await cached(PAGE.url, SCOPE.prefixes, hit)).toEqual(redirected);
     expect(hit).toEqual({ cacheHit: true, searchCredits: 0 });
     expect(calls).toHaveLength(1);
+  });
 
-    const missing = "https://warcraft.wiki.gg/wiki/Nowhere";
-    const notFound = stubFetch({ ...PAGE, url: missing, status: 404 }, { ...PAGE, url: missing });
-    const fetches = cachedPageFetch(notFound.fetchPage, { pool, now: clock });
-    expect((await fetches(missing)).status).toBe(404);
-    expect((await fetches(missing)).status).toBe(200);
-    expect(notFound.calls).toHaveLength(2);
+  it("stores only a page with status 200 whose final URL is in the caller's scope", async () => {
+    const { status: _, ...noStatus } = PAGE;
+    for (const answer of [{ ...PAGE, status: 404 }, noStatus, { ...PAGE, url: "https://www.wowhead.com/tbc/npc=448/hogger" }]) {
+      const { fetchPage, calls } = stubFetch(answer);
+      const cached = cachedPageFetch(fetchPage, { pool, now: clock });
+      expect(await cached(PAGE.url, SCOPE.prefixes)).toEqual(answer);
+      expect(await cached(PAGE.url, SCOPE.prefixes)).toEqual(answer);
+      expect(calls).toHaveLength(2);
+    }
+    expect(await rows()).toBe(0);
   });
 
   it("stores two identical misses at once without an error", async () => {

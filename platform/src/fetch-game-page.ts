@@ -84,7 +84,7 @@ export const fetchGamePage: PlatformTool = {
     if (ctx.fetchPage === null) return refuse(ctx, "search_unavailable", NOT_SET_UP_MESSAGE);
     let page: Page;
     try {
-      page = await ctx.fetchPage(pageKey(url), ctx.event);
+      page = await ctx.fetchPage(pageKey(url), prefixes, ctx.event);
     } catch (err) {
       if (err instanceof FirecrawlError) return refuse(ctx, "search_unavailable", UNAVAILABLE_MESSAGE);
       throw err;

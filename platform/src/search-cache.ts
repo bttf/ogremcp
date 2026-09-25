@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import { logger } from "./log.js";
 import { MAX_PAGE_SOURCE, type Page, type PageFetch } from "./pages.js";
-import { inScope, MAX_RESULTS, MAX_URL, type ScopedSearch, type SearchHit, type SearchUsage } from "./search.js";
+import { inScope, MAX_RESULTS, type ScopedSearch, type SearchHit, type SearchUsage } from "./search.js";
 
 /**
  * The shared search and page cache (§12), on the `search_cache` table
@@ -19,9 +19,10 @@ import { inScope, MAX_RESULTS, MAX_URL, type ScopedSearch, type SearchHit, type 
  *   (`search_unavailable`) throws and stores nothing, and a scope with no
  *   prefixes (`no_sources`) is never stored.
  * - A page is keyed by its URL without the fragment (`pageKey`). Its row holds
- *   the final URL and the stripped text. A page with a 4xx or 5xx status, 404
- *   included, is not stored, and neither is one whose final URL is longer
- *   than any URL in scope can be.
+ *   the final URL and the stripped text. Only a page with status 200 whose
+ *   final URL is in the caller's scope is stored: not a 404 or another error
+ *   page, not one without a status, such as some challenge pages, and no text
+ *   from outside the scope.
  * - An empty answer, a search with no hit in scope or a page with no text,
  *   stays for `emptyTtlMs` instead of `ttlMs` (S3,
  *   docs/spikes/s3-firecrawl-scoping.md): the sources may have it later.
@@ -96,7 +97,7 @@ export function cachedSearch(search: ScopedSearch, options: SearchCacheOptions):
 /** `fetchPage`, answered from the cache when it can be. */
 export function cachedPageFetch(fetchPage: PageFetch, options: SearchCacheOptions): PageFetch {
   const cache = new Cache(options);
-  return async (url, usage) => {
+  return async (url, prefixes, usage) => {
     const key = [url];
     const cached = page(await cache.get("page", key));
     if (cached !== null) {
@@ -105,9 +106,8 @@ export function cachedPageFetch(fetchPage: PageFetch, options: SearchCacheOption
       return cached;
     }
     if (usage !== undefined) usage.cacheHit = false;
-    const fetched = await fetchPage(url, usage);
-    const failed = fetched.status !== undefined && fetched.status >= 400;
-    if (!failed && fetched.url.length <= MAX_URL) await cache.put("page", key, fetched, fetched.markdown === "");
+    const fetched = await fetchPage(url, prefixes, usage);
+    if (fetched.status === 200 && inScope(fetched.url, prefixes) !== null) await cache.put("page", key, fetched, fetched.markdown === "");
     return fetched;
   };
 }
