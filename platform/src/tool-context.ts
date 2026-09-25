@@ -37,7 +37,9 @@ import type { Pool } from "pg";
  * The kit never sees a uuid: the tool registry uses them to name, in the
  * call's events row, the snapshot the call returned (§16.2).
  *
- * Paid-only gating of `history` is not here yet (§14).
+ * Tier gating is per tool, not here: the tool registry (`tools.ts`) answers
+ * a free user's call of a paid-only tool before its handler runs (§10.2,
+ * §14).
  *
  * The matching rule and the newest-first pick are adapted from
  * `sameCharacter()` and `select()` in `cloud/src/mcpTools.ts` in

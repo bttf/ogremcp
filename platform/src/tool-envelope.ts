@@ -22,9 +22,10 @@ import { UserFacingError } from "./tool-context.js";
  *   message (`userError`), not protocol errors, so the agent relays them: a
  *   `UserFacingError`, such as `ToolContext`'s for an unknown character, and
  *   a call to a tool of a game the user has turned off (`gameOffResult`),
- *   which a client can still list until a new chat (§10.2). So are cap
+ *   which a client can still list until a new chat (§10.2). So are a free
+ *   user's call of a paid-only tool (`paidOnlyResult`, §10.2, §14), cap
  *   reached (`capReachedResult` in `usage.ts`, §14), no sources, and search
- *   unavailable (§12). Paid-only will be too.
+ *   unavailable (§12).
  * - Any other error becomes `TOOL_FAILED_MESSAGE`, and a log line with the
  *   tool's name and the error's code alone: its message can hold user data.
  *
@@ -60,6 +61,8 @@ export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] a
  * - `not_found`: fetch_game_page's page is a 404.
  * - `cap_reached`: the user's daily tool calls reached the tier's cap, and
  *   the tool did not run (§14, §16.1 cap hits).
+ * - `paid_only`: a free user called a paid-only tool, which did not run: an
+ *   upgrade prompt (§10.2, §14).
  */
 export type ToolCallError =
   | "user_error"
@@ -71,7 +74,8 @@ export type ToolCallError =
   | "search_unavailable"
   | "out_of_scope"
   | "not_found"
-  | "cap_reached";
+  | "cap_reached"
+  | "paid_only";
 
 /** What a call answers, and why it is an error, or null when it is not one. */
 export interface ToolAnswer {
@@ -108,4 +112,14 @@ export function errorResult(err: unknown, tool: string, log: Log): ToolAnswer {
 /** What a call to a tool of the game `gameName` answers when the user has turned the game off. */
 export function gameOffResult(gameName: string): ToolResult {
   return userError(`${gameName} is turned off on the Games page of the Open Gamer MCP website. The player can turn it on there.`);
+}
+
+/**
+ * What a free user's call of a paid-only tool answers (§10.2, §14). It names
+ * no price and no billing link: billing is not decided yet (§19.1 D5).
+ */
+export function paidOnlyResult(): ToolResult {
+  return userError(
+    "This tool is part of the Open Gamer MCP paid plan, and the player is on the free plan, so it did not run. The Account page of the Open Gamer MCP website will show the plans.",
+  );
 }
