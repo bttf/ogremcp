@@ -132,6 +132,7 @@ const app = createApp({
   webRoot,
   kits,
   toolContext: config.toolContext,
+  bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
   https,
   trustProxyHops: config.trustProxyHops,

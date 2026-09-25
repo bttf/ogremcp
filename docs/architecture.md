@@ -553,7 +553,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | Page | Purpose |
 |---|---|
 | Sign in | Google / Discord |
-| Get started | One-time onboarding: download the bridge (one app for every game), approve it, connect an agent |
+| Get started | One-time onboarding: choose your games (the bridge installs addons only for enabled games, §8.2), download the bridge (one app for every game), approve it, connect an agent. Owner decision on the first step, 2026-09-25. |
 | Games | Enable/disable kits; per-game in-game tips (e.g. `/transmit`, restart WoW after the addon's first install, close WoW to finish an addon update). The bridge picks up changes on its own (§7). |
 | Connect your agent | The MCP URL and steps for Claude, Claude Code, ChatGPT, and Perplexity |
 | Device approval (`/device`) | Confirm a bridge's code |

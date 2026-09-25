@@ -6,6 +6,7 @@ import { listAgentGrants, revokeAgentGrant } from "./agents.js";
 import { deviceName, findDevice, listDevices, renameDevice, revokeDevice } from "./devices.js";
 import type { ProviderName } from "./identities.js";
 import type { KitRegistry } from "./kits/registry.js";
+import { mcpResource } from "./mcp.js";
 import { requireSameOrigin } from "./same-origin.js";
 import type { SignInProviders } from "./sign-in-providers.js";
 import { currentUser } from "./web-sessions.js";
@@ -19,6 +20,8 @@ export interface ApiOptions {
   kits?: KitRegistry;
   /** The OAuth server (§9), which reads agent clients' names. Left out, the `/api/v1/agents` routes are not served. */
   oidc?: Provider;
+  /** `BRIDGE_DOWNLOAD_URL`. Left out or null, `GET /api/v1/setup` answers null for it. */
+  bridgeDownloadUrl?: string | null;
 }
 
 /** What `GET /api/v1/me` answers for a signed-in user. */
@@ -27,6 +30,14 @@ export interface Me {
   uuid: string;
   /** The sign-in providers linked to the user, oldest first. */
   providers: ProviderName[];
+}
+
+/** What `GET /api/v1/setup` answers: the links of the Get started and Connect your agent pages (§13.2). */
+export interface Setup {
+  /** `<PUBLIC_BASE_URL>/mcp`, the one URL every agent connects to (§1, §9). */
+  mcp_url: string;
+  /** `BRIDGE_DOWNLOAD_URL`, or null when the bridge has no download yet. */
+  bridge_download_url: string | null;
 }
 
 /** One first-class kit on the Games page (§13.2). */
@@ -49,6 +60,7 @@ export interface Game {
  * - `GET /api/v1/sign-in-providers`: the providers this server has
  *   credentials for, so the Sign in page can say which are off. Their
  *   `/auth/<provider>` routes answer 503.
+ * - `GET /api/v1/setup`: the `Setup` links, for the signed-in user.
  * - `GET /api/v1/games`: `{ games: Game[] }`, every first-class kit in
  *   registry order, for the signed-in user.
  * - `PUT` and `DELETE /api/v1/games/:kit`: enable and disable a kit for the
@@ -76,7 +88,7 @@ export interface Game {
  * a web session. Every route that changes something needs this site's
  * `Origin`. Any other path under `/api` answers a JSON 404.
  */
-export function apiRouter({ pool, providers, publicBaseUrl, kits, oidc }: ApiOptions): Router {
+export function apiRouter({ pool, providers, publicBaseUrl, kits, oidc, bridgeDownloadUrl = null }: ApiOptions): Router {
   const router = express.Router();
 
   const sameOrigin = requireSameOrigin(publicBaseUrl);
@@ -102,6 +114,15 @@ export function apiRouter({ pool, providers, publicBaseUrl, kits, oidc }: ApiOpt
 
   router.get("/api/v1/sign-in-providers", (_req, res) => {
     res.json({ providers: (["google", "discord"] as const).filter((name) => providers[name] !== null) });
+  });
+
+  router.get("/api/v1/setup", (_req, res) => {
+    if (currentUser(res) === null) {
+      res.status(401).json({ error: "signed_out" });
+      return;
+    }
+    const setup: Setup = { mcp_url: mcpResource(publicBaseUrl), bridge_download_url: bridgeDownloadUrl };
+    res.json(setup);
   });
 
   if (kits !== undefined) {

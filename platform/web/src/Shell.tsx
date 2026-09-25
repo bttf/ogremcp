@@ -7,7 +7,9 @@ import { useSession } from "./session.js";
  */
 const NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Home" },
+  { to: "/get-started", label: "Get started" },
   { to: "/games", label: "Games" },
+  { to: "/connect", label: "Connect your agent" },
   { to: "/devices", label: "Devices" },
   { to: "/agents", label: "Connected agents" },
 ];

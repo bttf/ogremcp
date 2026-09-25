@@ -42,10 +42,11 @@ afterEach(() => {
   server = undefined;
 });
 
-async function serve(pool: Pool): Promise<string> {
+async function serve(pool: Pool, bridgeDownloadUrl?: string): Promise<string> {
   const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
   const auth = { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: BASE };
-  server = createServer(createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits })).listen(0, "127.0.0.1");
+  const app = createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits, bridgeDownloadUrl });
+  server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
@@ -57,6 +58,13 @@ describe("without a web session", () => {
     const res = await fetch(`${base}/api/v1/me`);
     expect(res.status).toBe(401);
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ error: "signed_out" });
+  });
+
+  it("GET /api/v1/setup answers 401", async () => {
+    const base = await serve({} as Pool, "https://downloads.example/ogmcp-bridge");
+    const res = await fetch(`${base}/api/v1/setup`);
+    expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "signed_out" });
   });
 
@@ -116,6 +124,21 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ uuid: user.uuid, providers: ["discord", "google"] });
+  });
+
+  it("GET /api/v1/setup answers the MCP URL, and the download URL only when one is configured (§13.2)", async () => {
+    const user = await signIn();
+    const configured = await serve(pool, "https://downloads.example/ogmcp-bridge");
+    const res = await fetch(`${configured}/api/v1/setup`, { headers: { cookie: user.cookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ mcp_url: `${BASE}/mcp`, bridge_download_url: "https://downloads.example/ogmcp-bridge" });
+    server?.close();
+
+    const unconfigured = await serve(pool);
+    expect(await (await fetch(`${unconfigured}/api/v1/setup`, { headers: { cookie: user.cookie } })).json()).toEqual({
+      mcp_url: `${BASE}/mcp`,
+      bridge_download_url: null,
+    });
   });
 
   it("the Games API enables and disables a kit for the signed-in user (§13.2, §11)", async () => {
