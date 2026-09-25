@@ -3,6 +3,169 @@
 Spec: §5 (Releases), §7. Decided in RED-287 (P0.7). RED-323 (P5.7) and
 RED-344 (P9.3) build on this.
 
+## Cutting a release
+
+Pushing a `bridge-v` or `addon-v` tag publishes a release. There is no
+approval step after the push. Tag a commit on `main` that passed CI: both
+workflows fail when the tagged commit is not on `main`. Both kinds of release
+go to the repo's one Releases page (§5).
+
+### Bridge
+
+1. Check that the six signing secrets are set in the `release` environment
+   ("Signing secrets" below). Without them the job fails at its first step,
+   and nothing is published.
+2. Optionally, run the dry run on `main` (below).
+3. Tag the commit and push the tag:
+
+       git fetch origin
+       git tag -a bridge-v1.2.3 -m "Bridge 1.2.3" origin/main
+       git push origin bridge-v1.2.3
+
+The `Bridge release` workflow (`.github/workflows/bridge-release.yml`) runs
+its `release` job on a macOS runner, in the `release` environment. It checks
+the secrets and the tag, imports the certificate into a temporary keychain,
+then runs "A tag build" (below). GoReleaser's `universal_binaries` post hook
+(`bridge/scripts/macos-app.sh`) builds `Ogre MCP.app`, and
+`bridge/scripts/macos-sign.sh` signs it with the Developer ID identity
+(hardened runtime, secure timestamp), notarizes it, and staples the ticket.
+The hook then zips the app and checks the app in the zip with Gatekeeper.
+Only after that does GoReleaser write `checksums.txt` and publish. The
+release, named "Bridge 1.2.3", holds:
+
+- `ogremcp-bridge_1.2.3_windows_amd64.exe`, unsigned (§7, D6)
+- `ogremcp-bridge_1.2.3_darwin_all.app.zip`, signed and notarized
+- `checksums.txt`
+
+Every GoReleaser run that is not a snapshot signs the app or fails: the hook
+passes `developer-id` unless `.IsSnapshot` is set (`bridge/.goreleaser.yaml`),
+and `macos-sign.sh` has no unsigned fallback. Snapshots (`make -C bridge
+dist`, the dev build, the dry run) get an ad hoc signature only.
+
+The version is the tag without `bridge-v`, such as `1.2.3` or `1.2.3-rc.1`.
+The job fails on a tag with any other form. A version with a `-`, such as
+`1.2.3-rc.1`, is published as a pre-release and is never marked Latest.
+
+Bridge releases run one at a time. A second tag waits for the first release
+to finish. GitHub keeps only one waiting run, so a third tag pushed while one
+runs and one waits cancels the waiting one. Push one `bridge-v` tag at a time.
+
+When the job fails, fix the cause and re-run it from the Actions tab. A
+failure during upload leaves a draft release, because GoReleaser publishes
+the release only after every upload. Delete that draft before the re-run.
+
+### Addon
+
+1. Raise the TOC `## Version` in `kits/wow/adapter/OgreMCP.toc` in a PR, as
+   every adapter change must (the `adapter-version` CI check), and merge it.
+2. Tag the merge commit with that version and push the tag:
+
+       git fetch origin
+       git tag -a addon-v0.2.0 -m "Addon 0.2.0" origin/main
+       git push origin addon-v0.2.0
+
+The `Addon release` workflow (`.github/workflows/addon-release.yml`) runs
+`scripts/check-addon-tag.sh`, which fails unless the tag's version equals the
+`## Version` of every `.toc` in `kits/wow/adapter` at the tag. The job zips
+the adapter's committed files under `OgreMCP/`, the folder that the manifest's
+`adapter.install` names and that players have in `Interface/AddOns`. It
+publishes `OgreMCP-0.2.0.zip` as "Addon 0.2.0", with GitHub's generated notes
+since the previous `addon-v` tag. Those notes list every PR merged in
+between, not only adapter changes. An addon release is never marked Latest,
+so the Releases page's Latest label stays on the newest bridge release.
+
+If the check fails, nothing is published. Delete the tag
+(`git push origin :refs/tags/addon-v0.2.0` and `git tag -d addon-v0.2.0`),
+then tag the right commit.
+
+The bridge installs the adapter from the platform (§8.2), so an adapter change
+reaches players with the platform deploy, whether or not it is tagged. The
+tag makes the GitHub release and, from P9.5, feeds the CurseForge and Wago
+packagers (§7 Listings).
+
+### Dry run
+
+Run the `Bridge release` workflow by hand on `main`: Actions, "Bridge
+release", "Run workflow", or `gh workflow run bridge-release.yml --ref main`.
+A manual run runs only the `dry-run` job and never publishes, even on a tag.
+It builds a snapshot, as `make -C bridge dist` does, and lists the files a
+release would publish. It has a read-only token and no access to the
+`release` environment, so it neither signs nor checks the secrets. The first
+tag is the first run that uses them.
+
+The `Bridge dev build` workflow runs on pushes to `main` that touch `bridge/`,
+not on PRs, to save macOS minutes. Start it for a branch with
+`gh workflow run bridge-dev-build.yml --ref <branch>`.
+
+### Signing secrets
+
+D6: macOS builds are Developer ID signed and notarized. The bridge release
+job reads six secrets from a GitHub environment named `release`. Only that
+job uses the environment. The dry run does not.
+
+The owner creates the environment once and limits it to `bridge-v*` tags, so
+no other branch or tag can deploy to it or read its secrets: Settings,
+Environments, New environment, `release`; then under "Deployment branches and
+tags", choose "Selected branches and tags" and add the tag rule `bridge-v*`.
+The same from a terminal:
+
+    gh api -X PUT 'repos/{owner}/{repo}/environments/release' \
+      -F 'deployment_branch_policy[protected_branches]=false' \
+      -F 'deployment_branch_policy[custom_branch_policies]=true'
+    gh api -X POST 'repos/{owner}/{repo}/environments/release/deployment-branch-policies' \
+      -f name='bridge-v*' -f type=tag
+
+In a private repo, environment secrets and deployment rules need GitHub Pro,
+Team, or Enterprise. On GitHub Free they work once the repo is public (P9).
+
+`gh secret set NAME --env release` sets one secret in the environment and
+reads the value from standard input.
+
+| Secret | What it holds |
+| ------ | ------------- |
+| `MACOS_CERT_P12_BASE64` | The Developer ID Application certificate and its private key, as a `.p12` file, base64-encoded. |
+| `MACOS_CERT_PASSWORD` | The password set when the `.p12` was exported. |
+| `APPLE_TEAM_ID` | The 10-character team ID. The job signs only with an identity of this team. |
+| `APPLE_API_KEY_ID` | The App Store Connect API key's ID. |
+| `APPLE_API_ISSUER_ID` | The App Store Connect API issuer ID (a UUID). |
+| `APPLE_API_KEY_P8_BASE64` | The API key's `.p8` file, base64-encoded. |
+
+To obtain them (this needs the Apple Developer Program; creating the
+certificate needs the Account Holder role):
+
+- **Team ID.** developer.apple.com/account, Membership details, "Team ID".
+- **Certificate.** In Keychain Access on a Mac, choose Certificate Assistant,
+  "Request a Certificate From a Certificate Authority", and save the request
+  to disk. At developer.apple.com/account, Certificates, IDs & Profiles,
+  Certificates, add a "Developer ID Application" certificate (G2 Sub-CA) and
+  upload the request. Download the `.cer` and open it, which adds it to the
+  login keychain. In Keychain Access, My Certificates, export
+  "Developer ID Application: … (TEAM ID)" as a `.p12` with a password. Then:
+
+      base64 -i DeveloperID.p12 | gh secret set MACOS_CERT_P12_BASE64 --env release
+      gh secret set MACOS_CERT_PASSWORD --env release
+      gh secret set APPLE_TEAM_ID --env release
+
+- **API key.** appstoreconnect.apple.com, Users and Access, Integrations, App
+  Store Connect API, Team Keys. Generate a key with the Developer role. The
+  page shows the Issuer ID above the list and the Key ID in the list. The
+  `.p8` file can be downloaded once only. Then:
+
+      base64 -i AuthKey_<key id>.p8 | gh secret set APPLE_API_KEY_P8_BASE64 --env release
+      gh secret set APPLE_API_KEY_ID --env release
+      gh secret set APPLE_API_ISSUER_ID --env release
+
+Keep the `.p12` and `.p8` files outside the repo, and delete them once they
+are stored somewhere safe. `.gitignore` lists both extensions.
+
+The job writes the certificate and the key under `RUNNER_TEMP` and deletes
+them and the keychain at the end, whether it passes or fails. It prints no
+secret. Its actions are pinned by commit SHA, and it builds without the Go
+cache.
+
+The steps above are adapted from `bttf/wow-guide@df80260`,
+`docs/DEVELOPMENT.md` ("Release").
+
 ## Decision
 
 The bridge is built and released with GoReleaser OSS (the free edition), v2.
@@ -81,9 +244,10 @@ checksum:
   addon and platform commits. Filtering by path (`changelog.paths`) is Pro.
 - `release.prerelease: auto` does not work, because `--skip=validate` leaves the
   semver fields empty. The key accepts only the literals `auto` and `true` and
-  is not a template, so its value is fixed in the config. To change it for one
-  release, run `gh release edit "$TAG" --prerelease` (or `--prerelease=false`)
-  after publishing.
+  is not a template. For a pre-release version, the release job pipes the
+  config to `goreleaser release -f -` with `prerelease: "true"` added.
+  `release.make_latest` is a template, so the config itself keeps a
+  pre-release off Latest.
 - The first bridge release has no previous `bridge-v` tag. Its changelog starts
   at the nearest tag of any prefix.
 - Pro-only features this project would otherwise use: `app_bundles`, `dmg`,
@@ -137,35 +301,45 @@ OSS binary v2.18.2.
   machine's macOS version. The `bridge-windows` build sets `CGO_ENABLED=0` and
   adds `-H windowsgui` to its ldflags.
 - Unsigned dev builds are CI artifacts from `--snapshot`. The `Bridge dev
-  build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on PRs that
-  touch `bridge/` and on `workflow_dispatch`. It uploads the Windows binary
-  and the zipped `.app` and publishes no release.
+  build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on pushes
+  to `main` that touch `bridge/` and on `workflow_dispatch`. It uploads the
+  Windows binary and the zipped `.app` and publishes no release.
 
 ## How P9.3 (RED-344) uses it
 
-- A workflow on `push: tags: ['bridge-v*']` on a macOS runner. Check out with
-  `fetch-depth: 0` so `git describe` sees the tags. Run
-  `goreleaser/goreleaser-action` with `distribution: goreleaser`, pinned by
-  commit SHA, with the guard, the env vars, and `--skip=validate`.
-- The detached signature is a `signs` entry over `checksums.txt`. It runs any
-  command, so the §7 ed25519 signer fits. Key material comes from CI secrets.
-- macOS signing, notarization, and the `.dmg` run in the post hook script (the
-  prototype's `bridge/scripts/macos-dmg.sh`), because GoReleaser's versions
-  are Pro.
-- Windows code signing (Azure Trusted Signing) signs the `.exe` in place, so it
-  runs from `hooks.post` on the `bridge-windows` build. That hook runs before
-  the checksums are written. `binary_signs` does not fit: it expects a
-  detached signature file (`${artifact}.sig`), an in-place signer writes none,
-  and the upload of that missing file then fails. Inno Setup needs Windows,
-  and OSS has no split and merge. If the installer is built in a Windows job,
-  run GoReleaser with `--skip=publish`, build the installer, then write
-  checksums, sign, and run `gh release create "$TAG" --verify-tag` in a final
-  job.
-- `addon-v` tags do not use GoReleaser. That workflow zips `kits/wow/adapter`
-  and publishes with `gh release create`.
-- Self-update lists releases and keeps `bridge-v` tags (§7). GitHub's
-  `releases/latest` endpoint returns the newest non-draft, non-prerelease
-  release whatever its tag, which can be an `addon-v` release.
+- `.github/workflows/bridge-release.yml` runs on `push: tags: ['bridge-v*']`
+  on a macOS runner, in the `release` environment, one release at a time. It
+  checks out with `fetch-depth: 0` so `git describe` sees the tags and
+  `origin/main` exists. It checks the tag's form and that the tagged commit is
+  on `main`, then runs "A tag build" above.
+  It installs GoReleaser with `.github/actions/install-goreleaser`, which the
+  dev build shares: the pinned OSS release, checked against its SHA-256. It
+  does not use `goreleaser/goreleaser-action`.
+- macOS signing and notarization run in the `universal_binaries` post hook,
+  because GoReleaser's versions are Pro. `bridge/scripts/macos-sign.sh`
+  signs, notarizes, and staples an `.app` or a `.dmg`, adapted from the
+  prototype's `bridge/scripts/macos-dmg.sh`. The `.dmg` (RED-342) reuses it.
+- `addon-v` tags do not use GoReleaser. `.github/workflows/addon-release.yml`
+  zips `kits/wow/adapter` with `git archive` and publishes with
+  `gh release create`.
+
+Left for later issues:
+
+- The detached signature (RED-343) is a `signs` entry over `checksums.txt`.
+  It runs any command, so the §7 ed25519 signer fits. Key material comes from
+  CI secrets.
+- Self-update (RED-343) lists releases and keeps `bridge-v` tags (§7).
+  GitHub's `releases/latest` endpoint is not a safe source for it: it returns
+  a release whatever its tag.
+- The Windows installer (RED-273) needs Windows, and OSS has no split and
+  merge. If it is built in a Windows job, run GoReleaser with
+  `--skip=publish`, build the installer, then write checksums, sign, and run
+  `gh release create "$TAG" --verify-tag` in a final job.
+- Windows code signing is `[later]` (§7, D6). Azure Trusted Signing signs the
+  `.exe` in place, so it would run from `hooks.post` on the `bridge-windows`
+  build, which runs before the checksums are written. `binary_signs` does not
+  fit: it expects a detached signature file (`${artifact}.sig`), an in-place
+  signer writes none, and the upload of that missing file then fails.
 
 ## Alternative considered
 

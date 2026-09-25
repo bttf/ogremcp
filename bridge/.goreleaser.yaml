@@ -1,5 +1,6 @@
 # Bridge builds with GoReleaser OSS v2 (docs/releases.md). Runs from bridge/.
-# `make dist` runs a snapshot build. Tagged releases are RED-344 (P9).
+# `make dist` runs a snapshot build. A pushed bridge-v tag runs a release
+# (.github/workflows/bridge-release.yml).
 # Templates use BRIDGE_VERSION, not .Version, which keeps the bridge-v prefix.
 version: 2
 project_name: ogremcp-bridge
@@ -33,13 +34,16 @@ universal_binaries:
   - ids: [bridge-darwin]
     replace: true
     # App bundles are Pro-only, so a script wraps the universal binary in an
-    # .app and zips it.
+    # .app and zips it. Every build that is not a snapshot is a release, and
+    # its app is Developer ID signed and notarized or the build fails (§7).
+    # Snapshots get an ad hoc signature only.
     hooks:
       post:
         - cmd: >-
             bash scripts/macos-app.sh "{{ .Path }}" "{{ .Env.BRIDGE_VERSION }}"
             "dist/Ogre MCP.app"
             "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.app.zip"
+            "{{ if .IsSnapshot }}adhoc{{ else }}developer-id{{ end }}"
           output: true
 
 # Windows only: the bare macOS binary would reach checksums.txt and a release
@@ -54,6 +58,13 @@ checksum:
   extra_files:
     - glob: dist/*.app.zip
 
+# The repo's one Releases page also holds the addon-v releases (§5). A
+# pre-release version, such as 1.2.3-rc.1, is never marked Latest. The
+# prerelease key is not a template, and `auto` needs the semver parse that
+# --skip=validate turns off, so the release workflow adds `prerelease: "true"`
+# to this config for a pre-release version (docs/releases.md).
 release:
+  name_template: "Bridge {{ .Env.BRIDGE_VERSION }}"
+  make_latest: '{{ if contains .Env.BRIDGE_VERSION "-" }}false{{ else }}true{{ end }}'
   extra_files:
     - glob: dist/*.app.zip
