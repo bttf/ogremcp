@@ -8,7 +8,8 @@ export const TERMS_UPDATED = "September 25, 2026";
 /**
  * The Terms page (§13.2): plain statements of how the service works. The
  * agent never acts in the game (§1), the service has limits (§8.3, §14), and
- * the licenses are §5's. No price: billing is undecided (§19.1 D5).
+ * the licenses are §5's. No price: the public beta has only the free tier,
+ * and billing comes after G2 (§19.1 D5).
  *
  * Adapted from `web/src/pages/Terms.tsx` in bttf/wow-guide@df80260.
  */
@@ -17,7 +18,7 @@ export function Terms() {
     <LegalPage title="Terms of use" updated={TERMS_UPDATED}>
       <h2>The service</h2>
       <p>
-        Open Gamer MCP connects your game to an AI agent you choose, such as Claude or ChatGPT. The agent reads your game state and
+        Ogre MCP connects your game to an AI agent you choose, such as Claude or ChatGPT. The agent reads your game state and
         suggests what to do. It never acts in the game: you make every move.
       </p>
 
@@ -53,7 +54,7 @@ export function Terms() {
 
       <h2>Not affiliated with Blizzard</h2>
       <p>
-        Open Gamer MCP is not made, endorsed, or supported by Blizzard Entertainment. World of Warcraft is a trademark of Blizzard
+        Ogre MCP is not made, endorsed, or supported by Blizzard Entertainment. World of Warcraft is a trademark of Blizzard
         Entertainment, Inc.
       </p>
 

@@ -12,7 +12,9 @@ export const PRIVACY_UPDATED = "September 25, 2026";
  * (§8.3), the tables (§11, `platform/migrations`), sign-in
  * (`sign-in-providers.ts`), retention (`retention.ts`), the deletes
  * (`account.ts`), search and page fetches (`search.ts`, `pages.ts`,
- * `search-cache.ts`), and the log (`log.ts`). Change it, and
+ * `search-cache.ts`), the cleanup of expired sign-ins and tokens
+ * (`auth-cleanup.ts`), and the log (`log.ts`). Paid retention is described,
+ * but the public beta has only the free tier (§19.1 D5). Change it, and
  * `PRIVACY_UPDATED`, when they change.
  *
  * Adapted from `web/src/pages/Privacy.tsx` in bttf/wow-guide@df80260.
@@ -21,7 +23,7 @@ export function Privacy() {
   return (
     <LegalPage title="Privacy policy" updated={PRIVACY_UPDATED}>
       <p>
-        Open Gamer MCP has three parts: an addon in your game, the bridge app on your computer, and this service, which your AI agent
+        Ogre MCP has three parts: an addon in your game, the bridge app on your computer, and this service, which your AI agent
         connects to. This page says what each part collects, who else receives it, how long it is kept, and how to delete it.
       </p>
       <p>It describes the hosted service. Someone who runs their own server can change the limits below.</p>
@@ -131,6 +133,7 @@ export function Privacy() {
       </ul>
 
       <h2>How long it is kept</h2>
+      <p>There is no paid tier yet, so every account is on the free tier.</p>
       <ul>
         <li>Free accounts: uploads and snapshots are deleted 30 days after they arrive. A job checks once a day.</li>
         <li>Paid accounts: uploads and snapshots are kept until you delete them.</li>
@@ -139,9 +142,9 @@ export function Privacy() {
           Records of tool calls and uploads, reported problems, and daily usage counts are kept until you delete them, as described below.
         </li>
         <li>
-          Your account, sign-ins, devices, and approvals are kept until you delete your account. Revoking a device or an agent ends its
-          access.
+          Your account, sign-ins, and devices are kept until you delete your account. Revoking a device or an agent ends its access.
         </li>
+        <li>Web sessions, approvals, and their tokens are deleted by a daily job once they expire.</li>
         <li>
           An entry in the shared search cache expires at most 7 days after it was fetched. Expired entries are removed as new ones are
           added.

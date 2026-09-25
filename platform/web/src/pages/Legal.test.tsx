@@ -56,13 +56,13 @@ const PAGES = [
 
 it("shows the Privacy and Terms pages to a signed-out browser, with the date and the contact email (§13.2)", async () => {
   for (const { path, title, updated } of PAGES) {
-    const container = await render(path, "privacy@ogmcp.example");
+    const container = await render(path, "privacy@ogremcp.example");
     // Not sent to the Sign in page.
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe(path);
     expect(container.querySelector("h1")?.textContent).toBe(title);
     expect(container.textContent).toContain(`Last updated ${updated}`);
     const contact = container.querySelector(".og-legal a[href^='mailto:']");
-    expect([contact?.textContent, contact?.getAttribute("href")]).toEqual(["privacy@ogmcp.example", "mailto:privacy@ogmcp.example"]);
+    expect([contact?.textContent, contact?.getAttribute("href")]).toEqual(["privacy@ogremcp.example", "mailto:privacy@ogremcp.example"]);
     // The footer links to both pages for everyone.
     expect([...container.querySelectorAll(".og-footer a")].map((a) => a.getAttribute("href"))).toEqual(["/privacy", "/terms"]);
     root?.unmount();
