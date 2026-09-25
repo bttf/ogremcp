@@ -97,6 +97,16 @@ describe("loadKitRegistry", () => {
     expect(() => checkKits([withTools(nine)])).toThrow("@ogremcp/kit-wow: the kit has 9 tools, and a kit may have at most 8 (§10.2).");
   });
 
+  it("refuses a mixed prefix that is not in the flavor's search (§6.1)", () => {
+    const flavors = {
+      ...(wowManifest["flavors"] as object),
+      classic_era: { status: "supported", search: ["https://www.wowhead.com/classic/"], mixed: ["https://warcraft.wiki.gg/"] },
+    };
+    expect(() => checkKits([{ ...wow, manifest: { ...wowManifest, flavors } }])).toThrow(
+      '@ogremcp/kit-wow: flavors.classic_era.mixed has "https://warcraft.wiki.gg/", which is not in flavors.classic_era.search (§6.1).',
+    );
+  });
+
   it("refuses two kits with the same tool_prefix", () => {
     const other: KitSource = { ...wow, package: "@ogremcp/kit-other", manifest: { ...wowManifest, kit: "other" } };
     expect(() => loadKitRegistry({ sources: [wow, other], adaptersDir })).toThrow(

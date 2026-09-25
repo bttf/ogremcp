@@ -35,6 +35,7 @@ const example = {
     classic_era: {
       status: "supported",
       search: ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"],
+      mixed: ["https://warcraft.wiki.gg/"],
     },
     forever: { status: "experimental", search: [] },
   },

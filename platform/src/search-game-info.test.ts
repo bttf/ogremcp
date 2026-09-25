@@ -5,9 +5,11 @@ import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPool } from "./db.js";
+import { fetchGamePage } from "./fetch-game-page.js";
 import { KIT_SOURCES, type Kit, type KitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { migrate } from "./migrations.js";
+import type { PageFetch } from "./pages.js";
 import { firecrawlScopedSearch, type ScopedSearch, type SearchHit, type SearchScope } from "./search.js";
 import { NOT_SET_UP_MESSAGE, searchGameInfo, UNAVAILABLE_MESSAGE } from "./search-game-info.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
@@ -66,6 +68,17 @@ describe("search_game_info (§10.3, §12)", () => {
     const fetch = (async () => new Response("{}", { status: 429 })) as typeof globalThis.fetch;
     const result = await call({ game: "wow", query: "hogger", flavor: "classic_era" }, firecrawlScopedSearch({ apiKey: "test-key", timeoutMs: 5000, fetch }));
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: UNAVAILABLE_MESSAGE }] });
+  });
+
+  it("flags a search hit and a fetched page from a mixed-version source (§12)", async () => {
+    const wiki: SearchHit = { title: "Hogger", url: "https://warcraft.wiki.gg/wiki/Hogger", excerpt: "A gnoll." };
+    const found = await call({ game: "wow", query: "hogger", flavor: "classic_era" }, async () => [HIT, wiki]);
+    expect(found.structuredContent?.["results"]).toEqual([HIT, { ...wiki, mixed_versions: true }]);
+
+    const fetchPage: PageFetch = async (url) => ({ url, markdown: "# Hogger", cut: false, status: 200 });
+    const context = { pool: {} as Pool, user: USER, agentClient: "agent", games: [WOW], settings: DEFAULT_TOOL_CONTEXT, search: null, fetchPage, event: {} };
+    const page = await fetchGamePage.handler({ game: "wow", url: wiki.url }, context);
+    expect(page.structuredContent).toEqual({ game: "wow", url: wiki.url, mixed_versions: true, truncated: false, markdown: "# Hogger" });
   });
 
   it("is read-only and open-world (§10.5)", () => {

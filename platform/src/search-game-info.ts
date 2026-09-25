@@ -2,7 +2,7 @@ import { jsonResult, type ToolResult, userError } from "@ogremcp/sdk";
 
 import { FirecrawlError } from "./firecrawl.js";
 import type { Kit } from "./kits/registry.js";
-import { MAX_QUERY, MAX_RESULTS, normalizeQuery, type SearchHit, searchScope } from "./search.js";
+import { MAX_QUERY, MAX_RESULTS, mixedVersions, normalizeQuery, type SearchHit, searchScope } from "./search.js";
 import type { PlatformTool, PlatformToolContext } from "./tools.js";
 
 /**
@@ -12,7 +12,9 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * flavor: `flavor` when given, else the user's active flavor for the game
  * (the flavor of its latest snapshot), else the manifest's first `supported`
  * flavor. The scope is that flavor's `search` prefixes (§6.1), and the
- * search is `ScopedSearch` (`search.ts`).
+ * search is `ScopedSearch` (`search.ts`). A result under one of the
+ * flavor's `mixed` prefixes carries `mixed_versions: true` (§12); other
+ * results leave the field out.
  *
  * User-facing conditions are `userError` results (§10.5), each with a
  * plain-language message: a bad argument, a game that is not enabled,
@@ -27,7 +29,11 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * a description or instructions (§10.5).
  */
 
-/** Names what it covers, and carries the §10.5 rules that act on its results. */
+/** The §12 rule for a result from a mixed-version source, in both tools' descriptions. */
+export const MIXED_VERSIONS_RULE =
+  "A result with `mixed_versions: true` comes from a source whose pages cover several game versions: prefer facts from other results, and say when a fact may belong to another version.";
+
+/** Names what it covers, and carries the §10.5 and §12 rules that act on its results. */
 const DESCRIPTION = [
   "Search the vetted web sources of one of the games the user has enabled for a game fact: where an NPC or object is, a quest's steps, what drops an item, how a mechanic works.",
   "`game` is a game key from list_games.",
@@ -35,6 +41,7 @@ const DESCRIPTION = [
   "Write the query as names and keywords, not a question.",
   `Returns up to ${MAX_RESULTS} results, each with a title, URL, and excerpt.`,
   "Base game facts on these results. The player's state (quest text, objectives) is a source for what it says; before you say where to go, who to see, where something is, or where an item comes from beyond that, call this tool first. Never answer from model memory alone. With no sources or no results, say so rather than guess.",
+  MIXED_VERSIONS_RULE,
   "Turn results into friend-style, spoiler-free guidance: directions and landmarks, not coordinates and kill counts.",
   "When `status` is experimental, caveat the answer: its sources may be thin or out of date.",
   "When the realm's `rules` has `fresh`, check that what a result describes is live in the realm's current phase.",
@@ -98,11 +105,12 @@ export const searchGameInfo: PlatformTool = {
       if (err instanceof FirecrawlError) return unavailable(ctx, UNAVAILABLE_MESSAGE);
       throw err;
     }
+    const mixed = config.mixed ?? [];
     return jsonResult({
       game: kit.key,
       flavor,
       status: config.status,
-      results,
+      results: results.map((hit) => (mixedVersions(hit.url, mixed) ? { ...hit, mixed_versions: true } : hit)),
       ...(results.length === 0 && { note: NO_RESULTS_NOTE }),
     });
   },

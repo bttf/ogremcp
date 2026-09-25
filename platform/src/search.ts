@@ -82,9 +82,25 @@ export type ScopedSearch = (scope: SearchScope, query: string, usage?: SearchUsa
 
 /** The scope of `flavor` of `kit`, from the flavor's `search` prefixes. A prefix that does not parse is left out: no URL could match it. */
 export function searchScope(kit: string, flavor: string, prefixes: readonly string[]): SearchScope {
-  const parsed = prefixes.flatMap((prefix) => URL.parse(prefix)?.href ?? []);
+  const parsed = parsePrefixes(prefixes);
   const input = JSON.stringify({ prefixes: parsed, template: providerQuery("{query}", parsed), limit: PROVIDER_LIMIT });
   return { kit, flavor, prefixes: parsed, hash: createHash("sha256").update(input).digest("hex") };
+}
+
+/** Manifest URL prefixes as the URL parser writes them, as `inScope` compares them. A prefix that does not parse is left out. */
+function parsePrefixes(prefixes: readonly string[]): string[] {
+  return prefixes.flatMap((prefix) => URL.parse(prefix)?.href ?? []);
+}
+
+/**
+ * Whether `url` is under one of `mixed`, prefixes from the manifest's
+ * `flavors.<key>.mixed`: a source whose pages cover several game versions
+ * (§6.1, §12). It matches as the post-filter (`inScope`) does. The tools
+ * compute it from each result's URL, so a cached result gets it too, and it
+ * is never stored.
+ */
+export function mixedVersions(url: string, mixed: readonly string[]): boolean {
+  return inScope(url, parsePrefixes(mixed)) !== null;
 }
 
 /** A query in the cache key's form (S3): NFKC, lower case, single spaces, and trimmed. */
