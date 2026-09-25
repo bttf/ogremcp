@@ -32,7 +32,7 @@ export interface AppOptions {
    * `oidc`, the bridge's kit endpoints (§8.2). Left out, neither is served.
    */
   kits?: KitRegistry;
-  /** `INGEST_MAX_UNCOMPRESSED_BYTES`: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
+  /** The `INGEST_` names: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
   ingest?: IngestSettings;
   /** The ingest endpoint's log (`IngestOptions.log`). */
   ingestLog?: (line: string) => void;
