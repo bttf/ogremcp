@@ -388,7 +388,7 @@ Plain HTTPS POST on change. No WebSocket, no UDP. The request is `multipart/form
 
 - `file`: the raw bytes, gzip-compressed.
 
-`instance` is hashed so account folder names never leave the PC. `client.errors` counts since the last successful upload (§16.1).
+`instance` is hashed so account folder names never leave the PC. `client.errors` counts since the last upload the server stored as a row: `stored`, `parse_error`, or `unsupported_flavor`. The server keeps the counts on that row; a `duplicate` or a refusal stores nothing, so the bridge keeps counting (§16.1).
 
 Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 
