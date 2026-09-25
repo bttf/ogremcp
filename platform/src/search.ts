@@ -65,9 +65,9 @@ export interface SearchHit {
   excerpt: string;
 }
 
-/** What one search cost, for the events table (§16). The `ScopedSearch` sets it as it runs. */
+/** What one search or page fetch cost, for the events table (§16). The `ScopedSearch` or `PageFetch` sets it as it runs. */
 export interface SearchUsage {
-  /** The Firecrawl credits the search used, when Firecrawl said. */
+  /** The Firecrawl credits the search or page fetch used, when Firecrawl said. */
   searchCredits?: number;
   /** Whether the search cache answered (§12). */
   cacheHit?: boolean;

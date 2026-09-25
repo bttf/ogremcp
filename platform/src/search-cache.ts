@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import { logger } from "./log.js";
 import { MAX_PAGE_SOURCE, type Page, type PageFetch } from "./pages.js";
-import { inScope, MAX_RESULTS, MAX_URL, type ScopedSearch, type SearchHit } from "./search.js";
+import { inScope, MAX_RESULTS, MAX_URL, type ScopedSearch, type SearchHit, type SearchUsage } from "./search.js";
 
 /**
  * The shared search and page cache (§12), on the `search_cache` table
@@ -28,6 +28,10 @@ import { inScope, MAX_RESULTS, MAX_URL, type ScopedSearch, type SearchHit } from
  *
  * `scope_hash` changes when a manifest's scope does (`searchScope`), so the
  * old rows are no longer read and expire.
+ *
+ * Each call sets `cacheHit` on its `usage` for the events table (§16): true
+ * with zero credits on a hit, and false on a miss, where the wrapped function
+ * sets Firecrawl's credits.
  *
  * Two identical misses at once both call Firecrawl, and both write: the write
  * is an upsert, so neither fails. Each write then deletes up to
@@ -72,17 +76,18 @@ export interface SearchCacheOptions {
 /** `search`, answered from the cache when it can be. */
 export function cachedSearch(search: ScopedSearch, options: SearchCacheOptions): ScopedSearch {
   const cache = new Cache(options);
-  return async (scope, query) => {
-    if (scope.prefixes.length === 0) return search(scope, query);
+  return async (scope, query, usage) => {
+    if (scope.prefixes.length === 0) return search(scope, query, usage);
     const key = [scope.kit, scope.flavor, scope.hash, query];
     const cached = searchHits(await cache.get("search", key));
     if (cached !== null) {
-      // RED-336: set usage.cacheHit = true and usage.searchCredits = 0 here, and usage.cacheHit = false on a miss.
+      markHit(usage);
       const hits = cached.filter((hit) => inScope(hit.url, scope.prefixes) === hit.url).slice(0, MAX_RESULTS);
       logger.info("search cache hit", { kit: scope.kit, flavor: scope.flavor, in_scope: hits.length });
       return hits;
     }
-    const hits = await search(scope, query);
+    if (usage !== undefined) usage.cacheHit = false;
+    const hits = await search(scope, query, usage);
     await cache.put("search", key, hits, hits.length === 0);
     return hits;
   };
@@ -91,18 +96,27 @@ export function cachedSearch(search: ScopedSearch, options: SearchCacheOptions):
 /** `fetchPage`, answered from the cache when it can be. */
 export function cachedPageFetch(fetchPage: PageFetch, options: SearchCacheOptions): PageFetch {
   const cache = new Cache(options);
-  return async (url) => {
+  return async (url, usage) => {
     const key = [url];
     const cached = page(await cache.get("page", key));
     if (cached !== null) {
+      markHit(usage);
       logger.info("page cache hit", { chars: cached.markdown.length });
       return cached;
     }
-    const fetched = await fetchPage(url);
+    if (usage !== undefined) usage.cacheHit = false;
+    const fetched = await fetchPage(url, usage);
     const failed = fetched.status !== undefined && fetched.status >= 400;
     if (!failed && fetched.url.length <= MAX_URL) await cache.put("page", key, fetched, fetched.markdown === "");
     return fetched;
   };
+}
+
+/** Marks `usage` as a cache hit, which costs no credits. */
+function markHit(usage: SearchUsage | undefined): void {
+  if (usage === undefined) return;
+  usage.cacheHit = true;
+  usage.searchCredits = 0;
 }
 
 type Kind = "search" | "page";

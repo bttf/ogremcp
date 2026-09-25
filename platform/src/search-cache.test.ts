@@ -8,7 +8,7 @@ import { FirecrawlError } from "./firecrawl.js";
 import { configureLogger } from "./log.js";
 import { migrate } from "./migrations.js";
 import type { Page, PageFetch } from "./pages.js";
-import { type ScopedSearch, type SearchHit, searchScope } from "./search.js";
+import { type ScopedSearch, type SearchHit, searchScope, type SearchUsage } from "./search.js";
 import { cachedPageFetch, cachedSearch, DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -55,8 +55,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     const calls: string[] = [];
     return {
       calls,
-      search: async (scope, query) => {
+      search: async (scope, query, usage) => {
         calls.push(`${scope.hash} ${query}`);
+        if (usage !== undefined) usage.searchCredits = 2;
         const answer = answers[Math.min(calls.length, answers.length) - 1] ?? [];
         if (answer instanceof Error) throw answer;
         return answer;
@@ -68,8 +69,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     const calls: string[] = [];
     return {
       calls,
-      fetchPage: async (url) => {
+      fetchPage: async (url, usage) => {
         calls.push(url);
+        if (usage !== undefined) usage.searchCredits = 1;
         return answers[Math.min(calls.length, answers.length) - 1] ?? PAGE;
       },
     };
@@ -80,12 +82,16 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     return rows[0]?.n ?? 0;
   }
 
-  it("answers a second identical search from the cache", async () => {
+  it("answers a second identical search from the cache, and reports the hit with zero credits", async () => {
     const { search, calls } = stubSearch([HIT]);
     const cached = cachedSearch(search, { pool, now: clock });
-    expect(await cached(SCOPE, "hogger")).toEqual([HIT]);
+    const miss: SearchUsage = {};
+    expect(await cached(SCOPE, "hogger", miss)).toEqual([HIT]);
+    expect(miss).toEqual({ cacheHit: false, searchCredits: 2 });
     now = new Date(now.getTime() + DEFAULT_SEARCH_CACHE.ttlMs - 1);
-    expect(await cached(SCOPE, "hogger")).toEqual([HIT]);
+    const hit: SearchUsage = {};
+    expect(await cached(SCOPE, "hogger", hit)).toEqual([HIT]);
+    expect(hit).toEqual({ cacheHit: true, searchCredits: 0 });
     expect(calls).toHaveLength(1);
   });
 
@@ -127,8 +133,12 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)
     const redirected: Page = { ...PAGE, url: "https://www.wowhead.com/classic/npc=448/hogger-the-gnoll" };
     const { fetchPage, calls } = stubFetch(redirected);
     const cached = cachedPageFetch(fetchPage, { pool, now: clock });
-    expect(await cached(PAGE.url)).toEqual(redirected);
-    expect(await cached(PAGE.url)).toEqual(redirected);
+    const miss: SearchUsage = {};
+    expect(await cached(PAGE.url, miss)).toEqual(redirected);
+    expect(miss).toEqual({ cacheHit: false, searchCredits: 1 });
+    const hit: SearchUsage = {};
+    expect(await cached(PAGE.url, hit)).toEqual(redirected);
+    expect(hit).toEqual({ cacheHit: true, searchCredits: 0 });
     expect(calls).toHaveLength(1);
 
     const missing = "https://warcraft.wiki.gg/wiki/Nowhere";

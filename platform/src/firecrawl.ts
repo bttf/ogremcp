@@ -55,6 +55,8 @@ export interface FirecrawlPage {
   markdown: string;
   /** The HTTP status of the page (`metadata.statusCode`), when Firecrawl gives one. */
   status?: number;
+  /** The scrape's `metadata.creditsUsed`, or null when it has none. */
+  creditsUsed: number | null;
 }
 
 /**
@@ -95,13 +97,12 @@ export async function firecrawlSearch(options: FirecrawlOptions, query: string, 
   const json = await post(options, FIRECRAWL_SEARCH_URL, { query, limit, sources: ["web"] });
   const hits = webHits(json);
   if (hits === null) throw new FirecrawlError("response");
-  return { hits, creditsUsed: creditsUsed(json) };
+  return { hits, creditsUsed: credits(isObject(json) ? json["creditsUsed"] : undefined) };
 }
 
-/** A successful search answer's `creditsUsed`, when it is a whole number of 0 or more. */
-function creditsUsed(json: unknown): number | null {
-  const credits = isObject(json) ? json["creditsUsed"] : undefined;
-  return Number.isSafeInteger(credits) && (credits as number) >= 0 ? (credits as number) : null;
+/** An answer's `creditsUsed`, when it is a whole number of 0 or more. */
+function credits(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
 }
 
 /**
@@ -174,7 +175,12 @@ function scrapedPage(json: unknown): FirecrawlPage | null {
   if (!isObject(metadata) || typeof metadata["url"] !== "string") return null;
   if (markdown !== undefined && typeof markdown !== "string") return null;
   const status = metadata["statusCode"];
-  return { url: metadata["url"], markdown: markdown ?? "", ...(typeof status === "number" && { status }) };
+  return {
+    url: metadata["url"],
+    markdown: markdown ?? "",
+    ...(typeof status === "number" && { status }),
+    creditsUsed: credits(metadata["creditsUsed"]),
+  };
 }
 
 function isObject(value: unknown): value is { [key: string]: unknown } {
