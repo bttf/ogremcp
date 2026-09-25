@@ -12,7 +12,7 @@ import { reportIssue } from "./report-issue.js";
 import type { ScopedSearch, SearchUsage } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type SnapshotRef, type ToolContextSettings, type ToolUser } from "./tool-context.js";
-import { errorResult, gameOffResult, kitToolResult, paidOnlyResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
+import { errorResult, gameOffResult, kitResultBytes, kitToolResult, paidOnlyResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } from "./usage.js";
 
@@ -261,7 +261,8 @@ async function answerCall(tool: UserTool, args: unknown, ctx: PlatformToolContex
     }
     const reads: SnapshotRef[] = [];
     const onRead = (snapshots: SnapshotRef[]) => reads.push(...snapshots);
-    const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings, onRead }));
+    const kitSettings = { ...settings, maxResultBytes: kitResultBytes(settings.maxResultBytes) };
+    const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings: kitSettings, onRead }));
     const answer = kitToolResult(result, tool.def.name, settings.maxResultBytes, log);
     const at = envelopeSnapshotAt(answer)?.getTime();
     ctx.event.snapshotUuid = reads.find((read) => read.snapshotAt.getTime() === at)?.uuid;

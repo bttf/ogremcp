@@ -221,7 +221,7 @@ interface ToolDef<State> {
 
 interface ToolContext<State> {
   user: { uuid: string; tier: "free" | "paid" };
-  maxResultBytes: number;         // the result size cap (§10.5)
+  maxResultBytes: number;         // the result size cap minus the grounding line's bytes (§10.5)
   latest(q: { flavor?: string; character?: string }): Promise<Snapshot<State> | null>;
   history(q: { since: Date; flavor?: string; character?: string; limit: number }): Promise<Snapshot<State>[]>;
 }
@@ -472,7 +472,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - **Every kit-tool response includes `snapshot_at`, `flavor`, `rules`, and `character`**, so the agent can flag stale data, suggest `/transmit`, and adapt to the realm's rules. It also carries one fixed line, added by the platform outside the game data, that repeats the grounding rule below, because agents read results when they answer. Owner decision, 2026-09-25, after the G1 re-test answered from memory (RED-366).
 - **Format:** return `structuredContent` plus the same JSON as a text block, because client support varies.
-- **Size:** one copy of a kit tool's result JSON is at most a configured cap (*proposed* 40 KB). The client gets the JSON twice and can have a tool-output limit. Over the cap, the kit trims its own result, because only the kit knows which of its fields matter least. The platform passes the cap in `ToolContext` and answers a result still over it with a user-facing error that asks for fewer `sections`. `wow_get_state` leaves out quest description text first, then shortens the bag list, and adds a note that says what it left out and suggests fewer `sections`. The player's current state stays accurate. Owner decision, 2026-09-25.
+- **Size:** one copy of a kit tool's result JSON is at most a configured cap (*proposed* 40 KB). The client gets the JSON twice and can have a tool-output limit. Over the cap, the kit trims its own result, because only the kit knows which of its fields matter least. The platform passes the kit the cap minus the bytes of the fixed `grounding` line in `ToolContext`, so the result with the line stays within the cap, and answers a result still over it with a user-facing error that asks for fewer `sections`. `wow_get_state` leaves out quest description text first, then shortens the bag list, and adds a note that says what it left out and suggests fewer `sections`. The player's current state stays accurate. Owner decision, 2026-09-25.
 - **Annotations:** `readOnlyHint: true` on every tool except `report_issue`; `openWorldHint: true` on `search_game_info` and `fetch_game_page`. Clients use these to decide when to ask the user for confirmation.
 - **User-facing conditions** (cap reached, paid-only, no snapshot yet, no sources, search unavailable) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which a client can keep listing until a new chat (§10.2): the message says the game is turned off on the Games page. An unknown tool name is a protocol error. The `isError` rule applies to tools that need a snapshot. `list_games` is the orientation call, so it answers "no snapshot yet" and "no game enabled" with a normal result that carries the setup steps.
 - **Tool descriptions name the game explicitly.** Together with the prefix and `list_games`, that's how the agent picks the right tool.
