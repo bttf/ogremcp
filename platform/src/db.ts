@@ -1,5 +1,7 @@
 import { DatabaseError, Pool } from "pg";
 
+import { logger } from "./log.js";
+
 /**
  * The Postgres connection pool, built by `index.ts` from `DATABASE_URL`.
  * Nothing in this module logs or throws the URL, the password, or the text
@@ -9,7 +11,7 @@ import { DatabaseError, Pool } from "pg";
 export interface PoolOptions {
   /** `DATABASE_URL`. */
   url: string;
-  /** Receives one line per error of an idle connection. Default: `console.error`. */
+  /** Receives one line per error of an idle connection. Default: `logger.error`. */
   log?: (line: string) => void;
   /** Most time a query waits for the database's answer. A query over it fails and its connection is dropped. */
   queryTimeoutMs: number;
@@ -17,7 +19,7 @@ export interface PoolOptions {
   max?: number;
 }
 
-export function createPool({ url, queryTimeoutMs, log = console.error, max = 5 }: PoolOptions): Pool {
+export function createPool({ url, queryTimeoutMs, log = logger.error, max = 5 }: PoolOptions): Pool {
   const pool = new Pool({
     connectionString: url,
     max,

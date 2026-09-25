@@ -14,11 +14,16 @@ import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
 import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
+import { captureConsole, configureLogger, logger } from "./log.js";
 import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { startClientCleanup } from "./oidc-registration.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
+
+// Every line the process writes is JSON (§16), a library's `console` output
+// too: oidc-provider prints its notices that way.
+captureConsole();
 
 // A missing or malformed DATABASE_URL, or another bad value, ends the process
 // before it listens. No message repeats the URL or a client secret.
@@ -26,17 +31,18 @@ let config: Config;
 let oidcKeys: OidcKeys;
 try {
   config = loadConfig(process.env);
+  configureLogger({ level: config.logLevel });
   // Without OIDC_JWKS and OIDC_COOKIE_KEYS, only a local run starts, on keys
   // made now. No message repeats a key.
   const resolved = resolveOidcKeys(config.oidcKeys, config.publicBaseUrl, config.production);
   oidcKeys = resolved.keys;
   if (resolved.ephemeral) {
-    console.warn(
+    logger.warn(
       "OIDC_JWKS and OIDC_COOKIE_KEYS are not set: the OAuth server uses keys made at start, so its tokens and cookies stop working when the process restarts",
     );
   }
 } catch (err) {
-  console.error(`configuration error: ${(err as Error).message}`);
+  logger.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);
 }
 
@@ -47,16 +53,16 @@ let kits: KitRegistry;
 try {
   kits = loadKitRegistry();
 } catch (err) {
-  console.error(`kit error: ${(err as Error).message}`);
+  logger.error(`kit error: ${(err as Error).message}`);
   process.exit(1);
 }
-console.log(`kits: ${kits.list().map((kit) => `${kit.key} ${kit.manifest.version}`).join(", ")}`);
+logger.info(`kits: ${kits.list().map((kit) => `${kit.key} ${kit.manifest.version}`).join(", ")}`);
 
 // The build writes the web UI to `platform/dist/web` (§13.2). Without it the
 // service would answer every page load with a 404, so it does not start.
 const webRoot = fileURLToPath(new URL("./web", import.meta.url));
 if (!existsSync(join(webRoot, "index.html"))) {
-  console.error(`web UI error: ${join(webRoot, "index.html")} is missing. Run the platform build.`);
+  logger.error(`web UI error: ${join(webRoot, "index.html")} is missing. Run the platform build.`);
   process.exit(1);
 }
 
@@ -77,10 +83,10 @@ try {
     client.release();
   }
 } catch (err) {
-  console.error(`database is not reachable: code=${failureCode(err)}`);
+  logger.error(`database is not reachable: code=${failureCode(err)}`);
   process.exit(1);
 }
-console.log(
+logger.info(
   tls
     ? "database connection uses TLS"
     : "database connection does not use TLS: a database reached over the internet needs sslmode=verify-full in DATABASE_URL",
@@ -89,7 +95,7 @@ console.log(
 // Sign-in providers without credentials stay off, and their routes answer 503.
 const providers = createSignInProviders(config);
 const signIn = (["google", "discord"] as const).filter((name) => providers[name] !== null);
-console.log(
+logger.info(
   `public base URL ${config.publicBaseUrl}; sign-in providers: ${signIn.length === 0 ? "none (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or the DISCORD_ pair)" : signIn.join(", ")}`,
 );
 
@@ -115,7 +121,7 @@ try {
     deviceCodeMisses: config.deviceCodeMisses,
   });
 } catch (err) {
-  console.error(`configuration error: ${(err as Error).message}`);
+  logger.error(`configuration error: ${(err as Error).message}`);
   process.exit(1);
 }
 

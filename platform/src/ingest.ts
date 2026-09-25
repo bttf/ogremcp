@@ -10,6 +10,7 @@ import type { Pool, PoolClient } from "pg";
 
 import { UploadLimiter } from "./ingest-limit.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
+import { formatLine, writeLine } from "./log.js";
 import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
 
 /**
@@ -199,12 +200,12 @@ export interface IngestOptions {
   pool: Pool;
   kits: KitRegistry;
   settings: IngestSettings;
-  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: `console.log`. */
+  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log (`writeLine`). */
   log?: (line: string) => void;
 }
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
-export function ingestHandler({ pool, kits, settings, log = console.log }: IngestOptions): RequestHandler {
+export function ingestHandler({ pool, kits, settings, log = writeLine }: IngestOptions): RequestHandler {
   const limiter = new UploadLimiter(settings);
   return async (req, res) => {
     const token = currentToken(res);
@@ -570,13 +571,11 @@ export const UNKNOWN_FLAVOR = "unknown";
 
 /**
  * The log line for an upload whose flavor is "unknown": why, with the raw
- * detection facts, as JSON (§6.3.1, §16). The user's uuid is its only user
- * identifier. The re-parse command writes it too.
+ * detection facts, as the platform's log writes it (§6.3.1, §16). The user's
+ * uuid is its only user identifier. The re-parse command writes it too.
  */
 export function unknownFlavorLine(userUuid: string, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): string {
-  return JSON.stringify({
-    level: "warn",
-    message: "ingest: unsupported_flavor for an unknown flavor",
+  return formatLine("warn", "ingest: unsupported_flavor for an unknown flavor", {
     user_uuid: userUuid,
     upload_uuid: uploadUuid,
     kit: kit.key,

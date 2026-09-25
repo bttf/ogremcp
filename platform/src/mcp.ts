@@ -7,6 +7,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Response, 
 import type Provider from "oidc-provider";
 
 import { failureCode } from "./db.js";
+import { logger } from "./log.js";
 import { currentToken, requireToken, resourcesOf, type VerifiedToken } from "./oidc-tokens.js";
 
 /**
@@ -80,7 +81,7 @@ export interface McpOptions {
    * exact origin. Default: `defaultMcpAllowedOrigins(publicBaseUrl)`.
    */
   allowedOrigins?: readonly string[];
-  /** Receives one line per request that failed with an error. Default: `console.error`. */
+  /** Receives one line per request that failed with an error. Default: `logger.error`. */
   log?: (line: string) => void;
 }
 
@@ -139,7 +140,7 @@ function createMcpServer(agent: VerifiedToken): Server {
 
 export function mcpRouter(options: McpOptions): Router {
   const router = express.Router();
-  const log = options.log ?? console.error;
+  const log = options.log ?? logger.error;
   const base = new URL(options.publicBaseUrl);
   const metadataUrl = `${base.origin}${MCP_RESOURCE_METADATA_PATH}`;
   const metadata = resourceMetadata(options);
