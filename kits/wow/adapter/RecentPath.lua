@@ -22,8 +22,12 @@
 -- in Collectors.lua), so there a building name is never the zone, not even in
 -- the first entry of a session. The zone text decides only when a map ID is
 -- missing, as in an instance. A subzone that differs is a change too. A place
--- whose zone has not resolved, as just after a loading screen, is not
--- recorded, and a value that could not be read is never a change.
+-- with no zone name from either the map or the zone text, as can happen just
+-- after a loading screen, is not recorded, and a value that could not be read
+-- is never a change. A map ID can arrive before the zone text. That place is
+-- recorded with the zone map's name and possibly an empty subzone, and a
+-- subzone change less than RECENT_PATH_MIN_INTERVAL seconds later replaces
+-- it, as below.
 --
 -- A subzone change keeps the zone of the newest entry, so a building name
 -- read on the same map never becomes the zone. A subzone change less than
