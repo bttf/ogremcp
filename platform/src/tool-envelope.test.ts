@@ -16,7 +16,10 @@ describe("kitToolResult (§10.5)", () => {
     const { lines, log } = logged();
     const { character: _, ...withoutCharacter } = ENVELOPE;
 
-    expect(kitToolResult(jsonResult({ ...withoutCharacter, state: {} }), "wow_get_state", 1024, log)).toEqual(userError(TOOL_FAILED_MESSAGE));
+    expect(kitToolResult(jsonResult({ ...withoutCharacter, state: {} }), "wow_get_state", 1024, log)).toEqual({
+      result: userError(TOOL_FAILED_MESSAGE),
+      error: "no_envelope_field",
+    });
     expect(lines).toEqual(["tool call failed: tool=wow_get_state code=NO_ENVELOPE_FIELD"]);
   });
 
@@ -24,7 +27,8 @@ describe("kitToolResult (§10.5)", () => {
     const { lines, log } = logged();
     const data = { ...ENVELOPE, state: { location: { zone: "Elwynn Forest" } } };
 
-    const result = kitToolResult({ content: [{ type: "text", text: "something else" }], structuredContent: data }, "wow_get_state", 1024, log);
+    const { result, error } = kitToolResult({ content: [{ type: "text", text: "something else" }], structuredContent: data }, "wow_get_state", 1024, log);
+    expect(error).toBeNull();
     expect(result).toEqual({ content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
     expect(JSON.parse(result.content[0]?.text ?? "")).toEqual(result.structuredContent);
     expect(lines).toEqual([]);
@@ -34,7 +38,7 @@ describe("kitToolResult (§10.5)", () => {
     const { lines, log } = logged();
     const data = { ...ENVELOPE, state: { pad: "x".repeat(1000) } };
 
-    expect(kitToolResult(jsonResult(data), "wow_get_state", 1000, log)).toEqual(userError(TOO_LARGE_MESSAGE));
+    expect(kitToolResult(jsonResult(data), "wow_get_state", 1000, log)).toEqual({ result: userError(TOO_LARGE_MESSAGE), error: "too_large" });
     expect(lines).toEqual([`tool result over the size cap: tool=wow_get_state bytes=${JSON.stringify(data).length}`]);
   });
 });
@@ -43,14 +47,14 @@ describe("errorResult", () => {
   it("relays a UserFacingError's message, and logs any other error by its code alone", () => {
     const { lines, log } = logged();
     expect(errorResult(new UserFacingError("None of your characters has that name."), "wow_get_state", log)).toEqual({
-      isError: true,
-      content: [{ type: "text", text: "None of your characters has that name." }],
+      result: { isError: true, content: [{ type: "text", text: "None of your characters has that name." }] },
+      error: "user_error",
     });
     expect(lines).toEqual([]);
 
     // A Postgres error's message can repeat a row.
     const err = Object.assign(new Error("duplicate key value: (Zoela)"), { code: "23505" });
-    expect(errorResult(err, "wow_get_state", log)).toEqual({ isError: true, content: [{ type: "text", text: TOOL_FAILED_MESSAGE }] });
+    expect(errorResult(err, "wow_get_state", log)).toEqual({ result: { isError: true, content: [{ type: "text", text: TOOL_FAILED_MESSAGE }] }, error: "failed" });
     expect(lines).toEqual(["tool call failed: tool=wow_get_state code=23505"]);
   });
 });

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { FIRECRAWL_SEARCH_URL } from "./firecrawl.js";
 import { configureLogger } from "./log.js";
-import { firecrawlScopedSearch, inScope, MAX_EXCERPT, MAX_RESULTS, searchScope, selectHits } from "./search.js";
+import { firecrawlScopedSearch, inScope, MAX_EXCERPT, MAX_RESULTS, type SearchUsage, searchScope, selectHits } from "./search.js";
 
 // The Classic Era scope of kits/wow/manifest.json.
 const PREFIXES = ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"];
@@ -91,11 +91,13 @@ describe("firecrawlScopedSearch", () => {
       hit("https://www.wowhead.com/classic-ptr/npc=448", 4),
       ...[5, 6, 7, 8, 9, 10].map((n) => hit(`https://warcraft.wiki.gg/wiki/Page_${n}`, n)),
     ];
-    const { fetch, calls } = stubFetch(async () => Response.json({ success: true, data: { web } }));
+    const { fetch, calls } = stubFetch(async () => Response.json({ success: true, data: { web }, creditsUsed: 2 }));
     const lines: string[] = [];
     configureLogger({ write: (line) => lines.push(line) });
 
-    const hits = await firecrawlScopedSearch({ apiKey: "test-key", timeoutMs: 5000, fetch })(SCOPE, "hogger elwynn");
+    const usage: SearchUsage = {};
+    const hits = await firecrawlScopedSearch({ apiKey: "test-key", timeoutMs: 5000, fetch })(SCOPE, "hogger elwynn", usage);
+    expect(usage).toEqual({ searchCredits: 2 });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(FIRECRAWL_SEARCH_URL);

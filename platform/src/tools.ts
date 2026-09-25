@@ -2,13 +2,14 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 
+import { createEventRecorder, type EventRecorder } from "./events.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
-import type { ScopedSearch } from "./search.js";
+import type { ScopedSearch, SearchUsage } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
-import { errorResult, gameOffResult, kitToolResult } from "./tool-envelope.js";
+import { errorResult, gameOffResult, kitToolResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 
 /**
@@ -21,6 +22,15 @@ import { checkPlatformToolName } from "./tool-names.js";
  * `ToolContext` for the user and the kit (`tool-context.ts`), a platform tool
  * call a `PlatformToolContext`. What a call answers is the response envelope
  * of `tool-envelope.ts` (§10.5).
+ *
+ * Each call of a tool the user may call, or of a tool of a game the user has
+ * turned off, writes one events row (`events.ts`, §16) once it has its
+ * answer: the agent's OAuth client, the tool, the args summary, the latency,
+ * the error category, the age of the snapshot it returned, and what a search
+ * cost. The args summary is the `sections` the tool's schema names and a
+ * `flavor` that is a kit's flavor key; a platform tool adds a query through
+ * `ToolCallNotes`. No other argument is recorded: `character` and the like
+ * are free text. A kit tool's snapshot is its envelope's `snapshot_at`.
  *
  * Names are checked at startup: kit tools in `checkKits`, and platform tools,
  * and platform tools against kit tools, in `createToolRegistry` (§10.1).
@@ -36,6 +46,26 @@ export interface PlatformToolContext {
   settings: ToolContextSettings;
   /** Game-scoped search (§12), or null without `FIRECRAWL_API_KEY`. */
   search: ScopedSearch | null;
+  /** What the handler adds to the call's events row. */
+  event: ToolCallNotes;
+}
+
+/** What a platform tool's handler adds to its call's events row (§16). */
+export interface ToolCallNotes extends SearchUsage {
+  /** search_game_info's normalized query. User data (§16.2). */
+  query?: string;
+  /** When the snapshot the call returned was captured. */
+  snapshotAt?: Date;
+  /** Why an `isError` result is one, when not `user_error`. */
+  error?: ToolCallError;
+}
+
+/** Who calls a tool: the user and the agent, from the access token (§9). */
+export interface ToolCaller {
+  /** `users.uuid`. */
+  userUuid: string;
+  /** The OAuth client ID of the agent. */
+  clientId: string;
 }
 
 /** A platform tool (§10.3): named `{verb}_{noun}`, with no prefix, and listed for every user. */
@@ -65,20 +95,23 @@ export interface ToolRegistryOptions {
    * user-facing, or whose result was over the size cap. Default: `logger.error`.
    */
   log?: (line: string) => void;
+  /** Where each call's events row goes (§16). Default: a recorder on `pool`. */
+  events?: EventRecorder;
 }
 
 export interface ToolRegistry {
   /** The tools of the user with this `users.uuid`, as `tools/list` lists them. */
   list(userUuid: string): Promise<Tool[]>;
   /**
-   * Calls the tool `name` for the user with this `users.uuid`, and answers
-   * with the response envelope (`tool-envelope.ts`): a kit tool's result is
-   * checked, the handler's errors become `isError` results, and a tool of a
-   * game the user has not enabled gets an `isError` result that says the game
-   * is turned off. Null when there is no user with this uuid or no tool of
-   * that name. An error while looking up the user propagates.
+   * Calls the tool `name` for the caller's user, and answers with the
+   * response envelope (`tool-envelope.ts`): a kit tool's result is checked,
+   * the handler's errors become `isError` results, and a tool of a game the
+   * user has not enabled gets an `isError` result that says the game is
+   * turned off. Null when there is no user with this uuid or no tool of that
+   * name; neither writes an events row. An error while looking up the user
+   * propagates.
    */
-  call(userUuid: string, name: string, args: unknown): Promise<ToolResult | null>;
+  call(caller: ToolCaller, name: string, args: unknown): Promise<ToolResult | null>;
 }
 
 /** A tool the user may call, with what its call needs. */
@@ -96,6 +129,7 @@ export function createToolRegistry({
   settings = DEFAULT_TOOL_CONTEXT,
   search = null,
   log = logger.error,
+  events = createEventRecorder({ pool, log }),
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);
@@ -125,25 +159,87 @@ export function createToolRegistry({
       }));
     },
 
-    async call(userUuid, name, args) {
-      const found = await userTools(userUuid);
+    async call(caller, name, args) {
+      const occurredAt = new Date();
+      const started = performance.now();
+      const found = await userTools(caller.userUuid);
       if (found === null) return null;
-      const tool = found.tools.find(({ def }) => def.name === name);
-      if (tool === undefined) {
-        // A client can keep a turned-off game's tools until a new chat (§10.2).
-        const off = allKits.find((kit) => kit.interpreter.tools.some((def) => def.name === name));
-        return off === undefined ? null : gameOffResult(off.name);
-      }
       const { user, games } = found;
-      try {
-        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, settings, search });
-        const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
-        return kitToolResult(result, name, settings.maxResultBytes, log);
-      } catch (err) {
-        return errorResult(err, name, log);
+      const event: ToolCallNotes = {};
+      let answer: ToolAnswer;
+      let schema: ToolInputSchema;
+      const tool = found.tools.find(({ def }) => def.name === name);
+      if (tool !== undefined) {
+        schema = tool.def.inputSchema;
+        answer = await answerCall(tool, args, { pool, user, games, settings, search, event }, log);
+      } else {
+        // A client can keep a turned-off game's tools until a new chat (§10.2).
+        const off = allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ kit, def }))).find(({ def }) => def.name === name);
+        if (off === undefined) return null;
+        schema = off.def.inputSchema;
+        answer = { result: gameOffResult(off.kit.name), error: "game_off" };
       }
+      const snapshotAt = tool?.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
+      events.record({
+        kind: "tool_call",
+        userId: user.id,
+        occurredAt,
+        latencyMs: performance.now() - started,
+        agentClient: caller.clientId,
+        tool: name,
+        sections: knownSections(args, schema),
+        flavor: knownFlavor(args, allKits),
+        query: event.query ?? null,
+        error: answer.error === "user_error" ? (event.error ?? "user_error") : answer.error,
+        snapshotAt: answer.error === null ? (snapshotAt ?? null) : null,
+        cacheHit: event.cacheHit ?? null,
+        searchCredits: event.searchCredits ?? null,
+      });
+      return answer.result;
     },
   };
+}
+
+/** Runs the handler of `tool`, and answers with the response envelope. */
+async function answerCall(tool: UserTool, args: unknown, ctx: PlatformToolContext, log: (line: string) => void): Promise<ToolAnswer> {
+  const { pool, user, settings } = ctx;
+  try {
+    if (tool.kit === null) {
+      const result = await tool.def.handler(args, ctx);
+      return { result, error: result.isError === true ? "user_error" : null };
+    }
+    const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
+    return kitToolResult(result, tool.def.name, settings.maxResultBytes, log);
+  } catch (err) {
+    return errorResult(err, tool.def.name, log);
+  }
+}
+
+/** The `snapshot_at` of a kit tool's answer (§10.5), or undefined. */
+function envelopeSnapshotAt({ result }: ToolAnswer): Date | undefined {
+  const value = result.structuredContent?.["snapshot_at"];
+  if (typeof value !== "string") return undefined;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? undefined : at;
+}
+
+/** The names in `args.sections` that the tool's schema lists for `sections`, in schema order, or null. */
+function knownSections(args: unknown, schema: ToolInputSchema): string[] | null {
+  const given = argument(args, "sections");
+  const items = (schema.properties?.["sections"] as { items?: { enum?: unknown } } | undefined)?.items?.enum;
+  if (!Array.isArray(given) || !Array.isArray(items)) return null;
+  const known = items.filter((name): name is string => typeof name === "string" && given.includes(name));
+  return known.length === 0 ? null : known;
+}
+
+/** `args.flavor` when it is a flavor key of a kit, or null. */
+function knownFlavor(args: unknown, kits: readonly Kit[]): string | null {
+  const flavor = argument(args, "flavor");
+  return typeof flavor === "string" && kits.some((kit) => Object.hasOwn(kit.manifest.flavors, flavor)) ? flavor : null;
+}
+
+function argument(args: unknown, name: string): unknown {
+  return typeof args === "object" && args !== null && !Array.isArray(args) ? (args as { [name: string]: unknown })[name] : undefined;
 }
 
 /** Checks each platform tool's name (§10.1), and that no two tools share a name. */

@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
@@ -379,6 +379,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     });
     const games = (await rpc(port, zoela, "tools/call", { name: "list_games" })) as { result: { structuredContent: { last_active: unknown } } };
     expect(games.result.structuredContent.last_active).toEqual({ game: "wow", flavor: "classic_era", snapshot_at: CAPTURED_AT.toISOString() });
+    // Each call's events row names the token's client (§16).
+    await vi.waitFor(async () => {
+      const { rows } = await pool.query("select tool, agent_client from events where tool = 'wow_get_state'");
+      expect(rows).toEqual([{ tool: "wow_get_state", agent_client: CLIENT_ID }]);
+    });
 
     // Another user with WoW enabled and no snapshot sees none of Zoela's. The
     // ToolContext's UserFacingError reaches the agent as an isError result.

@@ -19,6 +19,9 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * with nothing sent yet is one answer (§10.5 is about the tools that need a
  * snapshot). With no game enabled, `note` points to the Games page.
  *
+ * The call's events row (§16) gets the `snapshot_at` of `last_active`: the
+ * newest snapshot the call returned.
+ *
  * Every query filters by the user's `users.id`, and the result holds no
  * serial id and no character key (§11). The queries read no `state`: one
  * reads each game's newest snapshot on `snapshots_user_kit_recent`, and one
@@ -141,6 +144,7 @@ export const listGames: PlatformTool = {
       games,
       last_active: lastActive && { game: lastActive.game, flavor: lastActive.active_flavor, snapshot_at: lastActive.snapshot_at },
     };
+    if (lastActive?.snapshot_at != null) ctx.event.snapshotAt = new Date(lastActive.snapshot_at);
     if (lastActive === null) {
       result["note"] = games.length === 0 ? NO_GAMES_NOTE : NO_SNAPSHOT_NOTE;
       result["setup"] = SETUP_STEPS;

@@ -20,6 +20,9 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * without `FIRECRAWL_API_KEY` or when Firecrawl fails (429, 5xx, timeout).
  * There is no separate search cap (§12).
  *
+ * The call's events row (§16) gets the normalized query, what the search
+ * cost, and `no_sources` or `search_unavailable` as its error.
+ *
  * The description carries no game text, and nothing from a result goes into
  * a description or instructions (§10.5).
  */
@@ -68,6 +71,7 @@ export const searchGameInfo: PlatformTool = {
   async handler(args, ctx) {
     const input = readInput(args);
     if (typeof input === "string") return userError(input);
+    ctx.event.query = input.query;
     const kit = ctx.games.find((game) => game.key === input.game);
     if (kit === undefined) {
       return userError("That is not one of the player's enabled games. Call list_games for the enabled games and their keys.");
@@ -79,15 +83,15 @@ export const searchGameInfo: PlatformTool = {
     const flavor = input.flavor ?? (await activeFlavor(ctx, kit)) ?? firstSupported(kit);
     // A snapshot's flavor that the manifest no longer lists has no sources either.
     const config = flavor === null ? undefined : flavors[flavor];
-    if (flavor === null || config === undefined) return noSources(kit, flavor);
+    if (flavor === null || config === undefined) return noSources(ctx, kit, flavor);
     const scope = searchScope(kit.key, flavor, config.search);
-    if (scope.prefixes.length === 0) return noSources(kit, flavor);
-    if (ctx.search === null) return userError(NOT_SET_UP_MESSAGE);
+    if (scope.prefixes.length === 0) return noSources(ctx, kit, flavor);
+    if (ctx.search === null) return unavailable(ctx, NOT_SET_UP_MESSAGE);
     let results: SearchHit[];
     try {
-      results = await ctx.search(scope, input.query);
+      results = await ctx.search(scope, input.query, ctx.event);
     } catch (err) {
-      if (err instanceof FirecrawlError) return userError(UNAVAILABLE_MESSAGE);
+      if (err instanceof FirecrawlError) return unavailable(ctx, UNAVAILABLE_MESSAGE);
       throw err;
     }
     return jsonResult({
@@ -135,7 +139,14 @@ function firstSupported(kit: Kit): string | null {
 }
 
 /** `no_sources`: the flavor has no vetted sources, so the agent says it can't verify (§12). */
-function noSources(kit: Kit, flavor: string | null): ToolResult {
+function noSources(ctx: PlatformToolContext, kit: Kit, flavor: string | null): ToolResult {
+  ctx.event.error = "no_sources";
   const what = flavor === null ? kit.name : `${kit.name} (${flavor})`;
   return userError(`${what} has no vetted search sources yet. Tell the player you can't verify game facts for it, rather than guess.`);
+}
+
+/** `search_unavailable` (§12), with `message`. */
+function unavailable(ctx: PlatformToolContext, message: string): ToolResult {
+  ctx.event.error = "search_unavailable";
+  return userError(message);
 }

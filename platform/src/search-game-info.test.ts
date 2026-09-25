@@ -38,7 +38,7 @@ function stubSearch(): { search: ScopedSearch; calls: { scope: SearchScope; quer
 
 /** Calls the tool with `flavor` given, so that no query reaches the (absent) database. */
 function call(args: unknown, search: ScopedSearch | null, games: readonly Kit[] = [WOW]): Promise<ToolResult> {
-  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, games, settings: DEFAULT_TOOL_CONTEXT, search });
+  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, games, settings: DEFAULT_TOOL_CONTEXT, search, event: {} });
 }
 
 describe("search_game_info (§10.3, §12)", () => {
@@ -124,14 +124,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("search_game_info's default fla
     const query = { game: "wow", query: "  Where is  HOGGER " };
 
     // No snapshot yet: the first supported flavor.
-    const fresh = await tools.call(await player(), "search_game_info", query);
+    const fresh = await tools.call({ userUuid: await player(), clientId: "test-agent" }, "search_game_info", query);
     expect(fresh?.structuredContent).toEqual({ game: "wow", flavor: "classic_era", status: "supported", results: [HIT] });
     expect(JSON.parse(fresh?.content[0]?.text ?? "")).toEqual(fresh?.structuredContent);
     expect(calls[0]?.query).toBe("where is hogger");
     expect(calls[0]?.scope).toMatchObject({ kit: "wow", flavor: "classic_era", prefixes: ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"] });
 
     // Played Forever last: its empty scope.
-    const forever = await player("classic_era", "forever");
+    const forever = { userUuid: await player("classic_era", "forever"), clientId: "test-agent" };
     const none = await tools.call(forever, "search_game_info", query);
     expect(none?.isError).toBe(true);
     expect(none?.content[0]?.text).toMatch(/^World of Warcraft \(forever\) has no vetted search sources yet\./);
