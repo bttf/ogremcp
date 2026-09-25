@@ -12,15 +12,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 // The temporary folders beside the adapter folder. The game loads an addon
 // folder only when it holds a TOC of its own name, so it never loads these.
 const (
-	stagePrefix = ".ogmcp-new-"
-	oldPrefix   = ".ogmcp-old-"
+	stagePrefix = ".ogremcp-new-"
+	oldPrefix   = ".ogremcp-old-"
 )
 
 // rename is (*os.Root).Rename; tests make it fail.

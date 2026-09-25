@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ParseError } from "@ogmcp/sdk";
+import { ParseError } from "@ogremcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { detect } from "./detect.js";
 import { MESSAGE_MAX } from "./errors.js";
@@ -27,7 +27,7 @@ const STUB = {
 const files = { era: "", forever: "" };
 
 beforeAll(() => {
-  const out = mkdtempSync(join(tmpdir(), "ogmcp-interpreter-"));
+  const out = mkdtempSync(join(tmpdir(), "ogremcp-interpreter-"));
   try {
     const script = fileURLToPath(new URL("../test/adapter_test.lua", import.meta.url));
     const run = spawnSync("luajit", [script, out], { encoding: "utf8" });
@@ -78,7 +78,7 @@ describe.each(["era", "forever"] as const)("the %s stub world's file", (client) 
 });
 
 it("parses the Classic Era golden fixture (§6.4)", () => {
-  const parsed = parse(readFileSync(new URL("../fixtures/classic_era/OpenGamerMCP.lua", import.meta.url)));
+  const parsed = parse(readFileSync(new URL("../fixtures/classic_era/OgreMCP.lua", import.meta.url)));
   expect(parsed).toMatchObject({
     flavor: "classic_era",
     rules: [],
@@ -118,11 +118,11 @@ describe("malformed input is a ParseError", () => {
     ["a function call", () => era().replace('"Zoëla"', 'os.execute("x")'), /unexpected "os"/],
     ["a newer schema", () => era().replace('["schema"] = 1,', '["schema"] = 2,'), /saves data format 2/],
     ["an older schema", () => era().replace('["schema"] = 1,', '["schema"] = 0,'), /out of date/],
-    ["a 4 MB client version", () => era().replace('"1.15.9"', `"${"1".repeat(4_000_000)}"`), /at OpenGamerMCPDB\.client\.version:/],
-    ["a wrong type",() => era().replace('["level"] = 12,', '["level"] = "12",'), /at OpenGamerMCPDB\.state\.character\.level:/],
-    ["no OpenGamerMCPDB", () => "OtherDB = {}", /holds no Open Gamer MCP data/],
-    ["too deep", () => `OpenGamerMCPDB = ${"{".repeat(33)}${"}".repeat(33)}`, /more than 32 levels deep/],
-    ["too many values", () => `OpenGamerMCPDB = {${"1,".repeat(200_000)}}`, /more than 200000 values/],
+    ["a 4 MB client version", () => era().replace('"1.15.9"', `"${"1".repeat(4_000_000)}"`), /at OgreMCPDB\.client\.version:/],
+    ["a wrong type",() => era().replace('["level"] = 12,', '["level"] = "12",'), /at OgreMCPDB\.state\.character\.level:/],
+    ["no OgreMCPDB", () => "OtherDB = {}", /holds no Ogre MCP data/],
+    ["too deep", () => `OgreMCPDB = ${"{".repeat(33)}${"}".repeat(33)}`, /more than 32 levels deep/],
+    ["too many values", () => `OgreMCPDB = {${"1,".repeat(200_000)}}`, /more than 200000 values/],
     ["too large", () => new Uint8Array(DEFAULT_LIMITS.maxBytes + 1).fill(0x20), /larger than 5 MB/],
     ["a 1 MB key", () => era().replace('["agility"]', `["${"a".repeat(1_000_000)}"]`), /\.stats\.a{39}…:/],
   ])("%s", (_, input, message) => {
@@ -142,7 +142,7 @@ describe("a ParseError records the facts read before the failure (§16.1)", () =
     ["a wrong type in a TBC Classic client's state", () => badLevel(tbc()), { adapterSchema: 1, flavor: "tbc_classic" }],
     ["client facts of a wrong type", () => era().replace('["interface"] = 11509', '["interface"] = "11509"'), { adapterSchema: 1 }],
     ["a newer schema", () => era().replace('["schema"] = 1,', '["schema"] = 2,'), { adapterSchema: 2 }],
-    ["no OpenGamerMCPDB", () => "OtherDB = {}", {}],
+    ["no OgreMCPDB", () => "OtherDB = {}", {}],
   ])("%s", (_, input, facts) => {
     const error = catchError(() => parse(input()));
     expect(error).toBeInstanceOf(ParseError);

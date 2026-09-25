@@ -195,7 +195,7 @@ function platformVersion(): string {
 }
 
 /** What the server tells a client about itself at `initialize`. */
-const SERVER_INFO = { name: "ogmcp", version: platformVersion() };
+const SERVER_INFO = { name: "ogremcp", version: platformVersion() };
 
 /**
  * The MCP server of one request to `/mcp`, for the agent whose access token

@@ -3,13 +3,13 @@
 --
 --   luajit test/adapter_test.lua [out-dir]
 --
--- Each client's run writes OpenGamerMCPDB the way the client writes a
+-- Each client's run writes OgreMCPDB the way the client writes a
 -- SavedVariables file and reads the file back. With out-dir, the files are
 -- written there as <client>.lua. test/run.mjs runs this file.
 
 local here = string.match(arg[0], "^(.*)[/\\]") or "."
 local ADDON_DIR = here .. "/../adapter"
-local ADDON_NAME = "OpenGamerMCP"
+local ADDON_NAME = "OgreMCP"
 local outDir = arg[1]
 
 -- ADDON_FILES are the paths of the Lua files the TOC lists, in the order the
@@ -34,7 +34,7 @@ end
 
 -- SavedVariables ---------------------------------------------------------------
 
--- WriteSavedVariables writes OpenGamerMCPDB the way both clients were seen to
+-- WriteSavedVariables writes OgreMCPDB the way both clients were seen to
 -- write a SavedVariables file: an empty first line, CRLF line endings, one
 -- entry per line with no indentation and no index comments, and strings in
 -- double quotes with backslash, double quote, newline, and carriage return
@@ -85,20 +85,20 @@ local function WriteValue(v, out, path)
 end
 
 local function WriteSavedVariables()
-	local out = { "\r\nOpenGamerMCPDB = " }
-	WriteValue(OpenGamerMCPDB, out, "OpenGamerMCPDB")
+	local out = { "\r\nOgreMCPDB = " }
+	WriteValue(OgreMCPDB, out, "OgreMCPDB")
 	out[#out + 1] = "\r\n"
 	return table.concat(out)
 end
 
 -- ReadSavedVariables loads SavedVariables text in an empty environment and
--- returns the OpenGamerMCPDB it defines.
+-- returns the OgreMCPDB it defines.
 local function ReadSavedVariables(text)
 	local env = {}
 	local chunk = assert(loadstring(text, "SavedVariables"))
 	setfenv(chunk, env)
 	chunk()
-	return env.OpenGamerMCPDB
+	return env.OgreMCPDB
 end
 
 -- Test runner ----------------------------------------------------------------
@@ -789,8 +789,8 @@ local function Start(setup, saved)
 	if setup then
 		setup(world)
 	end
-	OpenGamerMCPDB = nil
-	SLASH_OPENGAMERMCPTRANSMIT1 = nil
+	OgreMCPDB = nil
+	SLASH_OGREMCPTRANSMIT1 = nil
 	InstallStubs()
 	if saved then
 		assert(loadstring(saved))()
@@ -812,7 +812,7 @@ local function EnterWorld()
 end
 
 -- Logout fires PLAYER_LOGOUT, writes the SavedVariables file the client would
--- write, and returns OpenGamerMCPDB read back from that file. With out-dir,
+-- write, and returns OgreMCPDB read back from that file. With out-dir,
 -- the file is kept there as name.lua.
 local function Logout(name)
 	Fire("PLAYER_LOGOUT")
@@ -836,21 +836,21 @@ end
 
 -- Tests ----------------------------------------------------------------------
 
-test("the TOC names the addon, both interface versions, and OpenGamerMCPDB", function()
+test("the TOC names the addon, both interface versions, and OgreMCPDB", function()
 	eq(TOC_META.Interface, "11509, 16001", "interface versions")
-	eq(TOC_META.SavedVariables, "OpenGamerMCPDB", "SavedVariables")
-	eq(TOC_META.Title, "Open Gamer MCP", "title")
+	eq(TOC_META.SavedVariables, "OgreMCPDB", "SavedVariables")
+	eq(TOC_META.Title, "Ogre MCP", "title")
 end)
 
 for _, client in ipairs({ "forever", "era" }) do
-	test(client .. ": PLAYER_LOGOUT writes OpenGamerMCPDB in the §6.3 shape", function()
+	test(client .. ": PLAYER_LOGOUT writes OgreMCPDB in the §6.3 shape", function()
 		local setup = client == "era" and Era(function(w)
 			-- A name with multi-byte UTF-8, which must survive the file.
 			w.char.name = "Zo\195\171la"
 		end) or nil
 		-- The file of an earlier session, from another character. None of it
 		-- is carried over.
-		Start(setup, 'OpenGamerMCPDB = { schema = 1, character = { name = "Oldalt" }, stale = true }')
+		Start(setup, 'OgreMCPDB = { schema = 1, character = { name = "Oldalt" }, stale = true }')
 		EnterWorld()
 		-- Changes after the last collection reach the file through the
 		-- collection at PLAYER_LOGOUT.
@@ -1040,7 +1040,7 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(path[1].zone, "Test Forest", "the carried entry")
 
 		-- An entry written while the zone came from the zone text.
-		OpenGamerMCPDB.state.recent_path[1].zone = "Test Inn"
+		OgreMCPDB.state.recent_path[1].zone = "Test Inn"
 		Start(Setup(), WriteSavedVariables())
 		EnterWorld()
 		eq(Logout().state.recent_path[1].zone, "Test Forest", "a carried building name")
@@ -1100,22 +1100,22 @@ end)
 
 test("/transmit reloads the UI and is the only command", function()
 	Start()
-	eq(Keys(SlashCmdList), "OPENGAMERMCPTRANSMIT", "slash commands")
-	eq(SLASH_OPENGAMERMCPTRANSMIT1, "/transmit", "slash")
-	SlashCmdList.OPENGAMERMCPTRANSMIT("")
+	eq(Keys(SlashCmdList), "OGREMCPTRANSMIT", "slash commands")
+	eq(SLASH_OGREMCPTRANSMIT1, "/transmit", "slash")
+	SlashCmdList.OGREMCPTRANSMIT("")
 	eq(world.calls.reloadUI, 1, "ReloadUI when it exists")
 	eq(world.calls.cReload, 0, "C_UI.Reload not called")
 
 	Start(function(w)
 		w.reload.global = false
 	end)
-	SlashCmdList.OPENGAMERMCPTRANSMIT("")
+	SlashCmdList.OGREMCPTRANSMIT("")
 	eq(world.calls.cReload, 1, "C_UI.Reload when ReloadUI is missing")
 
 	Start(function(w)
 		w.reload.global, w.reload.c = false, false
 	end)
-	SlashCmdList.OPENGAMERMCPTRANSMIT("")
+	SlashCmdList.OGREMCPTRANSMIT("")
 	truthy(string.find(world.chat[#world.chat], "transmit FAILED", 1, true), "failure line")
 end)
 

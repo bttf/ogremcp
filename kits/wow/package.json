@@ -1,5 +1,5 @@
 {
-  "name": "@ogmcp/kit-wow",
+  "name": "@ogremcp/kit-wow",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -25,7 +25,7 @@
     "test:adapter": "node test/run.mjs"
   },
   "dependencies": {
-    "@ogmcp/sdk": "workspace:*",
+    "@ogremcp/sdk": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {

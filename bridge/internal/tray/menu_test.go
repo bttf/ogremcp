@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/adapter"
+	"github.com/bttf/ogremcp/bridge/internal/adapter"
 )
 
 func TestRenderStatus(t *testing.T) {
@@ -21,8 +21,8 @@ func TestRenderStatus(t *testing.T) {
 		{"starting", State{Login: LoginChecking}, "Starting… |  |  off"},
 		{"logged out", State{Login: LoginNeeded}, "Not logged in |  | Log in… on"},
 		{"code pending", State{Login: LoginWaiting}, "Logging in… | Asking the server for a login code… | Open the login page off"},
-		{"code shown", State{Login: LoginWaiting, UserCode: "BCDF-GHJK", LoginPage: "https://ogmcp.example/device"},
-			"Logging in… | Enter code BCDF-GHJK at https://ogmcp.example/device | Open the login page on"},
+		{"code shown", State{Login: LoginWaiting, UserCode: "BCDF-GHJK", LoginPage: "https://ogremcp.example/device"},
+			"Logging in… | Enter code BCDF-GHJK at https://ogremcp.example/device | Open the login page on"},
 		{"no upload", State{Login: LoginDone}, "Last upload: none yet |  |  off"},
 		{"upload today", State{Login: LoginDone, LastUpload: now.Add(-time.Hour)}, "Last upload: 17:30 |  |  off"},
 		{"upload yesterday", State{Login: LoginDone, LastUpload: now.Add(-24 * time.Hour)}, "Last upload: Sep 23, 18:30 |  |  off"},
@@ -34,7 +34,7 @@ func TestRenderStatus(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
 		}
-		if v.Tooltip != "Open Gamer MCP: "+v.Status {
+		if v.Tooltip != "Ogre MCP: "+v.Status {
 			t.Errorf("%s: tooltip %q", c.name, v.Tooltip)
 		}
 		if v.Active != (c.s.Login == LoginDone) {

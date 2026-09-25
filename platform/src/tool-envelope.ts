@@ -1,4 +1,4 @@
-import { type ToolResult, userError, utf8Length } from "@ogmcp/sdk";
+import { type ToolResult, userError, utf8Length } from "@ogremcp/sdk";
 
 import { failureCode } from "./db.js";
 import { UserFacingError } from "./tool-context.js";
@@ -111,7 +111,7 @@ export function errorResult(err: unknown, tool: string, log: Log): ToolAnswer {
 
 /** What a call to a tool of the game `gameName` answers when the user has turned the game off. */
 export function gameOffResult(gameName: string): ToolResult {
-  return userError(`${gameName} is turned off on the Games page of the Open Gamer MCP website. The player can turn it on there.`);
+  return userError(`${gameName} is turned off on the Games page of the Ogre MCP website. The player can turn it on there.`);
 }
 
 /**
@@ -120,6 +120,6 @@ export function gameOffResult(gameName: string): ToolResult {
  */
 export function paidOnlyResult(): ToolResult {
   return userError(
-    "This tool is part of the Open Gamer MCP paid plan, and the player is on the free plan, so it did not run. The Account page of the Open Gamer MCP website will show the plans.",
+    "This tool is part of the Ogre MCP paid plan, and the player is on the free plan, so it did not run. The Account page of the Ogre MCP website will show the plans.",
   );
 }

@@ -46,7 +46,7 @@ import (
 
 // ClientID is the bridge's pre-registered public client on the OAuth server
 // (§8.1). It has no secret.
-const ClientID = "ogmcp-bridge"
+const ClientID = "ogremcp-bridge"
 
 // scope is the bridge API's scope (§8.1).
 const scope = "ingest"
@@ -402,7 +402,7 @@ func (c *Client) discover(ctx context.Context) (endpoints, error) {
 		TokenEndpoint               string `json:"token_endpoint"`
 	}
 	if status != http.StatusOK || json.Unmarshal(raw, &doc) != nil || doc.Issuer != c.base {
-		return endpoints{}, fmt.Errorf("the server at %s did not answer as an Open Gamer MCP server (status %d)", c.base, status)
+		return endpoints{}, fmt.Errorf("the server at %s did not answer as an Ogre MCP server (status %d)", c.base, status)
 	}
 	if !c.onOriginString(doc.DeviceAuthorizationEndpoint) || !c.onOriginString(doc.TokenEndpoint) {
 		return endpoints{}, fmt.Errorf("the server at %s names endpoints on another origin", c.base)
@@ -421,7 +421,7 @@ func (c *Client) onOriginString(raw string) bool {
 }
 
 func (c *Client) userAgent() string {
-	return "ogmcp-bridge/" + c.version
+	return "ogremcp-bridge/" + c.version
 }
 
 // postForm posts form to endpoint.

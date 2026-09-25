@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const keep = process.argv[2];
-const out = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), "ogmcp-adapter-"));
+const out = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), "ogremcp-adapter-"));
 
 let status = 1;
 try {

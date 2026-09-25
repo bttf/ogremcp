@@ -9,11 +9,11 @@ import (
 
 // Adapted from bttf/wow-guide@df80260, bridge/internal/autostart/autostart_test.go.
 func TestTranslocated(t *testing.T) {
-	moved := "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B2C3D/d/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"
+	moved := "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B2C3D/d/Ogre MCP.app/Contents/MacOS/ogremcp-bridge"
 	if !Translocated(moved) {
 		t.Error("translocated path not recognised")
 	}
-	if Translocated("/Users/player/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge") {
+	if Translocated("/Users/player/Applications/Ogre MCP.app/Contents/MacOS/ogremcp-bridge") {
 		t.Error("an app in Applications counts as translocated")
 	}
 	if runtime.GOOS == "darwin" {
@@ -30,8 +30,8 @@ func TestRunValue(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{`C:\Apps\ogmcp-bridge.exe`}, `C:\Apps\ogmcp-bridge.exe`},
-		{[]string{`C:\Users\Ann Lee\AppData\Local\ogmcp-bridge.exe`}, `"C:\Users\Ann Lee\AppData\Local\ogmcp-bridge.exe"`},
+		{[]string{`C:\Apps\ogremcp-bridge.exe`}, `C:\Apps\ogremcp-bridge.exe`},
+		{[]string{`C:\Users\Ann Lee\AppData\Local\ogremcp-bridge.exe`}, `"C:\Users\Ann Lee\AppData\Local\ogremcp-bridge.exe"`},
 	}
 	for _, c := range cases {
 		if got := RunValue(c.args); got != c.want {
@@ -44,8 +44,8 @@ func TestRunValue(t *testing.T) {
 // tray writes it again for the app's new place.
 func TestLaunchAgentCurrent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "LaunchAgents", Label+".plist")
-	old := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Downloads/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"}}
-	moved := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"}}
+	old := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Downloads/Ogre MCP.app/Contents/MacOS/ogremcp-bridge"}}
+	moved := LaunchAgent{Path: path, Label: Label, Args: []string{"/Users/a/Applications/Ogre MCP.app/Contents/MacOS/ogremcp-bridge"}}
 	if on, current, err := moved.Enabled(); on || current || err != nil {
 		t.Fatalf("before: %v %v %v", on, current, err)
 	}

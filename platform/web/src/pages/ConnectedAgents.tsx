@@ -69,7 +69,7 @@ export function ConnectedAgents() {
       {agents === "loading" ? (
         <p>Loading…</p>
       ) : agents === "error" ? (
-        <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
       ) : agents.length === 0 ? (
         <p>No agents are connected.</p>
       ) : (

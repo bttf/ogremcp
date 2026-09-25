@@ -12,7 +12,7 @@ import { createOidcProvider, type OidcOptions } from "./oidc.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
 
-const ISSUER = "https://ogmcp.example";
+const ISSUER = "https://ogremcp.example";
 const REDIRECT_URI = "https://agent.example/callback";
 
 /**

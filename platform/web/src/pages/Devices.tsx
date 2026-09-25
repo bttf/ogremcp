@@ -112,7 +112,7 @@ export function Devices() {
       {devices === "loading" ? (
         <p>Loading…</p>
       ) : devices === "error" ? (
-        <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
       ) : devices.length === 0 ? (
         <p>
           You have not approved a bridge yet. The bridge shows a code to enter on the <Link to="/device">approval page</Link>.

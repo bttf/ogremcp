@@ -44,7 +44,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 var (

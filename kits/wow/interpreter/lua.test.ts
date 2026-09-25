@@ -1,4 +1,4 @@
-import { ParseError } from "@ogmcp/sdk";
+import { ParseError } from "@ogremcp/sdk";
 import { expect, it } from "vitest";
 import { readSavedVariables, type ReadLimits } from "./lua.js";
 

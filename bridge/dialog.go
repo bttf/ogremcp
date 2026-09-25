@@ -11,8 +11,8 @@ import (
 
 	"github.com/ncruces/zenity"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/config"
 )
 
 // pickFolder shows the OS's folder picker, titled title: an open panel on
@@ -28,14 +28,14 @@ func pickFolder(ctx context.Context, title string) (string, error) {
 }
 
 // serverTitle is the title of the server dialogs.
-const serverTitle = "Open Gamer MCP server"
+const serverTitle = "Ogre MCP server"
 
 // askServer asks for the server in a text dialog that starts with current,
 // the server in use, and confirms the change. It is the tray's
 // Controller.AskServer (§13.3). An empty entry means the hosted service. An
 // entry that auth.ParseBaseURL refuses is shown, and asked for again. It
 // returns false when the user cancels or enters the server in use. While
-// OGMCP_BASE_URL is set, which overrides server_url, it says so and returns
+// OGREMCP_BASE_URL is set, which overrides server_url, it says so and returns
 // false.
 func askServer(ctx context.Context, current string) (string, bool, error) {
 	if os.Getenv(config.EnvServerURL) != "" {
@@ -45,7 +45,7 @@ func askServer(ctx context.Context, current string) (string, bool, error) {
 	}
 	text := current
 	for {
-		entry, err := zenity.Entry("The bridge uploads to "+current+".\n\nTo use your own server, enter its address, such as https://ogmcp.example.com. Leave it empty to use the hosted service.",
+		entry, err := zenity.Entry("The bridge uploads to "+current+".\n\nTo use your own server, enter its address, such as https://ogremcp.example.com. Leave it empty to use the hosted service.",
 			zenity.Title(serverTitle), zenity.EntryText(text), zenity.Context(ctx))
 		if err != nil {
 			return "", false, ignoreCancel(err)
@@ -85,7 +85,7 @@ func ignoreCancel(err error) error {
 // alert shows text in a message box, for a tray app that cannot start and has
 // no menu to say so.
 func alert(text string) {
-	_ = zenity.Info(text, zenity.Title("Open Gamer MCP"))
+	_ = zenity.Info(text, zenity.Title("Ogre MCP"))
 }
 
 // trayPlace is where the OS shows the tray icon.

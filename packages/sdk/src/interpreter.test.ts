@@ -3,10 +3,10 @@ import { checkToolName, ParseError } from "./interpreter.js";
 
 describe("ParseError", () => {
   it("carries the user-facing message", () => {
-    const error = new ParseError("Update the OpenGamerMCP addon, then /transmit again.");
+    const error = new ParseError("Update the OgreMCP addon, then /transmit again.");
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("ParseError");
-    expect(error.message).toBe("Update the OpenGamerMCP addon, then /transmit again.");
+    expect(error.message).toBe("Update the OgreMCP addon, then /transmit again.");
     expect(error).not.toHaveProperty("adapterSchema");
     expect(error).not.toHaveProperty("flavor");
   });

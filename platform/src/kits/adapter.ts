@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32 } from "node:zlib";
 
-import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
+import schema from "@ogremcp/sdk/manifest.schema.json" with { type: "json" };
 
 import type { CheckedKit } from "./validate.js";
 
@@ -21,7 +21,7 @@ export const ADAPTERS_DIR = fileURLToPath(new URL("../adapters", import.meta.url
 
 /** One kit's adapter zip, as the registry serves it. */
 export interface AdapterZip {
-  /** The folder the zip holds, e.g. `OpenGamerMCP`. */
+  /** The folder the zip holds, e.g. `OgreMCP`. */
   folder: string;
   /** The zip file. */
   path: string;

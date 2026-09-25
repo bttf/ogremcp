@@ -3,7 +3,7 @@
 # migrations. docker-compose.yml at the repo root builds and runs it, and
 # docs/self-host.md has the steps. To build it alone, from the repo root:
 #
-#   docker build -f docker/Dockerfile -t ogmcp .
+#   docker build -f docker/Dockerfile -t ogremcp .
 #
 # It is not at the repo root: Railway builds from a root Dockerfile when it
 # finds one, and Railpack reads a root .dockerignore, while the hosted service
@@ -30,17 +30,17 @@ COPY tsconfig.json ./
 COPY packages packages
 COPY kits kits
 COPY platform platform
-RUN pnpm install --offline --frozen-lockfile --filter "@ogmcp/platform..." \
- && pnpm --filter "@ogmcp/platform..." run build
+RUN pnpm install --offline --frozen-lockfile --filter "@ogremcp/platform..." \
+ && pnpm --filter "@ogremcp/platform..." run build
 
 # The production dependencies only, installed from the lockfile in place of
 # the build's. The store already holds them.
 RUN rm -rf node_modules packages/*/node_modules kits/*/node_modules platform/node_modules \
- && pnpm install --offline --frozen-lockfile --prod --filter "@ogmcp/platform..."
+ && pnpm install --offline --frozen-lockfile --prod --filter "@ogremcp/platform..."
 
 # What the service reads at run time, in the repo's layout: the dependencies,
 # and each package's package.json, LICENSE, build output, and data files. A
-# new first-class kit is added here too. @ogmcp/sdk has no dependencies, so it
+# new first-class kit is added here too. @ogremcp/sdk has no dependencies, so it
 # has no node_modules. cp fails the build when a path is missing, and -a keeps
 # pnpm's symlinks.
 RUN mkdir /prod \

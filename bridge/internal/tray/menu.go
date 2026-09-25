@@ -30,7 +30,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/bttf/ogmcp/bridge/internal/adapter"
+	"github.com/bttf/ogremcp/bridge/internal/adapter"
 )
 
 // Login is the state of the bridge's login.
@@ -112,10 +112,10 @@ const (
 	TitleChooseFolder = "Choose the game folder…"
 	TitleServer       = "Server…"
 	TitleAutostart    = "Start at login"
-	TitleQuit         = "Quit Open Gamer MCP"
+	TitleQuit         = "Quit Ogre MCP"
 	// TitleMoveApp replaces TitleAutostart for an app that macOS runs from a
 	// temporary copy (autostart.ErrTranslocated).
-	TitleMoveApp = "Move Open Gamer MCP to Applications to start at login"
+	TitleMoveApp = "Move Ogre MCP to Applications to start at login"
 )
 
 // MaxAdapterLines is the most adapter lines a View has.
@@ -170,7 +170,7 @@ func Render(s State, now time.Time) View {
 	if s.Error != "" {
 		v.Error = "Error at " + clock(s.ErrorAt, now) + ": " + shorten(s.Error, maxErrorRunes)
 	}
-	v.Tooltip = "Open Gamer MCP: " + v.Status
+	v.Tooltip = "Ogre MCP: " + v.Status
 	return v
 }
 

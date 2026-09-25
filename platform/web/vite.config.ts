@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
  * The web UI (§13.2). `pnpm build` writes it to `platform/dist/web`, which
  * the platform service serves (`src/web.ts`).
  *
- * `pnpm --filter @ogmcp/platform dev:web` runs the Vite dev server, which
+ * `pnpm --filter @ogremcp/platform dev:web` runs the Vite dev server, which
  * sends the service's paths to a platform started on its default port. Set
  * the platform's `PUBLIC_BASE_URL` to the dev server's origin, so that
  * sign-in returns to it and sign-out passes the `Origin` check.

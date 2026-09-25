@@ -3,7 +3,7 @@
 // §10.5 envelope, `snapshot_at`, `flavor`, `rules`, and `character`, plus the
 // requested sections (sections.ts), as `structuredContent` and as the same
 // JSON in a text block, trimmed to the size cap (§10.5).
-import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogmcp/sdk";
+import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogremcp/sdk";
 import { clip, QUOTE_MAX } from "./errors.js";
 import type { WowState } from "./schema.js";
 import { buildSections, type BuiltSections, type Section, SECTIONS } from "./sections.js";
@@ -47,7 +47,7 @@ export function stateRules(experimental: readonly string[]): string[] {
 /** The user has no WoW snapshot at all: the setup steps (§10.5). */
 export const NO_SNAPSHOT_MESSAGE = [
   "No World of Warcraft snapshot yet. To send one, the player:",
-  "1. installs the Open Gamer MCP bridge on the computer that runs the game, from the Get started page of the Open Gamer MCP website;",
+  "1. installs the Ogre MCP bridge on the computer that runs the game, from the Get started page of the Ogre MCP website;",
   "2. approves the bridge on the website, with the code the bridge shows;",
   "3. types /transmit in game. If WoW was running when the bridge installed the addon, restart WoW first.",
   "Then call wow_get_state again.",

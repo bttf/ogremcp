@@ -1,18 +1,18 @@
--- Open Gamer MCP, the WoW adapter (docs/architecture.md §6.3). It keeps the
+-- Ogre MCP, the WoW adapter (docs/architecture.md §6.3). It keeps the
 -- current character's state in the account-wide SavedVariables table
--- OpenGamerMCPDB. The client writes that table to disk on a UI reload and on
+-- OgreMCPDB. The client writes that table to disk on a UI reload and on
 -- logout, and the bridge uploads the file.
 --
--- The addon is split into files that OpenGamerMCP.toc lists in load order:
+-- The addon is split into files that OgreMCP.toc lists in load order:
 --
---   OpenGamerMCP.lua  this overview, and the secret-value helpers every file uses
+--   OgreMCP.lua  this overview, and the secret-value helpers every file uses
 --   Collectors.lua    value readers and the character, location, quests, and
 --                     skills sections
 --   Items.lua         item details and the inventory section
 --   RecentPath.lua    the recent_path section, the one section carried across
 --                     reloads
 --   Storage.lua       the client facts, the secret-value guard, and the
---                     OpenGamerMCPDB write
+--                     OgreMCPDB write
 --   Collect.lua       collection, its scheduling, and the write at PLAYER_LOGOUT
 --   Transmit.lua      /transmit, the only command
 --
@@ -46,7 +46,7 @@ local SAFE_MESSAGE_MAX = 4000
 -- no secret values at all, so the fallback should never report a secret there.
 --
 -- No value is inspected before IsSecret has cleared it, and no secret value is
--- ever written to OpenGamerMCPDB.
+-- ever written to OgreMCPDB.
 
 local function IsSecret(v)
 	local predicate = issecretvalue

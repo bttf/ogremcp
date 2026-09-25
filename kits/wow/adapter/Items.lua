@@ -192,7 +192,7 @@ local scanTooltip
 local function HiddenTooltipLines(link)
 	if scanTooltip == nil then
 		scanTooltip = false
-		local ok, frame = pcall(CreateFrame, "GameTooltip", "OpenGamerMCPScanTooltip", nil, "GameTooltipTemplate")
+		local ok, frame = pcall(CreateFrame, "GameTooltip", "OgreMCPScanTooltip", nil, "GameTooltipTemplate")
 		if ok and type(frame) == "table" and type(frame.SetHyperlink) == "function"
 			and type(frame.NumLines) == "function" then
 			scanTooltip = frame
@@ -212,7 +212,7 @@ local function HiddenTooltipLines(link)
 		for i = 1, math.min(count, ITEM_TOOLTIP_MAX_LINES) do
 			local line = {}
 			for side, field in pairs({ Left = "left", Right = "right" }) do
-				local region = Lookup("OpenGamerMCPScanTooltipText" .. side .. i)
+				local region = Lookup("OgreMCPScanTooltipText" .. side .. i)
 				if type(region) == "table" and type(region.GetText) == "function" then
 					line[field] = ReadString(region:GetText())
 				end

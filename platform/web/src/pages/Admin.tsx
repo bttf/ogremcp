@@ -140,7 +140,7 @@ export function Admin() {
   }, [days]);
 
   if (status === "not-found") return <NotFound />;
-  const failed = <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>;
+  const failed = <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>;
   if (metrics === null) return status === "error" ? failed : <p>Loading…</p>;
   return (
     <div className="og-admin">

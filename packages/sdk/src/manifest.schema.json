@@ -16,7 +16,7 @@
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$"
     },
     "sdk": {
-      "description": "The compatible `@ogmcp/sdk` version range, e.g. `^0.1.0`.",
+      "description": "The compatible `@ogremcp/sdk` version range, e.g. `^0.1.0`.",
       "type": "string",
       "minLength": 1
     },

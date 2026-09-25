@@ -19,7 +19,7 @@ const example = {
     verify: "_*_",
   },
   adapter: {
-    install: "_*_/Interface/AddOns/OpenGamerMCP",
+    install: "_*_/Interface/AddOns/OgreMCP",
     process: ["Wow*.exe", "World of Warcraft*"],
   },
   sources: [
@@ -27,7 +27,7 @@ const example = {
       id: "savedvariables",
       type: "file",
       format: "text",
-      path: "_*_/WTF/Account/*/SavedVariables/OpenGamerMCP.lua",
+      path: "_*_/WTF/Account/*/SavedVariables/OgreMCP.lua",
       trigger: "on_change",
     },
   ],
@@ -56,7 +56,7 @@ describe("manifest schema", () => {
     ],
     [
       "a variable in a path relative to root",
-      { ...example, sources: [{ ...source, path: "{HOME}/WTF/OpenGamerMCP.lua" }] },
+      { ...example, sources: [{ ...source, path: "{HOME}/WTF/OgreMCP.lua" }] },
     ],
     ["an uppercase tool_prefix", { ...example, tool_prefix: "WoW" }],
     ["a tool_prefix with a dot", { ...example, tool_prefix: "wow.era" }],
@@ -90,7 +90,7 @@ describe("manifest schema", () => {
     const types = await compile(schema as JSONSchema, "Manifest", {
       bannerComment: [
         "// Generated from manifest.schema.json by manifest.test.ts. Do not edit.",
-        "// After a schema change, regenerate with: pnpm --filter @ogmcp/sdk test -u",
+        "// After a schema change, regenerate with: pnpm --filter @ogremcp/sdk test -u",
       ].join("\n"),
       ignoreMinAndMaxItems: true,
     });

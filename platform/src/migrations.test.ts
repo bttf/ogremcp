@@ -17,7 +17,7 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in migrations.test.ts are skipped");
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "ogmcp-migrations-"));
+  return mkdtempSync(join(tmpdir(), "ogremcp-migrations-"));
 }
 
 describe("listMigrationFiles", () => {
@@ -83,7 +83,7 @@ describe("stripTransaction", () => {
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("migrate against Postgres", () => {
   // Each run gets a database of its own on that server, and drops it.
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -154,7 +154,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("migrate against Postgres", () 
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("0013 against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 

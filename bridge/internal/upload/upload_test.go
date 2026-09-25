@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // upload is one request the server read whole.
@@ -213,7 +213,7 @@ func TestStoredThenDuplicate(t *testing.T) {
 	s := newServer(t)
 	u := start(t, s)
 	u.CountError(LocateFailed)
-	c := change(t, t.TempDir(), "OpenGamerMCP.lua", "WTF/Account/A/SavedVariables/OpenGamerMCP.lua", []byte("OpenGamerMCPDB = {}\n"))
+	c := change(t, t.TempDir(), "OgreMCP.lua", "WTF/Account/A/SavedVariables/OgreMCP.lua", []byte("OgreMCPDB = {}\n"))
 	u.Add(c)
 	waitFor(t, "the upload", func() bool { return !u.Status().LastUpload.IsZero() })
 	u.Add(c)
@@ -222,7 +222,7 @@ func TestStoredThenDuplicate(t *testing.T) {
 	got := s.got()
 	m := got[0].meta
 	if m.Kit != "wow" || m.SourceID != "savedvariables" || m.Instance != c.Instance || m.MTime != c.ModTime.UTC().Format(time.RFC3339) ||
-		m.Client.BridgeVersion != "0.1.0-test" || m.Client.OS == "" || string(got[0].data) != "OpenGamerMCPDB = {}\n" {
+		m.Client.BridgeVersion != "0.1.0-test" || m.Client.OS == "" || string(got[0].data) != "OgreMCPDB = {}\n" {
 		t.Errorf("first upload: %+v", got[0])
 	}
 	if m.Client.Errors[LocateFailed] != 1 || m.Client.Errors[UploadFailed] != 0 {
@@ -250,7 +250,7 @@ func TestCountersResetWhenTheServerKeepsARow(t *testing.T) {
 		s.mu.Unlock()
 		switch n {
 		case 1:
-			reply(w, http.StatusUnprocessableEntity, "parse_error", "OpenGamerMCP.lua could not be read.")
+			reply(w, http.StatusUnprocessableEntity, "parse_error", "OgreMCP.lua could not be read.")
 		case 2:
 			reply(w, http.StatusOK, "duplicate", "")
 		default:
@@ -264,7 +264,7 @@ func TestCountersResetWhenTheServerKeepsARow(t *testing.T) {
 		if count {
 			u.CountError(LocateFailed)
 		}
-		c := change(t, dir, "OpenGamerMCP.lua", "a", []byte{byte(i)})
+		c := change(t, dir, "OgreMCP.lua", "a", []byte{byte(i)})
 		u.Add(c)
 		waitFor(t, "the upload", func() bool { return s.count() == i+1 && !instance(u, c).Pending })
 	}
@@ -288,7 +288,7 @@ func TestDeadlineScalesWithTheBody(t *testing.T) {
 	u.attemptRate = 256 << 10
 	data := make([]byte, 256<<10)
 	rand.NewChaCha8([32]byte{}).Read(data)
-	c := change(t, t.TempDir(), "OpenGamerMCP.lua", "a", data)
+	c := change(t, t.TempDir(), "OgreMCP.lua", "a", data)
 	u.Add(c)
 	waitFor(t, "the upload", func() bool { return len(s.got()) == 1 })
 	if n := s.count(); n != 1 {
@@ -311,7 +311,7 @@ func TestRateLimitedHonorsRetryAfter(t *testing.T) {
 		return true
 	})
 	u := start(t, s)
-	u.Add(change(t, t.TempDir(), "OpenGamerMCP.lua", "a", []byte("x")))
+	u.Add(change(t, t.TempDir(), "OgreMCP.lua", "a", []byte("x")))
 	waitFor(t, "the upload", func() bool { return len(s.got()) == 1 })
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -340,7 +340,7 @@ func TestBrokenConnectionIsRetried(t *testing.T) {
 	u := start(t, s)
 	data := make([]byte, 2<<20)
 	rand.NewChaCha8([32]byte{}).Read(data)
-	u.Add(change(t, t.TempDir(), "OpenGamerMCP.lua", "a", data))
+	u.Add(change(t, t.TempDir(), "OgreMCP.lua", "a", data))
 	waitFor(t, "the upload", func() bool { return len(s.got()) == 1 })
 	up := s.got()[0]
 	if !bytes.Equal(up.data, data) || up.meta.Client.Errors[UploadFailed] != 1 {
@@ -386,7 +386,7 @@ func TestLoginRequiredStops(t *testing.T) {
 		return true
 	})
 	u := start(t, s)
-	c := change(t, t.TempDir(), "OpenGamerMCP.lua", "a", []byte("x"))
+	c := change(t, t.TempDir(), "OgreMCP.lua", "a", []byte("x"))
 	u.Add(c)
 	waitFor(t, "the refused login", func() bool { return u.Status().LoginRequired })
 	u.Add(c)

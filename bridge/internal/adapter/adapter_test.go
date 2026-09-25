@@ -17,11 +17,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
-const folderName = "OpenGamerMCP"
+const folderName = "OgreMCP"
 
 type entry struct {
 	name, body string
@@ -53,8 +53,8 @@ func makeZip(t *testing.T, entries ...entry) []byte {
 
 func adapterZip(t *testing.T, version string) []byte {
 	return makeZip(t,
-		entry{name: folderName + "/" + folderName + ".toc", body: "## Interface: 11509\n## Version: " + version + "\nOpenGamerMCP.lua\n"},
-		entry{name: folderName + "/OpenGamerMCP.lua", body: "-- " + version + "\n"},
+		entry{name: folderName + "/" + folderName + ".toc", body: "## Interface: 11509\n## Version: " + version + "\nOgreMCP.lua\n"},
+		entry{name: folderName + "/OgreMCP.lua", body: "-- " + version + "\n"},
 	)
 }
 

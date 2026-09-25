@@ -1,4 +1,4 @@
-import type { ToolResult } from "@ogmcp/sdk";
+import type { ToolResult } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 

@@ -23,7 +23,7 @@ const DCR_CLIENT = "dcr-client-0123456789";
 const LONG_QUERY = `where is ${"the ".repeat(40)}trainer`;
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres (§13.2, §16.1)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   const now = Date.now();
   /** An instant `minutes` from now. */
   const at = (minutes: number) => new Date(now + minutes * 60_000);
@@ -60,8 +60,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     const [owner, player] = users;
     if (owner === undefined || player === undefined) throw new Error("no user rows");
     ids.push(owner.uuid, player.uuid);
-    adminCookie = `ogmcp_session=${(await sessions.create(owner.id)).token}`;
-    playerCookie = `ogmcp_session=${(await sessions.create(player.id)).token}`;
+    adminCookie = `ogremcp_session=${(await sessions.create(owner.id)).token}`;
+    playerCookie = `ogremcp_session=${(await sessions.create(player.id)).token}`;
 
     const { rows: devices } = await pool.query<{ id: string; uuid: string }>(
       "insert into devices (user_id, name) values ($1, 'Test bridge') returning id, uuid",

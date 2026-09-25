@@ -12,7 +12,7 @@ import (
 
 // Service names the bridge's keychain entries. Each server base URL has an
 // entry of its own, with the URL as its account.
-const Service = "ogmcp-bridge"
+const Service = "ogremcp-bridge"
 
 // Entry is the keychain entry of one server. It is an auth.Store.
 type Entry struct {

@@ -14,18 +14,18 @@ import ts from "typescript";
 // Package name -> the workspace packages it may declare (§5). A package with
 // no entry here fails the check until it gets one.
 const ALLOWED = [
-  [/^@ogmcp\/sdk$/, []],
-  [/^@ogmcp\/kit-/, [/^@ogmcp\/sdk$/]],
-  [/^@ogmcp\/platform$/, [/^@ogmcp\/sdk$/, /^@ogmcp\/kit-/]],
+  [/^@ogremcp\/sdk$/, []],
+  [/^@ogremcp\/kit-/, [/^@ogremcp\/sdk$/]],
+  [/^@ogremcp\/platform$/, [/^@ogremcp\/sdk$/, /^@ogremcp\/kit-/]],
 ];
 // The one platform module that may import kits. .dependency-cruiser.cjs names
 // it too.
 const KIT_REGISTRY = "platform/src/kits/registry.ts";
-const KIT = /^@ogmcp\/kit-/;
+const KIT = /^@ogremcp\/kit-/;
 
 const FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 // The only specs allowed for a workspace dependency. An alias such as
-// workspace:@ogmcp/platform@* would link another package under an allowed name.
+// workspace:@ogremcp/platform@* would link another package under an allowed name.
 const WORKSPACE_SPEC = /^workspace:[*^~]$/;
 const PATH_SPEC = /^(?:link|file):(.*)$/;
 
@@ -59,7 +59,7 @@ for (const pkg of packages) {
       const path = PATH_SPEC.exec(spec)?.[1];
       if (path !== undefined && inRepo(resolve(pkg.path, path))) {
         fail(`${pkg.name}: ${field} links ${dep} to a path in the repo (${spec}). Use a workspace: spec.`);
-      } else if (names.has(dep) || dep.startsWith("@ogmcp/") || spec.startsWith("workspace:") || spec.includes("@ogmcp/")) {
+      } else if (names.has(dep) || dep.startsWith("@ogremcp/") || spec.startsWith("workspace:") || spec.includes("@ogremcp/")) {
         if (!WORKSPACE_SPEC.test(spec)) {
           fail(`${pkg.name}: ${field} declares ${dep} as ${spec}. Use workspace:*, workspace:^, or workspace:~.`);
         } else if (!rule[1].some((allowed) => allowed.test(dep))) {
@@ -72,7 +72,7 @@ for (const pkg of packages) {
 if (!failed) console.log(`Workspace dependencies follow §5 in ${packages.length} packages.`);
 
 // 2. The registry types each kit as an Interpreter (§5), so it must not pass a
-// kit on whole: no `export ... from "@ogmcp/kit-*"`, and no `export { name }`
+// kit on whole: no `export ... from "@ogremcp/kit-*"`, and no `export { name }`
 // or `export default name` of a name imported from a kit. It imports a kit's
 // exports by name: no `import * as`, and a default import only of a kit's
 // JSON file, which has no named exports.
@@ -115,7 +115,7 @@ if (existsSync(KIT_REGISTRY)) {
 // dependency-cruiser resolves them against the working directory. For such a
 // package, dependency-cruiser gets a tsconfig that extends the package's and
 // sets baseUrl to that directory.
-const tmp = mkdtempSync(join(tmpdir(), "ogmcp-seams-"));
+const tmp = mkdtempSync(join(tmpdir(), "ogremcp-seams-"));
 try {
   for (const pkg of packages) {
     let tsconfig = join(pkg.path, "tsconfig.json");

@@ -1,10 +1,10 @@
-# Self-hosted Open Gamer MCP (docs/architecture.md §13.3): the platform and
+# Self-hosted Ogre MCP (docs/architecture.md §13.3): the platform and
 # its Postgres. Copy selfhost.env.example to .env, fill it in, and run
 #
 #   docker compose up
 #
 # docs/self-host.md has the steps.
-name: ogmcp
+name: ogremcp
 
 services:
   postgres:
@@ -13,20 +13,20 @@ services:
     image: postgres:18.6
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ogmcp
-      POSTGRES_DB: ogmcp
+      POSTGRES_USER: ogremcp
+      POSTGRES_DB: ogremcp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres-data:/var/lib/postgresql
     # Over TCP: while it sets up a new volume, the image runs a server that
     # listens on no TCP address, so the check passes only once Postgres is up.
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ogmcp", "-d", "ogmcp"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ogremcp", "-d", "ogremcp"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  ogmcp:
+  ogremcp:
     # The image applies the pending migrations, then starts the service.
     build:
       context: .
@@ -40,7 +40,7 @@ services:
     # Every line of .env reaches the service. The two names below override it.
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://ogmcp:${POSTGRES_PASSWORD}@postgres:5432/ogmcp?sslmode=disable
+      DATABASE_URL: postgresql://ogremcp:${POSTGRES_PASSWORD}@postgres:5432/ogremcp?sslmode=disable
       PORT: "4790"
     # This machine only. Other machines reach it through a reverse proxy that
     # terminates TLS (docs/self-host.md).

@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { loadSetup, type Setup } from "../setup.js";
 
 /** The name the Claude Code command gives the server. */
-const CLAUDE_CODE_NAME = "ogmcp";
+const CLAUDE_CODE_NAME = "ogremcp";
 
 /**
  * The Connect your agent page (§13.2): the MCP URL, which every agent uses
@@ -29,12 +29,12 @@ export function ConnectAgent() {
     <>
       <h1>Connect your agent</h1>
       <p>
-        Every agent connects to Open Gamer MCP with this one URL. When you add it, your agent sends you here to sign in and approve it.
+        Every agent connects to Ogre MCP with this one URL. When you add it, your agent sends you here to sign in and approve it.
       </p>
       {setup === "loading" ? (
         <p>Loading…</p>
       ) : setup === "error" ? (
-        <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
       ) : (
         <>
           <Copyable text={setup.mcp_url} label="Copy URL" />

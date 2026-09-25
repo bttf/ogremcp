@@ -1,11 +1,11 @@
 -- Storage --------------------------------------------------------------------
 --
--- OpenGamerMCPDB is the account-wide SavedVariables table. It holds the
+-- OgreMCPDB is the account-wide SavedVariables table. It holds the
 -- current character's latest state only, in the shape of
 -- docs/architecture.md §6.3:
 --
 --   schema          SCHEMA, the adapter schema version
---   addon_version   the Version line of OpenGamerMCP.toc
+--   addon_version   the Version line of OgreMCP.toc
 --   client          raw detection facts: project_id, season_id, version,
 --                   build, interface. The interpreter maps them to a flavor
 --                   and rules (§6.3.1); the adapter never decides the flavor.
@@ -127,7 +127,7 @@ end
 
 -- Write ----------------------------------------------------------------------
 
--- Write replaces OpenGamerMCPDB with parts, which maps each part of
+-- Write replaces OgreMCPDB with parts, which maps each part of
 -- COLLECT_PARTS (Collect.lua) to its value, and stamps captured_at. A part
 -- without a value is left out.
 local function Write(parts, partList)
@@ -142,7 +142,7 @@ local function Write(parts, partList)
 	end
 	-- Stamped last, so it matches the moment the state was read.
 	db.captured_at = ReadInteger(Api("GetServerTime"), 0)
-	OpenGamerMCPDB = Clean(db, 0)
+	OgreMCPDB = Clean(db, 0)
 end
 
 -- Read by the files after this one.

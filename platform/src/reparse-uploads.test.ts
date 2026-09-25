@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 
-import { ParseError } from "@ogmcp/sdk";
+import { ParseError } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -23,7 +23,7 @@ const UNKNOWN_CLIENT = `{ ["project_id"] = 2, ["interface"] = 20506 }`;
 
 /** A SavedVariables file the WoW interpreter parses (§6.3), with synthetic data. */
 function savedVariables(capturedAt: number, client = CLASSIC_ERA_CLIENT): string {
-  return `OpenGamerMCPDB = {
+  return `OgreMCPDB = {
   ["schema"] = 1,
   ["client"] = ${client},
   ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
@@ -56,7 +56,7 @@ function testKits(): KitRegistry {
 }
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("re-parse stored uploads (§11)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   const kits = testKits();
   const version = kits.get("wow")?.manifest.version;
   let admin: Pool;

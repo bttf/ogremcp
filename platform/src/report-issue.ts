@@ -1,4 +1,4 @@
-import { jsonResult, userError } from "@ogmcp/sdk";
+import { jsonResult, userError } from "@ogremcp/sdk";
 import type { PoolClient } from "pg";
 
 import { DEFAULT_VISIT_GAP_MINUTES } from "./events.js";
@@ -45,7 +45,7 @@ export const NOTE_MAX_CHARS = 1000;
 
 /** Names what it covers, and carries the §10.5 rule that acts on it. */
 const DESCRIPTION = [
-  "Report a problem to Open Gamer MCP about one of the games the user has enabled: a wrong answer, game state that is wrong or out of date, or a search that missed what the user needed.",
+  "Report a problem to Ogre MCP about one of the games the user has enabled: a wrong answer, game state that is wrong or out of date, or a search that missed what the user needed.",
   "Call it only when the user says an answer was wrong or asks to report a problem. Never call it on your own initiative or to flag your own uncertainty.",
   "`game` is a game key from list_games. `note` says what went wrong, in a sentence or two.",
   "The server attaches your recent tool calls and the snapshot you read, so the note need not repeat them.",

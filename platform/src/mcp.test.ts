@@ -34,7 +34,7 @@ import { WebSessions } from "./web-sessions.js";
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in mcp.test.ts are skipped");
 
-const ISSUER = "https://ogmcp.example";
+const ISSUER = "https://ogremcp.example";
 
 /** `list_games` as `tools/list` lists it, for every user (§10.3). */
 const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: listGames.annotations };
@@ -111,7 +111,7 @@ async function send(
         port,
         method,
         path,
-        headers: { host: "ogmcp.example", "x-forwarded-proto": "https", accept: "application/json, text/event-stream", ...headers },
+        headers: { host: "ogremcp.example", "x-forwarded-proto": "https", accept: "application/json, text/event-stream", ...headers },
       },
       (res) => {
         let body = "";
@@ -188,18 +188,18 @@ describe("/mcp", () => {
 
   it("refuses a Host that is not PUBLIC_BASE_URL's, before the challenge", async () => {
     const port = await serve();
-    for (const host of ["evil.example", "ogmcp.example.evil.example", "127.0.0.1", "not a host"]) {
+    for (const host of ["evil.example", "ogremcp.example.evil.example", "127.0.0.1", "not a host"]) {
       const res = await send(port, "POST", "/mcp", { host });
       expect(res.status).toBe(403);
       expect(res.headers["www-authenticate"]).toBeUndefined();
     }
     // Any port of the right host passes on to the challenge.
-    expect((await send(port, "POST", "/mcp", { host: "ogmcp.example:443" })).status).toBe(401);
+    expect((await send(port, "POST", "/mcp", { host: "ogremcp.example:443" })).status).toBe(401);
   });
 
   it("refuses an Origin not in MCP_ALLOWED_ORIGINS, matching exact origins only", async () => {
     const port = await serve();
-    for (const origin of ["https://evil.example", "http://ogmcp.example", "http://claude.ai", "https://evil.claude.ai", "https://claude.ai.evil.example", "null"]) {
+    for (const origin of ["https://evil.example", "http://ogremcp.example", "http://claude.ai", "https://evil.claude.ai", "https://claude.ai.evil.example", "null"]) {
       expect((await send(port, "POST", "/mcp", { origin })).status).toBe(403);
     }
     // The default list: PUBLIC_BASE_URL and the target clients' web origins.
@@ -210,7 +210,7 @@ describe("/mcp", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   const CLIENT_ID = "test-client";
   const RESOURCE = `${ISSUER}/mcp`;
   let admin: Pool;
@@ -220,7 +220,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
   let kits: KitRegistry;
 
   beforeAll(async () => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
     kits = loadKitRegistry({ adaptersDir });
 
@@ -300,7 +300,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     expect(JSON.parse(init.body)).toEqual({
       jsonrpc: "2.0",
       id: 1,
-      result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "ogmcp", version }, instructions: SERVER_INSTRUCTIONS },
+      result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "ogremcp", version }, instructions: SERVER_INSTRUCTIONS },
     });
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
@@ -313,7 +313,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
   const CAPTURED_AT = new Date("2026-09-21T12:00:00Z");
 
   /** A SavedVariables file of a Classic Era character, with synthetic data (§6.3). */
-  const SAVED_VARIABLES = `OpenGamerMCPDB = {
+  const SAVED_VARIABLES = `OgreMCPDB = {
   ["schema"] = 1,
   ["client"] = { ["project_id"] = 2, ["interface"] = 11509 },
   ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
@@ -420,7 +420,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       result: {
         isError: true,
         content: [
-          { type: "text", text: "World of Warcraft is turned off on the Games page of the Open Gamer MCP website. The player can turn it on there." },
+          { type: "text", text: "World of Warcraft is turned off on the Games page of the Ogre MCP website. The player can turn it on there." },
         ],
       },
     });

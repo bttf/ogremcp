@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
 
-import { ParseError, type Parsed, type UnknownFlavor } from "@ogmcp/sdk";
+import { ParseError, type Parsed, type UnknownFlavor } from "@ogremcp/sdk";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";

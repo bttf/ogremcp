@@ -35,8 +35,8 @@ severity.
    It runs `gh pr diff` itself; the orchestrator does not paste the diff.
 6. **Triage.** Orchestrator classifies findings:
    - *Blocker* — wrong behavior, security problem, breaks a contract in
-     `@ogmcp/sdk` or `docs/architecture.md`, or misses an acceptance criterion.
-     Goes back to the implementer.
+     `@ogremcp/sdk` or `docs/architecture.md`, or misses an acceptance
+     criterion. Goes back to the implementer.
    - *Non-blocking* — style, naming, future refactor. Recorded in the PR body or
      a follow-up Linear issue. Not fixed now.
    Re-review after a non-trivial fix.
@@ -70,7 +70,7 @@ work-in-progress.
 
 ## Linear conventions
 
-Workspace `redpinesoftware`, team `RED`, project **Open Gamer MCP**. Every
+Workspace `redpinesoftware`, team `RED`, project **Ogre MCP**. Every
 command needs `-w redpinesoftware`. The Linear MCP connector cannot see this
 workspace.
 

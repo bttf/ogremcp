@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/adapter"
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/upload"
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/adapter"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/upload"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // fakeAuth approves each login. The keychain saves only once saveOK is set;
@@ -45,8 +45,8 @@ func (f *fakeAuth) save() error {
 func (f *fakeAuth) Login(ctx context.Context, show func(auth.Code)) error {
 	show(auth.Code{
 		UserCode:                "BCDF-GHJK",
-		VerificationURI:         "https://ogmcp.example/device",
-		VerificationURIComplete: "https://ogmcp.example/device?user_code=BCDF-GHJK",
+		VerificationURI:         "https://ogremcp.example/device",
+		VerificationURIComplete: "https://ogremcp.example/device?user_code=BCDF-GHJK",
 		ExpiresIn:               10 * time.Minute,
 	})
 	return f.save()
@@ -134,7 +134,7 @@ func TestLoginWhenTheKeychainDoesNotSave(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	want := "https://ogmcp.example/device?user_code=BCDF-GHJK"
+	want := "https://ogremcp.example/device?user_code=BCDF-GHJK"
 	if !slices.Equal(opened, []string{want, want}) {
 		t.Errorf("opened %q", opened)
 	}

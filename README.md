@@ -1,14 +1,14 @@
-# Open Gamer MCP
+# Ogre MCP
 
-Open Gamer MCP (`ogmcp`) connects a video game to any AI agent through one remote MCP server, so the agent can read your live game state and give spoiler-free guidance. The design is in [`docs/architecture.md`](docs/architecture.md).
+Ogre MCP (Open Game Relay Engine, `ogremcp`) connects a video game to any AI agent through one remote MCP server, so the agent can read your live game state and give spoiler-free guidance. The design is in [`docs/architecture.md`](docs/architecture.md).
 
 ## Layout
 
 | Path | Contents | License |
 |---|---|---|
-| `packages/sdk/` | `@ogmcp/sdk`: manifest schema, `Interpreter` interface, shared types | MIT |
-| `kits/wow/` | `@ogmcp/kit-wow`: WoW adapter, manifest, interpreter, fixtures | MIT |
-| `platform/` | `@ogmcp/platform`: service, web UI, MCP server, bridge API, OAuth server | AGPL-3.0-or-later |
+| `packages/sdk/` | `@ogremcp/sdk`: manifest schema, `Interpreter` interface, shared types | MIT |
+| `kits/wow/` | `@ogremcp/kit-wow`: WoW adapter, manifest, interpreter, fixtures | MIT |
+| `platform/` | `@ogremcp/platform`: service, web UI, MCP server, bridge API, OAuth server | AGPL-3.0-or-later |
 | `bridge/` | Go module: the bridge that runs on the player's PC | MIT |
 
 ## Self-host

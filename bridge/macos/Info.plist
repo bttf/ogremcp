@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-	Info.plist for Open Gamer MCP.app. scripts/macos-app.sh replaces @VERSION@
+	Info.plist for Ogre MCP.app. scripts/macos-app.sh replaces @VERSION@
 	and names the binary after CFBundleExecutable. LSUIElement: a tray app has
 	no Dock icon. LSMinimumSystemVersion is the oldest macOS that Go 1.27
 	supports; .goreleaser.yaml passes the same version to clang.
@@ -9,13 +9,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>ogmcp-bridge</string>
+	<string>ogremcp-bridge</string>
 	<key>CFBundleIdentifier</key>
-	<string>software.redpine.ogmcp</string>
+	<string>software.redpine.ogremcp</string>
 	<key>CFBundleName</key>
-	<string>Open Gamer MCP</string>
+	<string>Ogre MCP</string>
 	<key>CFBundleDisplayName</key>
-	<string>Open Gamer MCP</string>
+	<string>Ogre MCP</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key>

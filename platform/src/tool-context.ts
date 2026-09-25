@@ -1,4 +1,4 @@
-import type { Character, Snapshot, ToolContext } from "@ogmcp/sdk";
+import type { Character, Snapshot, ToolContext } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 
 /**

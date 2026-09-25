@@ -49,7 +49,7 @@ type Manifest struct {
 	Kit string `json:"kit"`
 	// Version is the kit's version, semver.
 	Version string `json:"version"`
-	// SDK is the compatible @ogmcp/sdk range.
+	// SDK is the compatible @ogremcp/sdk range.
 	SDK        string `json:"sdk"`
 	ToolPrefix string `json:"tool_prefix"`
 	Root       Root   `json:"root"`

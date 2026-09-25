@@ -15,7 +15,7 @@ if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set:
 const HEX64 = "a".repeat(64);
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("history retention against Postgres (§11, §14)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   const lines: string[] = [];

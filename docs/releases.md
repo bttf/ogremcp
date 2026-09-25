@@ -51,7 +51,7 @@ for cross-compiles unless `CGO_ENABLED=1` is set.
 
 ```yaml
 version: 2
-project_name: ogmcp-bridge
+project_name: ogremcp-bridge
 builds:
   - id: bridge-darwin
     goos: [darwin]
@@ -127,7 +127,7 @@ OSS binary v2.18.2.
 - The `.app` is not an OSS feature. The `universal_binaries` post hook runs
   `bridge/scripts/macos-app.sh`, adapted from the prototype's `tray-app`
   target (`bttf/wow-guide@df80260`, `bridge/Makefile`) without its `lipo`
-  step. The script builds `Open Gamer MCP.app` from `bridge/macos/Info.plist`,
+  step. The script builds `Ogre MCP.app` from `bridge/macos/Info.plist`,
   gives it an ad hoc signature, and zips it. The zip is in
   `checksum.extra_files` and `release.extra_files`.
 - Build on macOS: the prototype's tray app needs cgo on macOS. The

@@ -16,8 +16,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 // maxBody is the largest answer the bridge reads from the kit routes.

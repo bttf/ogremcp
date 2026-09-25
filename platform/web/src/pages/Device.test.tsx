@@ -44,7 +44,7 @@ it("looks up the code of the bridge's link, names what asks, and posts the answe
       case "/device":
         if (init?.method !== "POST") return Response.json({ step: "enter", xsrf: "x1" });
         posted.push(String(init.body));
-        return Response.json({ step: "confirm", xsrf: "x1", user_code: "BCDF-GHJK", client_name: "Open Gamer MCP bridge" });
+        return Response.json({ step: "confirm", xsrf: "x1", user_code: "BCDF-GHJK", client_name: "Ogre MCP bridge" });
       default:
         return new Response("not found", { status: 404 });
     }
@@ -58,7 +58,7 @@ it("looks up the code of the bridge's link, names what asks, and posts the answe
   });
   // The code goes to the service in its stored form.
   expect(posted).toEqual(["xsrf=x1&user_code=BCDFGHJK"]);
-  expect(container.querySelector("bdi")?.textContent).toBe("Open Gamer MCP bridge");
+  expect(container.querySelector("bdi")?.textContent).toBe("Ogre MCP bridge");
   expect(container.querySelector(".og-device__code")?.textContent).toBe("BCDF-GHJK");
   expect(container.textContent).toContain("Approve only a code you started on your own computer.");
   expect([form.method, form.getAttribute("action")]).toEqual(["post", "/device"]);

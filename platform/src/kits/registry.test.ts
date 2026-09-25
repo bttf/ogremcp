@@ -30,7 +30,7 @@ function readZipNames(zip: Buffer): string[] {
 describe("loadKitRegistry", () => {
   let adaptersDir: string;
   beforeAll(() => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
   });
   afterAll(() => rmSync(adaptersDir, { recursive: true, force: true }));
@@ -46,7 +46,7 @@ describe("loadKitRegistry", () => {
 
     const zip = readFileSync(kit!.adapter!.path);
     expect(kit?.adapter).toMatchObject({
-      folder: "OpenGamerMCP",
+      folder: "OgreMCP",
       sha256: createHash("sha256").update(zip).digest("hex"),
       version: expect.stringMatching(/^\d+\.\d+\.\d+/),
       size: zip.length,
@@ -54,18 +54,18 @@ describe("loadKitRegistry", () => {
     expect(kit?.adapter?.data.equals(zip)).toBe(true);
     // A local .DS_Store stays out of the zip.
     const files = readdirSync(wow.adapterDir).filter((file) => !file.startsWith(".")).sort();
-    expect(readZipNames(zip)).toEqual(files.map((file) => `OpenGamerMCP/${file}`));
+    expect(readZipNames(zip)).toEqual(files.map((file) => `OgreMCP/${file}`));
   });
 
   it("refuses to start with an invalid manifest or tool name", () => {
     const badManifest: KitSource = { ...wow, manifest: { ...wowManifest, tool_prefix: "WoW" } };
     expect(() => loadKitRegistry({ sources: [badManifest], adaptersDir })).toThrow(
-      /^@ogmcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/tool_prefix /,
+      /^@ogremcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/tool_prefix /,
     );
     // A search prefix must be https and end in `/`: `/classic` would admit `/classic-ptr/` (§12).
     const flavors = { ...(wowManifest["flavors"] as object), classic_era: { status: "supported", search: ["https://www.wowhead.com/classic"] } };
     expect(() => loadKitRegistry({ sources: [{ ...wow, manifest: { ...wowManifest, flavors } }], adaptersDir })).toThrow(
-      /^@ogmcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/flavors\/classic_era\/search\/0 /,
+      /^@ogremcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/flavors\/classic_era\/search\/0 /,
     );
 
     const tool = {
@@ -76,7 +76,7 @@ describe("loadKitRegistry", () => {
     };
     const badTool: KitSource = { ...wow, interpreter: { ...wow.interpreter, tools: [tool] } };
     expect(() => loadKitRegistry({ sources: [badTool], adaptersDir })).toThrow(
-      /^@ogmcp\/kit-wow: Tool name "get_state" must start with "wow_"/,
+      /^@ogremcp\/kit-wow: Tool name "get_state" must start with "wow_"/,
     );
   });
 
@@ -86,21 +86,21 @@ describe("loadKitRegistry", () => {
       manifest,
       interpreter: { ...wow.interpreter, tools: names.map((name) => ({ ...wow.interpreter.tools[0]!, name })) },
     });
-    expect(() => checkKits([withTools(["wow_state"])])).toThrow('@ogmcp/kit-wow: Tool name "wow_state" must be wow_{verb}_{noun}');
+    expect(() => checkKits([withTools(["wow_state"])])).toThrow('@ogremcp/kit-wow: Tool name "wow_state" must be wow_{verb}_{noun}');
     // The manifest schema allows a 55-character tool_prefix; the tool's full name is 65 characters.
     const prefix = "w".repeat(55);
     expect(() => checkKits([withTools([`${prefix}_get_state`], { ...wowManifest, tool_prefix: prefix })])).toThrow(
-      /^@ogmcp\/kit-wow: Tool name "w+_get_state" is longer than 64 characters\.$/,
+      /^@ogremcp\/kit-wow: Tool name "w+_get_state" is longer than 64 characters\.$/,
     );
     const nine = Array.from({ length: 9 }, (_, i) => `wow_get_state${i}`);
     expect(() => checkKits([withTools(nine.slice(0, 8))])).not.toThrow();
-    expect(() => checkKits([withTools(nine)])).toThrow("@ogmcp/kit-wow: the kit has 9 tools, and a kit may have at most 8 (§10.2).");
+    expect(() => checkKits([withTools(nine)])).toThrow("@ogremcp/kit-wow: the kit has 9 tools, and a kit may have at most 8 (§10.2).");
   });
 
   it("refuses two kits with the same tool_prefix", () => {
-    const other: KitSource = { ...wow, package: "@ogmcp/kit-other", manifest: { ...wowManifest, kit: "other" } };
+    const other: KitSource = { ...wow, package: "@ogremcp/kit-other", manifest: { ...wowManifest, kit: "other" } };
     expect(() => loadKitRegistry({ sources: [wow, other], adaptersDir })).toThrow(
-      '@ogmcp/kit-wow and @ogmcp/kit-other both have tool_prefix "wow"',
+      '@ogremcp/kit-wow and @ogremcp/kit-other both have tool_prefix "wow"',
     );
   });
 });
@@ -108,7 +108,7 @@ describe("loadKitRegistry", () => {
 describe("readAdapterVersion", () => {
   // kits/wow/test/adapter_test.lua checks that the adapter stamps this version as addon_version (§6.3).
   it("reads the TOC's ## Version, which every TOC must name the same (§8.2)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ogmcp-toc-"));
+    const dir = mkdtempSync(join(tmpdir(), "ogremcp-toc-"));
     try {
       writeFileSync(join(dir, "Addon.toc"), "\uFEFF## Interface: 11509\r\n## Title: Addon\r\n## Version: 1.2.3-beta.1\r\nAddon.lua\r\n");
       expect(readAdapterVersion(dir)).toBe("1.2.3-beta.1");
@@ -125,7 +125,7 @@ describe("readAdapterVersion", () => {
 describe("zipAdapter", () => {
   let dir: string;
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "ogmcp-adapter-"));
+    dir = mkdtempSync(join(tmpdir(), "ogremcp-adapter-"));
     mkdirSync(join(dir, "sub"));
     mkdirSync(join(dir, "tests"));
     mkdirSync(join(dir, ".git"));
@@ -145,7 +145,7 @@ describe("zipAdapter", () => {
   });
 
   it("fails on a name that is a path on Windows (§7)", () => {
-    const bad = mkdtempSync(join(tmpdir(), "ogmcp-adapter-bad-"));
+    const bad = mkdtempSync(join(tmpdir(), "ogremcp-adapter-bad-"));
     try {
       writeFileSync(join(bad, "a\\..\\..\\evil.lua"), "-- evil\n");
       expect(() => zipAdapter(bad, "Addon")).toThrow(/a name with "\\" or ":"/);

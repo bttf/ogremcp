@@ -16,7 +16,7 @@ package process
 import (
 	"strings"
 
-	"github.com/bttf/ogmcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
 )
 
 // Lister lists the executable names or paths of the running processes.
