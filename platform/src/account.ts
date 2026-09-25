@@ -18,10 +18,9 @@ import { logger } from "./log.js";
  *   (`oidc_models`): the grants of every bridge and agent, every token and
  *   code of them, and the user's OAuth sessions and interactions. Then the
  *   user's web sessions, identities, enabled games, devices, and the user.
- *   Access tokens are looked up at each request (`requireToken`), so every
- *   bridge and agent token is refused from the commit on. A table that
- *   references `users` and is not named here goes with the user's row, by
- *   its cascade.
+ *   `usage_daily` goes with the user's row, by its cascade. Access tokens
+ *   are looked up at each request (`requireToken`), so every bridge and
+ *   agent token is refused from the commit on.
  *
  * `search_cache` is not linked to users and stays (§11).
  *

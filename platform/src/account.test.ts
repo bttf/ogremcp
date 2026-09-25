@@ -50,7 +50,7 @@ const DATA_TABLES = ["uploads", "snapshots", "events", "issues"];
  * the table is named here, and in `DATA_TABLES` when "Delete my data" must
  * delete it too.
  */
-const USER_TABLES = [...DATA_TABLES, "oauth_identities", "web_sessions", "devices", "user_games"];
+const USER_TABLES = [...DATA_TABLES, "oauth_identities", "web_sessions", "devices", "user_games", "usage_daily"];
 
 it("runs a delete once more when Postgres aborts it for a deadlock", async () => {
   const statements: string[] = [];
@@ -190,6 +190,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete acco
     const cookie = `ogmcp_session=${(await sessions.create(user.id)).token}`;
     await pool.query("insert into oauth_identities (user_id, provider, provider_user_id) values ($1, 'google', $2)", [user.id, user.uuid]);
     await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [user.id]);
+    await pool.query("insert into usage_daily (user_id, day, tool_calls) values ($1, current_date, 3)", [user.id]);
     const bridge = await approve(user, true);
     const agent = await approve(user, false);
     const hex = () => randomBytes(32).toString("hex");
