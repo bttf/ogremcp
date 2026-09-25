@@ -330,7 +330,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Platforms:** Windows and macOS. macOS ships as a universal binary (Apple Silicon + Intel). Both are v1; who tests Windows: §18.2.
   - **Minimum OS:** macOS 13 (Go 1.27) and Windows 10 (Go 1.21+).
 - **Generic:** no game logic. Everything game-specific arrives as manifests and adapters from the platform, for the user's enabled kits (§8.2).
-- **Tray UI:** status (last upload, latest error message), device-code login, folder picker for `prompt`, start-at-login.
+- **Tray UI:** status (last upload, latest error message), device-code login, folder picker for `prompt`, start-at-login, and the server to use (saved in the bridge's settings, for self-hosters, §13.3).
 - **Credentials:** the refresh token lives in the OS keychain (Windows Credential Manager, macOS Keychain), never in a plain file.
 - **Watching:** `fsnotify` on the *parent directories* of resolved instances, filtered by file name. WoW may replace the file on save (it keeps `.bak` copies), which breaks file-level watches. Debounce until writes settle (proposed 2 s). Re-resolve globs at start and periodically (proposed every 5 min) to pick up new flavor folders and accounts.
 - **Upload:** §8.3. **Offline:** keep only the latest pending upload per source instance, never a backlog.
@@ -405,7 +405,7 @@ Response body: `{ "status": …, "message"?: …, "snapshot_uuid"?: … }`
 | `bad_request` | 400 | Malformed request: a missing or extra part, bad JSON, bad hex, an unknown kit or source, or a `sha256` that doesn't match the uncompressed bytes |
 | (none) | 401 | Token invalid or revoked; the bridge prompts re-login |
 
-- **Device limit (free tier):** the first device to upload holds the user's upload slot. Revoking that device frees the slot (*proposed*). Other devices get `device_limit`.
+- **Device limit (free tier):** the first device whose upload is stored (produces a snapshot) holds the user's upload slot; a failed parse or a rejected flavor claims nothing. Revoking that device, or its grant ending, frees the slot (*proposed*). Other devices get `device_limit`.
 - **Cap: 5 MB of *uncompressed* bytes** per upload. Decompress with a hard limit (gzip-bomb safe).
 - **Dedup key:** `(device, kit, source_id, instance)`. A duplicate still updates the device's last-seen time.
 - **Kits:** ingest accepts any kit in the registry, enabled on the Games page or not.
@@ -514,7 +514,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Order by `snapshot_at`**, not insert time, because offline uploads arrive late. Indexes: `(user_id, kit, snapshot_at DESC)` and `(user_id, kit, flavor, character_key, snapshot_at DESC)`.
 - **Retention by tier:** free keeps 30 days of uploads and snapshots; paid keeps them forever. A daily job deletes expired rows. After a paid-to-free downgrade, history older than 30 days is kept for a 30-day grace period, then deleted (§19.1 D9).
 - **Stints** (§3) are derived from gaps between snapshots (proposed: more than 30 minutes). There is no separate tracking.
-- **Delete my data** hard-deletes the user's uploads, snapshots, events, and issues. **Delete account** also removes devices, agent grants, identities, and the user. `search_cache` isn't user-linked and stays.
+- **Delete my data** hard-deletes the user's uploads, snapshots, events, and issues. **Delete account** also removes devices, agent grants, identities, and the user. `search_cache` isn't user-linked and stays, so a cached query can outlive the delete until its TTL. Delete my data keeps `usage_daily`, so it can't reset the day's cap; Delete account removes it.
 - Rough volume: ~8 KB compressed × 30 uploads/day × 1,000 users ≈ 240 MB/day. Free-tier retention bounds most of it; paid grows forever. Monitor it.
 
 ## 12. Game-scoped search and grounding `[v1]`
@@ -589,7 +589,7 @@ No snapshot diagnostics pages. Players see their state through their agent.
 | History tools (`*_get_history`) | No (upgrade message) | Yes |
 
 - **Everyone:** the per-device ingest rate limit and the 5 MB cap (§8.3).
-- **Cap reached:** tools return a plain-language message with the reset time (§10.5).
+- **Cap reached:** tools return a plain-language message with the reset time (the next UTC midnight, §10.5). Every tool call that runs counts, except one that fails through the service's fault (`search_unavailable`, an internal error), which is refunded (owner decision, 2026-09-25). With no cap set, calls are still counted, so the numbers can be measured.
 - **Cap numbers: measure, then set** (config). They depend on Firecrawl's per-call cost and the cache hit rate.
 - **Billing:** `[decide]` D5. Needed before the paid tier launches.
 
@@ -639,6 +639,7 @@ We never see the agent's answers, only its tool calls. Efficacy is inferred from
 
 - **User-triggered only.** The agent calls it when the user says an answer was wrong or asks to report a problem. It never calls it on its own initiative or to flag its own uncertainty.
 - **Tiny args.** The agent passes a short note. The server attaches the context itself: the visit's recent tool calls and the snapshot the agent read.
+- **Limit:** a per-user number of reports per rolling day (*proposed* 10, config), so a looping agent can't fill the table.
 - It never touches the game, so the read-only principle holds.
 - **Privacy:** search queries and issue notes are user data, covered by "Delete my data" (§11).
 
