@@ -17,6 +17,7 @@ import type { ScopedSearch } from "./search.js";
 import { securityHeaders } from "./security-headers.js";
 import type { ToolContextSettings } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
+import { createUsageMeter, type ToolCallCaps } from "./usage.js";
 import { webFiles, webPages } from "./web.js";
 
 export interface AppOptions {
@@ -59,6 +60,12 @@ export interface AppOptions {
    * gives it a pool of its own. Default: none, and nothing is recorded.
    */
   events?: EventRecorder;
+  /**
+   * `TOOL_CALLS_PER_DAY_FREE` and `TOOL_CALLS_PER_DAY_PAID`, the daily caps
+   * of `/mcp`'s tool calls (§14). The calls are counted either way. Default:
+   * `NO_TOOL_CALL_CAPS`.
+   */
+  toolCallCaps?: ToolCallCaps;
   /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
   https?: boolean;
   /**
@@ -86,6 +93,7 @@ export function createApp({
   ingest,
   ingestLog,
   events,
+  toolCallCaps,
   https = false,
   trustProxyHops = 0,
   log = logger.error,
@@ -102,7 +110,8 @@ export function createApp({
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
     // The registry checks the platform tools' names: a bad one stops the start (§10.1).
-    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, fetchPage, log, events });
+    const usage = createUsageMeter({ pool: auth.pool, caps: toolCallCaps });
+    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, fetchPage, log, events, usage });
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) {

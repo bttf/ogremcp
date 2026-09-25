@@ -9,6 +9,7 @@ import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } f
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
 import { DEFAULT_SEARCH_CACHE, type SearchCacheSettings } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
+import type { ToolCallCaps } from "./usage.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
@@ -100,6 +101,12 @@ export interface Config {
    */
   searchCache: SearchCacheSettings;
   /**
+   * `TOOL_CALLS_PER_DAY_FREE` and `TOOL_CALLS_PER_DAY_PAID`: the most MCP
+   * tool calls a user of each tier makes per UTC day (§14, `usage.ts`). Each
+   * one unset is null: no cap. The calls are counted either way.
+   */
+  toolCallCaps: ToolCallCaps;
+  /**
    * `BRIDGE_DOWNLOAD_URL`: where the Get started page sends people to
    * download the bridge (§7, §13.2), or null when it is unset. The page then
    * says the download is not available yet.
@@ -150,6 +157,12 @@ function positiveInt(name: string, value: string | undefined, fallback: number):
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a whole number of 1 or more`);
   return n;
+}
+
+/** A whole number of 1 or more, or null when unset. */
+function optionalPositiveInt(name: string, value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  return positiveInt(name, value, 1);
 }
 
 function nonNegativeInt(name: string, value: string | undefined, fallback: number): number {
@@ -410,6 +423,10 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       ttlMs: positiveInt("SEARCH_CACHE_TTL_DAYS", env["SEARCH_CACHE_TTL_DAYS"], DEFAULT_SEARCH_CACHE.ttlMs / DAY_MS) * DAY_MS,
       emptyTtlMs:
         positiveInt("SEARCH_CACHE_EMPTY_TTL_MINUTES", env["SEARCH_CACHE_EMPTY_TTL_MINUTES"], DEFAULT_SEARCH_CACHE.emptyTtlMs / MINUTE_MS) * MINUTE_MS,
+    },
+    toolCallCaps: {
+      free: optionalPositiveInt("TOOL_CALLS_PER_DAY_FREE", env["TOOL_CALLS_PER_DAY_FREE"]),
+      paid: optionalPositiveInt("TOOL_CALLS_PER_DAY_PAID", env["TOOL_CALLS_PER_DAY_PAID"]),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     logLevel: logLevel(env["LOG_LEVEL"]),

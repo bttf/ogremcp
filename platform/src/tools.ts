@@ -13,6 +13,7 @@ import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
 import { errorResult, gameOffResult, kitToolResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
+import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js";
 
 /**
  * The tool registry: the MCP tools each user may list and call (§10).
@@ -24,6 +25,12 @@ import { checkPlatformToolName } from "./tool-names.js";
  * `ToolContext` for the user and the kit (`tool-context.ts`), a platform tool
  * call a `PlatformToolContext`. What a call answers is the response envelope
  * of `tool-envelope.ts` (§10.5).
+ *
+ * Each call of a tool the user may call is counted toward the user's daily
+ * tool calls before the tool runs (`usage.ts`, §14). A call past the tier's
+ * cap does not run and is not counted: it answers `capReachedResult`. A call
+ * to a tool of a game the user has turned off runs nothing and is not
+ * counted.
  *
  * Each call of a tool the user may call, or of a tool of a game the user has
  * turned off, writes one events row (`events.ts`, §16) once it has its
@@ -103,6 +110,8 @@ export interface ToolRegistryOptions {
   log?: (line: string) => void;
   /** Where each call's events row goes (§16). Default: none, and nothing is recorded. */
   events?: EventRecorder;
+  /** Counts each call and applies the daily caps (§14). Default: counts on `pool`, with no cap. */
+  usage?: UsageMeter;
 }
 
 export interface ToolRegistry {
@@ -113,9 +122,10 @@ export interface ToolRegistry {
    * response envelope (`tool-envelope.ts`): a kit tool's result is checked,
    * the handler's errors become `isError` results, and a tool of a game the
    * user has not enabled gets an `isError` result that says the game is
-   * turned off. Null when there is no user with this uuid or no tool of that
-   * name; neither writes an events row. An error while looking up the user
-   * propagates.
+   * turned off, and a call past the daily cap gets one that says when the
+   * count resets. Null when there is no user with this uuid or no tool of
+   * that name; neither writes an events row. An error while looking up the
+   * user or counting the call propagates.
    */
   call(caller: ToolCaller, name: string, args: unknown): Promise<ToolResult | null>;
 }
@@ -137,6 +147,7 @@ export function createToolRegistry({
   fetchPage = null,
   log = logger.error,
   events,
+  usage = createUsageMeter({ pool }),
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);
@@ -176,7 +187,12 @@ export function createToolRegistry({
       let answer: ToolAnswer;
       let schema: ToolInputSchema;
       const tool = found.tools.find(({ def }) => def.name === name);
-      if (tool !== undefined) {
+      // Before the tool runs, so that a call past the cap costs nothing (§14).
+      const capped = tool === undefined ? null : await usage.count(user);
+      if (tool !== undefined && capped !== null) {
+        schema = tool.def.inputSchema;
+        answer = { result: capReachedResult(capped), error: "cap_reached" };
+      } else if (tool !== undefined) {
         schema = tool.def.inputSchema;
         answer = await answerCall(tool, args, { pool, user, games, settings, search, fetchPage, event }, log);
       } else {
