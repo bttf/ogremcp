@@ -23,7 +23,8 @@ export class PostgresAdapter implements Adapter {
 
   /**
    * Stores the payload under `id`, replacing any earlier one. `expiresIn` is
-   * in seconds; without it the row does not expire, as for a client.
+   * in seconds; without it the row does not expire, as for a client. A
+   * replaced row keeps its `last_used_at` (migrations 0004 and 0014).
    */
   async upsert(id: string, payload: AdapterPayload, expiresIn?: number): Promise<void> {
     let nul = id.includes("\0");

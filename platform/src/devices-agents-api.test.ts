@@ -268,6 +268,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
     });
     expect(((await refreshed.json()) as Record<string, unknown>)["error"]).toBe("invalid_grant");
     expect(await api(user, "GET", "/api/v1/agents")).toEqual({ status: 200, body: { agents: [] } });
+
+    // "Last used" is the grant's own, and outlives its access tokens, which the cleanup deletes once expired (§11).
+    await pool.query("delete from oidc_models where model = 'AccessToken' and grant_id = $1", [theirs.grantId]);
+    expect(await api(other, "GET", "/api/v1/agents")).toMatchObject({ body: { agents: [{ last_used_at: expect.any(String) }] } });
   });
 
   it("lists an agent whose CIMD document is not cached by its host, and fetches nothing", async () => {
