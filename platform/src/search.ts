@@ -17,8 +17,8 @@ import { logger } from "./log.js";
  * `ScopedSearch` is the one call to the provider. Its inputs are the search
  * cache's key (§12): the scope's kit, flavor, and hash, and the normalized
  * query. The request is made from them alone, and the answer is the
- * post-filtered hits, so the shared cache can wrap it and store them
- * (RED-335).
+ * post-filtered hits, so the shared cache (`search-cache.ts`) wraps it and
+ * stores them.
  *
  * The post-filter, `normalizeQuery`, `clip`, and `plainText` are adapted from
  * `allowedUrl()`, `selectHits()`, `normalizeQuery()`, `clip()`, and

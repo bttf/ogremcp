@@ -8,9 +8,9 @@ import { logger } from "./log.js";
  * `PageFetch` is the one call to the provider. Its input is the page cache's
  * key (§12): the page's URL, in scope and without its fragment (`pageKey`).
  * Its answer is the page's final URL, unchecked, and the page's text as
- * `pageText` makes it. So the shared cache can wrap it and store the answer
- * (RED-335), and the caller checks the final URL against the game's scope on
- * every call, from the cache too.
+ * `pageText` makes it. So the shared cache (`search-cache.ts`) wraps it and
+ * stores the answer, and the caller checks the final URL against the game's
+ * scope on every call, from the cache too.
  *
  * `pageText` removes images and link targets and keeps link text (S3,
  * docs/spikes/s3-firecrawl-scoping.md). Wowhead markdown is mostly that
