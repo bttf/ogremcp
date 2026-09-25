@@ -17,8 +17,8 @@ import { logger } from "./log.js";
  * `ScopedSearch` is the one call to the provider. Its inputs are the search
  * cache's key (§12): the scope's kit, flavor, and hash, and the normalized
  * query. The request is made from them alone, and the answer is the
- * post-filtered hits, so the shared cache can wrap it and store them
- * (RED-335).
+ * post-filtered hits, so the shared cache (`search-cache.ts`) wraps it and
+ * stores them.
  *
  * The post-filter, `normalizeQuery`, `clip`, and `plainText` are adapted from
  * `allowedUrl()`, `selectHits()`, `normalizeQuery()`, `clip()`, and
@@ -65,9 +65,9 @@ export interface SearchHit {
   excerpt: string;
 }
 
-/** What one search cost, for the events table (§16). The `ScopedSearch` sets it as it runs. */
+/** What one search or page fetch cost, for the events table (§16). The `ScopedSearch` or `PageFetch` sets it as it runs. */
 export interface SearchUsage {
-  /** The Firecrawl credits the search used, when Firecrawl said. */
+  /** The Firecrawl credits the search or page fetch used, when Firecrawl said. */
   searchCredits?: number;
   /** Whether the search cache answered (§12). */
   cacheHit?: boolean;

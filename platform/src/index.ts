@@ -22,6 +22,7 @@ import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { startClientCleanup } from "./oidc-registration.js";
 import { firecrawlPageFetch } from "./pages.js";
 import { firecrawlScopedSearch } from "./search.js";
+import { cachedPageFetch, cachedSearch } from "./search-cache.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -129,12 +130,14 @@ try {
   process.exit(1);
 }
 
-// Game-scoped search and page fetches (§12). Without a key, search_game_info
-// and fetch_game_page answer search_unavailable. No line repeats the key.
+// Game-scoped search and page fetches (§12), through the shared cache. Without
+// a key, search_game_info and fetch_game_page answer search_unavailable. No
+// line repeats the key.
 const { apiKey, timeoutMs } = config.firecrawl;
-const search = apiKey === null ? null : firecrawlScopedSearch({ apiKey, timeoutMs });
-const fetchPage = apiKey === null ? null : firecrawlPageFetch({ apiKey, timeoutMs });
-logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecrawl"}`);
+const cache = { pool, settings: config.searchCache };
+const search = apiKey === null ? null : cachedSearch(firecrawlScopedSearch({ apiKey, timeoutMs }), cache);
+const fetchPage = apiKey === null ? null : cachedPageFetch(firecrawlPageFetch({ apiKey, timeoutMs }), cache);
+logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecrawl, with the shared cache"}`);
 
 // The events table (§16): one row per tool call and ingest request, written
 // on a pool of its own, so that a slow or locked table never holds a

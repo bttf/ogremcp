@@ -1,4 +1,4 @@
-import { jsonResult, userError } from "@ogmcp/sdk";
+import { jsonResult, type ToolResult, userError } from "@ogmcp/sdk";
 
 import { FirecrawlError } from "./firecrawl.js";
 import type { Kit } from "./kits/registry.js";
@@ -6,7 +6,8 @@ import { logger } from "./log.js";
 import { type Page, pageKey } from "./pages.js";
 import { clip, inScope, MAX_URL, searchScope } from "./search.js";
 import { NOT_ENABLED_MESSAGE, NOT_SET_UP_MESSAGE, noSources, UNAVAILABLE_MESSAGE } from "./search-game-info.js";
-import type { PlatformTool } from "./tools.js";
+import type { ToolCallError } from "./tool-envelope.js";
+import type { PlatformTool, PlatformToolContext } from "./tools.js";
 
 /**
  * `fetch_game_page(game, url)` (§10.3, §12): a page of a game's vetted
@@ -28,6 +29,10 @@ import type { PlatformTool } from "./tools.js";
  * scope, a page its site answers 404 to, and `search_unavailable` without
  * `FIRECRAWL_API_KEY`, when Firecrawl fails (429, 5xx, timeout), or when the
  * site answers another 4xx or 5xx, such as a challenge page.
+ *
+ * The call's events row (§16) gets whether the cache answered, what the fetch
+ * cost, and the category of its error: `no_sources`, `out_of_scope` for a URL
+ * or final URL out of scope, `not_found`, or `search_unavailable`.
  *
  * The description carries no game text, and nothing from a page goes into a
  * description or instructions (§10.5).
@@ -71,27 +76,31 @@ export const fetchGamePage: PlatformTool = {
     const kit = ctx.games.find((game) => game.key === input.game);
     if (kit === undefined) return userError(NOT_ENABLED_MESSAGE);
     const prefixes = gamePrefixes(kit);
-    if (prefixes.length === 0) return noSources(kit, null);
+    if (prefixes.length === 0) return refuse(ctx, "no_sources", noSources(kit, null));
     const url = inScope(input.url, prefixes);
     if (url === null) {
-      return userError(`That URL is not in ${kit.name}'s vetted sources, so it was not fetched. Use a URL from a search_game_info result.`);
+      return refuse(ctx, "out_of_scope", `That URL is not in ${kit.name}'s vetted sources, so it was not fetched. Use a URL from a search_game_info result.`);
     }
-    if (ctx.fetchPage === null) return userError(NOT_SET_UP_MESSAGE);
+    if (ctx.fetchPage === null) return refuse(ctx, "search_unavailable", NOT_SET_UP_MESSAGE);
     let page: Page;
     try {
-      page = await ctx.fetchPage(pageKey(url));
+      page = await ctx.fetchPage(pageKey(url), prefixes, ctx.event);
     } catch (err) {
-      if (err instanceof FirecrawlError) return userError(UNAVAILABLE_MESSAGE);
+      if (err instanceof FirecrawlError) return refuse(ctx, "search_unavailable", UNAVAILABLE_MESSAGE);
       throw err;
     }
     const finalUrl = inScope(page.url, prefixes);
     if (finalUrl === null) {
       logger.warn("page refused", { reason: "final_url_out_of_scope" });
-      return userError(`That URL leads to a page outside ${kit.name}'s vetted sources, so its text is not returned. Use a URL from a search_game_info result.`);
+      return refuse(
+        ctx,
+        "out_of_scope",
+        `That URL leads to a page outside ${kit.name}'s vetted sources, so its text is not returned. Use a URL from a search_game_info result.`,
+      );
     }
     // A missing page, or an error or challenge page: its text is not the page's.
-    if (page.status === 404) return userError(NOT_FOUND_MESSAGE);
-    if (page.status !== undefined && page.status >= 400) return userError(UNAVAILABLE_MESSAGE);
+    if (page.status === 404) return refuse(ctx, "not_found", NOT_FOUND_MESSAGE);
+    if (page.status !== undefined && page.status >= 400) return refuse(ctx, "search_unavailable", UNAVAILABLE_MESSAGE);
     const limit = ctx.settings.fetchPageMaxChars;
     return jsonResult({
       game: kit.key,
@@ -101,6 +110,12 @@ export const fetchGamePage: PlatformTool = {
     });
   },
 };
+
+/** A user-facing refusal, a message or a `userError` result, with `error` as the category of the call's events row. */
+function refuse(ctx: PlatformToolContext, error: ToolCallError, refusal: string | ToolResult): ToolResult {
+  ctx.event.error = error;
+  return typeof refusal === "string" ? userError(refusal) : refusal;
+}
 
 /** The checked arguments, or a user-facing message on a bad one. */
 function readInput(args: unknown): Input | string {

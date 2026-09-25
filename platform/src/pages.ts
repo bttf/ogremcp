@@ -1,16 +1,18 @@
 import { failureLevel, FirecrawlError, type FirecrawlOptions, type FirecrawlPage, firecrawlScrape } from "./firecrawl.js";
 import { logger } from "./log.js";
+import type { SearchUsage } from "./search.js";
 
 /**
  * Page fetches (§12), behind the `fetch_game_page` tool
  * (`fetch-game-page.ts`).
  *
  * `PageFetch` is the one call to the provider. Its input is the page cache's
- * key (§12): the page's URL, in scope and without its fragment (`pageKey`).
- * Its answer is the page's final URL, unchecked, and the page's text as
- * `pageText` makes it. So the shared cache can wrap it and store the answer
- * (RED-335), and the caller checks the final URL against the game's scope on
- * every call, from the cache too.
+ * key (§12): the page's URL, in scope and without its fragment (`pageKey`),
+ * and the caller's scope. Its answer is the page's final URL, unchecked, and
+ * the page's text as `pageText` makes it. So the shared cache
+ * (`search-cache.ts`) wraps it and stores the answer when the final URL is in
+ * the caller's scope, and the caller checks the final URL against the game's
+ * scope on every call, from the cache too.
  *
  * `pageText` removes images and link targets and keeps link text (S3,
  * docs/spikes/s3-firecrawl-scoping.md). Wowhead markdown is mostly that
@@ -37,10 +39,11 @@ export interface Page {
 }
 
 /**
- * Fetches the page at `url`, a `pageKey` result. Throws a `FirecrawlError`
- * when the provider fails.
+ * Fetches the page at `url`, a `pageKey` result, and sets what the fetch cost
+ * on `usage`. `prefixes` is the caller's scope: the cache stores only a page
+ * whose final URL is in it. Throws a `FirecrawlError` when the provider fails.
  */
-export type PageFetch = (url: string) => Promise<Page>;
+export type PageFetch = (url: string, prefixes: readonly string[], usage?: SearchUsage) => Promise<Page>;
 
 /** A page's cache key (S3): the URL, an `inScope` result, without its fragment. Wowhead links carry fragments such as `#comments`. */
 export function pageKey(url: string): string {
@@ -84,12 +87,13 @@ export function pageText(markdown: string): string {
 }
 
 /**
- * The `PageFetch` on Firecrawl: one scrape per call. Each call writes one log
- * line with the page's HTTP status, sizes, and time, or the failure's reason
- * and status. Never the URL: the line carries the user's uuid.
+ * The `PageFetch` on Firecrawl: one scrape per call. It sets the credits
+ * Firecrawl says the scrape used on `usage`. Each call writes one log line
+ * with the page's HTTP status, sizes, credits, and time, or the failure's
+ * reason and status. Never the URL: the line carries the user's uuid.
  */
 export function firecrawlPageFetch(options: FirecrawlOptions): PageFetch {
-  return async (url) => {
+  return async (url, _prefixes, usage) => {
     const started = performance.now();
     let page: FirecrawlPage;
     try {
@@ -100,8 +104,15 @@ export function firecrawlPageFetch(options: FirecrawlOptions): PageFetch {
       }
       throw err;
     }
+    if (usage !== undefined && page.creditsUsed !== null) usage.searchCredits = page.creditsUsed;
     const markdown = pageText(page.markdown);
-    logger.info("page fetch", { status: page.status, source_chars: page.markdown.length, chars: markdown.length, duration_ms: since(started) });
+    logger.info("page fetch", {
+      status: page.status,
+      source_chars: page.markdown.length,
+      chars: markdown.length,
+      credits: page.creditsUsed,
+      duration_ms: since(started),
+    });
     return { url: page.url, markdown, cut: page.markdown.length > MAX_PAGE_SOURCE, ...(page.status !== undefined && { status: page.status }) };
   };
 }
