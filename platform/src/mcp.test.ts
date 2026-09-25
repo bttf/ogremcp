@@ -359,23 +359,19 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     return JSON.parse(res.body);
   }
 
-  it("lists wow_get_state for a user with WoW enabled, and calls it on that user's snapshot only (§10.2)", async () => {
+  it("lists the WoW tools for a user with WoW enabled, and calls wow_get_state on that user's snapshot only (§10.2)", async () => {
     const port = await serve(pool, provider, kits);
     const zoela = await player({ wow: true, snapshot: true });
-    const [wowGetState] = kits.get("wow")?.interpreter.tools ?? [];
+    const wowTools = kits.get("wow")?.interpreter.tools ?? [];
 
+    expect(wowTools.map((tool) => tool.name)).toEqual(["wow_get_state", "wow_get_history"]);
     expect(await rpc(port, zoela, "tools/list")).toEqual({
       jsonrpc: "2.0",
       id: 1,
       result: {
         tools: [
           ...PLATFORM,
-          {
-            name: "wow_get_state",
-            description: wowGetState?.description,
-            inputSchema: wowGetState?.inputSchema,
-            annotations: wowGetState?.annotations,
-          },
+          ...wowTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations })),
         ],
       },
     });
