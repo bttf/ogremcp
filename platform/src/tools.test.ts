@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { jsonResult, type ToolDef } from "@ogmcp/sdk";
+import { jsonResult, type ToolDef } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -37,7 +37,7 @@ describe("createToolRegistry", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("paid-only tools (§10.2, §14)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -105,7 +105,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("paid-only tools (§10.2, §14)
         content: [
           {
             type: "text",
-            text: "This tool is part of the Open Gamer MCP paid plan, and the player is on the free plan, so it did not run. The Account page of the Open Gamer MCP website will show the plans.",
+            text: "This tool is part of the Ogre MCP paid plan, and the player is on the free plan, so it did not run. The Account page of the Ogre MCP website will show the plans.",
           },
         ],
       });

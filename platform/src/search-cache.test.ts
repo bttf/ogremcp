@@ -21,7 +21,7 @@ const HIT: SearchHit = { title: "Hogger - NPC", url: "https://www.wowhead.com/cl
 const PAGE: Page = { url: "https://www.wowhead.com/classic/npc=448/hogger", markdown: "# Hogger\n\nFound in Elwynn Forest.", cut: false, status: 200 };
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the shared search cache (§12)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let now: Date;

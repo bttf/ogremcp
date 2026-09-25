@@ -75,7 +75,7 @@ it("runs a delete once more when Postgres aborts it for a deadlock", async () =>
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete account against Postgres (§11)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;
@@ -86,7 +86,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete acco
   const lines: string[] = [];
 
   beforeAll(async () => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
     admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
     await admin.query(`create database "${name}"`);
@@ -187,7 +187,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete acco
     const { rows } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
     const user = rows[0];
     if (user === undefined) throw new Error("no user row");
-    const cookie = `ogmcp_session=${(await sessions.create(user.id)).token}`;
+    const cookie = `ogremcp_session=${(await sessions.create(user.id)).token}`;
     await pool.query("insert into oauth_identities (user_id, provider, provider_user_id) values ($1, 'google', $2)", [user.id, user.uuid]);
     await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [user.id]);
     await pool.query("insert into usage_daily (user_id, day, tool_calls) values ($1, current_date, 3)", [user.id]);
@@ -298,7 +298,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete acco
 
     const res = await del(user, "/api/v1/account");
     expect(res.status).toBe(204);
-    expect(res.headers.get("set-cookie")).toMatch(/^ogmcp_session=;/);
+    expect(res.headers.get("set-cookie")).toMatch(/^ogremcp_session=;/);
     const after = await rowCounts(user);
     expect(after).toEqual(Object.fromEntries(Object.keys(after).map((table) => [table, 0])));
     expect(await rowCounts(other)).toEqual(otherBefore);

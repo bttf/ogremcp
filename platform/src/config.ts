@@ -21,7 +21,7 @@ export interface Config {
   databaseQueryTimeoutMs: number;
   /**
    * `PUBLIC_BASE_URL`: the origin browsers reach the service at, e.g.
-   * `https://ogmcp-production.up.railway.app`, without a trailing slash.
+   * `https://ogremcp.redpine.software`, without a trailing slash.
    * Sign-in redirect URIs are built from it, the `Origin` check compares
    * against it, and web session cookies are `Secure` when it is `https`.
    */

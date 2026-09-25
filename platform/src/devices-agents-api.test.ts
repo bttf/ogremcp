@@ -39,7 +39,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MCP_ACCEPTED = 406;
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agents API against Postgres (§13.2)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;
@@ -51,7 +51,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
   const fetched: string[] = [];
 
   beforeAll(async () => {
-    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
     writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
     admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
     await admin.query(`create database "${name}"`);
@@ -107,7 +107,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
     const { rows } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
     const user = rows[0];
     if (user === undefined) throw new Error("no user row");
-    return { ...user, cookie: `ogmcp_session=${(await sessions.create(user.id)).token}` };
+    return { ...user, cookie: `ogremcp_session=${(await sessions.create(user.id)).token}` };
   }
 
   /**
@@ -268,6 +268,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agen
     });
     expect(((await refreshed.json()) as Record<string, unknown>)["error"]).toBe("invalid_grant");
     expect(await api(user, "GET", "/api/v1/agents")).toEqual({ status: 200, body: { agents: [] } });
+
+    // "Last used" is the grant's own, and outlives its access tokens, which the cleanup deletes once expired (§11).
+    await pool.query("delete from oidc_models where model = 'AccessToken' and grant_id = $1", [theirs.grantId]);
+    expect(await api(other, "GET", "/api/v1/agents")).toMatchObject({ body: { agents: [{ last_used_at: expect.any(String) }] } });
   });
 
   it("lists an agent whose CIMD document is not cached by its host, and fetches nothing", async () => {

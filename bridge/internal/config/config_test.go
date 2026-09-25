@@ -8,7 +8,7 @@ import (
 )
 
 func TestSaveAndLoad(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ogmcp-bridge", "config.json")
+	path := filepath.Join(t.TempDir(), "ogremcp-bridge", "config.json")
 	f, err := Load(path)
 	if err != nil || f.Roots != nil || f.Interval() != DefaultRefreshInterval || f.DebounceDelay() != DefaultDebounce || f.UploadCap() != DefaultMaxUploadBytes {
 		t.Fatalf("a missing file: %+v, %v", f, err)
@@ -35,10 +35,10 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
-// OGMCP_BASE_URL wins over server_url, which wins over the default. A URL
+// OGREMCP_BASE_URL wins over server_url, which wins over the default. A URL
 // the bridge would not send a token to is refused, never passed over.
 func TestServer(t *testing.T) {
-	const saved = "https://ogmcp.example.com"
+	const saved = "https://ogremcp.example.com"
 	cases := []struct {
 		env, saved, want string
 	}{
@@ -51,7 +51,7 @@ func TestServer(t *testing.T) {
 			t.Errorf("env %q, server_url %q: %q, %v; want %q", c.env, c.saved, got, err, c.want)
 		}
 	}
-	for _, bad := range []string{"http://ogmcp.example.com", "https://user:pw@ogmcp.example.com", "https://ogmcp.example.com/app", "ogmcp.example.com"} {
+	for _, bad := range []string{"http://ogremcp.example.com", "https://user:pw@ogremcp.example.com", "https://ogremcp.example.com/app", "ogremcp.example.com"} {
 		if got, err := (File{ServerURL: bad}).Server(""); err == nil {
 			t.Errorf("server_url %q: %q", bad, got)
 		}

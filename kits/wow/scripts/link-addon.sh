@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Symlink kits/wow/adapter into a WoW client's AddOns directory as
-# Interface/AddOns/OpenGamerMCP. For development only; players get the addon
+# Interface/AddOns/OgreMCP. For development only; players get the addon
 # from the bridge.
 #
 # Usage: kits/wow/scripts/link-addon.sh [era|forever|all|client-path]
@@ -24,7 +24,7 @@ forever_path="$install_path/_classic_beta_"
 
 kit_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_dir="$kit_root/adapter"
-addon_name="OpenGamerMCP"
+addon_name="OgreMCP"
 
 die() {
 	printf 'link-addon: %s\n' "$1" >&2

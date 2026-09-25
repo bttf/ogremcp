@@ -1,4 +1,4 @@
-// Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
+// Command bridge is the Ogre MCP bridge (docs/architecture.md §7).
 //
 // Without arguments it is the tray app, which the macOS .app and the login
 // item start: an icon in the menu bar or the notification area. Its menu
@@ -39,7 +39,7 @@
 // command hold a lock while they run, and a second one exits. bridge server
 // takes it only to change the server.
 //
-// The server is OGMCP_BASE_URL when it is set, for development, or else the
+// The server is OGREMCP_BASE_URL when it is set, for development, or else the
 // settings file's server_url, or else the hosted service
 // (config.File.Server). The tray's Server… item and bridge server set change
 // server_url. The game folders, the refresh interval, the debounce delay, and
@@ -57,13 +57,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/config"
-	"github.com/bttf/ogmcp/bridge/internal/keychain"
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/lock"
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/keychain"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/lock"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // version is set by the build's ldflags: the bridge-v tag without its prefix,
@@ -159,7 +159,7 @@ func loadSettings() (config.File, string, error) {
 }
 
 // newClient returns the auth client of the server that settings and
-// OGMCP_BASE_URL name (config.File.Server), and its base URL.
+// OGREMCP_BASE_URL name (config.File.Server), and its base URL.
 func newClient(settings config.File) (*auth.Client, string, error) {
 	base, err := settings.Server(os.Getenv(config.EnvServerURL))
 	if err != nil {

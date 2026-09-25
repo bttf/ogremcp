@@ -12,7 +12,7 @@ import { createOidcProvider } from "./oidc.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
 
-const ISSUER = "https://ogmcp.example";
+const ISSUER = "https://ogremcp.example";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_UUID = "0f1e2d3c-4b5a-4968-8778-a1b2c3d4e5f6";
 /** A web session token: 43 base64url characters. */
@@ -101,7 +101,7 @@ describe("log", () => {
     // A client's X-Railway-Request-Id counts only behind a trusted proxy.
     const res = await fetch(`${base}/api/v1/devices/${device}`, {
       method: "DELETE",
-      headers: { origin: ISSUER, cookie: `ogmcp_session=${SESSION}`, "x-railway-request-id": "client-picked" },
+      headers: { origin: ISSUER, cookie: `ogremcp_session=${SESSION}`, "x-railway-request-id": "client-picked" },
     });
     expect(res.status).toBe(500);
     const requestId = res.headers.get("x-request-id");
@@ -145,7 +145,7 @@ describe("log", () => {
       bearer: "bearer-secret",
       clientSecret: "client-secret",
     };
-    const cookie = `ogmcp_session=${SESSION}`;
+    const cookie = `ogremcp_session=${SESSION}`;
 
     const authorize = new URL("/oauth/authorize", base);
     authorize.search = new URLSearchParams({

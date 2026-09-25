@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 // The watcher runs on a fake clock: its timers fire only when a test advances
@@ -94,7 +94,7 @@ type harness struct {
 	from   int // waitTrace looks at traces from here on
 }
 
-const sourcePath = "_*_/WTF/Account/*/SavedVariables/OpenGamerMCP.lua"
+const sourcePath = "_*_/WTF/Account/*/SavedVariables/OgreMCP.lua"
 
 func start(t *testing.T, root string) *harness {
 	t.Helper()
@@ -227,7 +227,7 @@ func TestReplaceOnSave(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := savedVariables(root, "_classic_era_", "ACCOUNT1")
-	path := filepath.Join(dir, "OpenGamerMCP.lua")
+	path := filepath.Join(dir, "OgreMCP.lua")
 	write(t, path, "v1")
 	info, err := os.Stat(path)
 	if err != nil {
@@ -237,7 +237,7 @@ func TestReplaceOnSave(t *testing.T) {
 	// Every instance counts as changed at start.
 	h := start(t, root)
 	h.advance(debounce)
-	sum := sha256.Sum256([]byte("_classic_era_/WTF/Account/ACCOUNT1/SavedVariables/OpenGamerMCP.lua"))
+	sum := sha256.Sum256([]byte("_classic_era_/WTF/Account/ACCOUNT1/SavedVariables/OgreMCP.lua"))
 	want := Change{
 		Kit:      "wow",
 		SourceID: "savedvariables",
@@ -254,7 +254,7 @@ func TestReplaceOnSave(t *testing.T) {
 	// to show that the watch outlives the first replacement.
 	for i := range 2 {
 		h.mark()
-		tmp := filepath.Join(dir, "OpenGamerMCP.lua.tmp")
+		tmp := filepath.Join(dir, "OgreMCP.lua.tmp")
 		write(t, tmp, fmt.Sprint("v", i+2))
 		if err := os.Rename(tmp, path); err != nil {
 			t.Fatal(err)
@@ -272,7 +272,7 @@ func TestBurstOfWritesIsOneChange(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := savedVariables(root, "_classic_era_", "ACCOUNT1")
-	path := filepath.Join(dir, "OpenGamerMCP.lua")
+	path := filepath.Join(dir, "OgreMCP.lua")
 	write(t, path, "v1")
 	h := start(t, root)
 	h.advance(debounce)
@@ -297,13 +297,13 @@ func TestOtherFilesAreIgnored(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := savedVariables(root, "_classic_era_", "ACCOUNT1")
-	write(t, filepath.Join(dir, "OpenGamerMCP.lua"), "v1")
+	write(t, filepath.Join(dir, "OgreMCP.lua"), "v1")
 	h := start(t, root)
 	h.advance(debounce)
 	h.next()
 
 	h.mark()
-	for _, name := range []string{"OpenGamerMCP.lua.bak", "OtherAddon.lua"} {
+	for _, name := range []string{"OgreMCP.lua.bak", "OtherAddon.lua"} {
 		write(t, filepath.Join(dir, name), "x")
 		h.waitTrace("ignore " + filepath.Join(dir, name))
 	}
@@ -318,7 +318,7 @@ func TestRescanFollowsARenamedAncestor(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := savedVariables(root, "_classic_era_", "ACCOUNT1")
-	path := filepath.Join(dir, "OpenGamerMCP.lua")
+	path := filepath.Join(dir, "OgreMCP.lua")
 	write(t, path, "v1")
 	h := start(t, root)
 	h.advance(debounce)
@@ -355,7 +355,7 @@ func TestRescanFindsNewFolders(t *testing.T) {
 	// A flavor folder and an account appear while the bridge runs, with the
 	// file already written.
 	dir := savedVariables(root, "_classic_era_", "ACCOUNT2")
-	path := filepath.Join(dir, "OpenGamerMCP.lua")
+	path := filepath.Join(dir, "OgreMCP.lua")
 	write(t, path, "v1")
 	h.advance(interval)
 	h.advance(debounce)

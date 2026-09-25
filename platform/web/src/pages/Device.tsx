@@ -23,7 +23,7 @@ const RESULTS: Readonly<Record<string, string>> = {
 };
 
 const INVALID_CODE = "A code is 8 letters, such as BCDF-GHJK.";
-const NO_ANSWER = "Open Gamer MCP did not answer. Try again.";
+const NO_ANSWER = "Ogre MCP did not answer. Try again.";
 
 type View =
   | { name: "enter"; message: string | null }
@@ -89,7 +89,7 @@ export function Device() {
       return (
         <>
           <h1>Approve a bridge</h1>
-          <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+          <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
         </>
       );
     case "signed-out":
@@ -159,7 +159,7 @@ function DeviceApproval() {
             <strong>
               <bdi>{client_name}</bdi>
             </strong>{" "}
-            asks to send your game state to your Open Gamer MCP account.
+            asks to send your game state to your Ogre MCP account.
           </p>
           <p className="og-device__code">
             <code>{user_code}</code>

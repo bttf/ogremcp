@@ -13,7 +13,7 @@
     "verify": "_*_"
   },
   "adapter": {
-    "install": "_*_/Interface/AddOns/OpenGamerMCP",
+    "install": "_*_/Interface/AddOns/OgreMCP",
     "process": [
       "WowClassic*.exe",
       "Wow.exe",
@@ -30,7 +30,7 @@
       "id": "savedvariables",
       "type": "file",
       "format": "text",
-      "path": "_*_/WTF/Account/*/SavedVariables/OpenGamerMCP.lua",
+      "path": "_*_/WTF/Account/*/SavedVariables/OgreMCP.lua",
       "trigger": "on_change"
     }
   ],

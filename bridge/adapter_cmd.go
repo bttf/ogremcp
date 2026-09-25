@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"github.com/bttf/ogmcp/bridge/internal/adapter"
-	"github.com/bttf/ogmcp/bridge/internal/kits"
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/process"
+	"github.com/bttf/ogremcp/bridge/internal/adapter"
+	"github.com/bttf/ogremcp/bridge/internal/kits"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/process"
 )
 
 // syncAdapters is the dev command `bridge adapter`: it fetches the enabled

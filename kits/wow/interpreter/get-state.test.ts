@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogmcp/sdk";
+import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogremcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json" with { type: "json" };
 import { describeGetState, EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
@@ -17,7 +17,7 @@ const SNAPSHOT_AT = new Date("2026-09-24T12:00:00.000Z");
 const snapshots = {} as Record<"era" | "forever", Snapshot<WowState>>;
 
 beforeAll(() => {
-  const out = mkdtempSync(join(tmpdir(), "ogmcp-get-state-"));
+  const out = mkdtempSync(join(tmpdir(), "ogremcp-get-state-"));
   try {
     const script = fileURLToPath(new URL("../test/adapter_test.lua", import.meta.url));
     const run = spawnSync("luajit", [script, out], { encoding: "utf8" });

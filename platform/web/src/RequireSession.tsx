@@ -18,7 +18,7 @@ export function RequireSession() {
       return (
         <>
           <h1>Something went wrong</h1>
-          <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
+          <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
         </>
       );
     case "signed-out":

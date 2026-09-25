@@ -9,7 +9,7 @@
  * request, so it stays short and states each rule without the reasoning.
  */
 export const SERVER_INSTRUCTIONS = [
-  "Open Gamer MCP gives you the user's live game state for the games they have enabled.",
+  "Ogre MCP gives you the user's live game state for the games they have enabled.",
   '- Give friend-style, spoiler-free guidance, such as "head north; you\'re close when you see water", not coordinates and kill counts.',
   "- Call list_games when unsure what the user is playing.",
   "- For an experimental flavor, caveat answers: sources may be thin or out of date.",

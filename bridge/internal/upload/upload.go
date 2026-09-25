@@ -64,7 +64,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bttf/ogmcp/bridge/internal/watch"
+	"github.com/bttf/ogremcp/bridge/internal/watch"
 )
 
 // The names of the error counters (§8.3 meta.client.errors, §16.1).

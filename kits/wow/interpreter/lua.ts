@@ -25,7 +25,7 @@
 // memory stay linear in its size: numerals are scanned by hand, never by a
 // backtracking regex, and strings with escapes share one byte buffer.
 
-import type { ParseError } from "@ogmcp/sdk";
+import type { ParseError } from "@ogremcp/sdk";
 import { parseError, QUOTE_MAX } from "./errors.js";
 
 export type LuaValue = string | number | boolean | LuaValue[] | { [key: string]: LuaValue };

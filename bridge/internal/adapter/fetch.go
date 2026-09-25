@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 // SHA256Header carries the adapter zip's sha256, as lower-case hex (§8.2).

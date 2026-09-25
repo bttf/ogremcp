@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bttf/ogmcp/bridge/internal/auth"
-	"github.com/bttf/ogmcp/bridge/internal/config"
+	"github.com/bttf/ogremcp/bridge/internal/auth"
+	"github.com/bttf/ogremcp/bridge/internal/config"
 )
 
 // server is the command `bridge server` (§13.3). Without arguments it prints
@@ -13,7 +13,7 @@ import (
 // pass auth.ParseBaseURL, as server_url in the settings file, and `reset`
 // removes server_url, so the bridge uses the hosted service. The change
 // lasts across restarts, and reaches the tray app when it starts at login,
-// which OGMCP_BASE_URL does not on macOS.
+// which OGREMCP_BASE_URL does not on macOS.
 func server(args []string) error {
 	settings, path, err := loadSettings()
 	if err != nil {

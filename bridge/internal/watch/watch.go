@@ -52,8 +52,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/bttf/ogmcp/bridge/internal/locate"
-	"github.com/bttf/ogmcp/bridge/internal/manifest"
+	"github.com/bttf/ogremcp/bridge/internal/locate"
+	"github.com/bttf/ogremcp/bridge/internal/manifest"
 )
 
 // Kit is a kit whose sources the watcher watches.

@@ -47,7 +47,7 @@ describe("OAuth token settings", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;

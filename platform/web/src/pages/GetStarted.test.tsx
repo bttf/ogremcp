@@ -32,7 +32,7 @@ async function render(downloadUrl: string | null, enabled: boolean, devices: unk
       case "/api/v1/me":
         return Response.json({ uuid: "00000000-0000-4000-8000-000000000000", providers: ["google"] });
       case "/api/v1/setup":
-        return Response.json({ mcp_url: "https://ogmcp.example/mcp", bridge_download_url: downloadUrl });
+        return Response.json({ mcp_url: "https://ogremcp.example/mcp", bridge_download_url: downloadUrl });
       case "/api/v1/games":
         return Response.json({ games: [{ kit: "wow", name: "World of Warcraft", enabled }] });
       case "/api/v1/devices":
@@ -62,7 +62,7 @@ function steps(container: HTMLElement): string[] {
 }
 
 it("shows the four steps, the download link when one is configured, and which steps are done", async () => {
-  const container = await render("https://downloads.example/ogmcp-bridge", true, [device]);
+  const container = await render("https://downloads.example/ogremcp-bridge", true, [device]);
   expect(container.querySelector("h1")?.textContent).toBe("Get started");
   // An enabled game and an approved bridge mark the first three steps done; no agent is connected yet.
   await vi.waitFor(() =>
@@ -71,7 +71,7 @@ it("shows the four steps, the download link when one is configured, and which st
   const links = [...container.querySelectorAll(".og-steps a")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(links).toEqual([
     ["Choose your games", "/games"],
-    ["Download the bridge", "https://downloads.example/ogmcp-bridge"],
+    ["Download the bridge", "https://downloads.example/ogremcp-bridge"],
     ["approval page", "/device"],
     ["Connect your agent", "/connect"],
   ]);

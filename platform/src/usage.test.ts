@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { userError } from "@ogmcp/sdk";
+import { userError } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,7 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in usage.test.ts are skipped");
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -100,7 +100,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", 
       content: [
         {
           type: "text",
-          text: "The player has used all 2 of today's Open Gamer MCP tool calls. The count resets at 2026-09-26T00:00:00Z (midnight UTC). Until then, every Open Gamer MCP tool answers with this message.",
+          text: "The player has used all 2 of today's Ogre MCP tool calls. The count resets at 2026-09-26T00:00:00Z (midnight UTC). Until then, every Ogre MCP tool answers with this message.",
         },
       ],
     });

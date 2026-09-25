@@ -59,10 +59,12 @@ import { type Bucket, level, type Limit, limit, waitSeconds } from "./token-buck
  * each replica keeps its own.
  *
  * Each time the token endpoint issues a client a token, its row's
- * `last_used_at` is set (migration 0004). `startClientCleanup` deletes the
- * clients that have not got a token for `unusedClientDays`, with their grants
- * and tokens. The token endpoint then answers `401 invalid_client` for them,
- * which tells Claude to register again.
+ * `last_used_at` is set (migration 0004), and so is its grant's, which the
+ * Connected agents page shows (`agents.ts`, migration 0014).
+ * `startClientCleanup` deletes the clients that have not got a token for
+ * `unusedClientDays`, with their grants and tokens. The token endpoint then
+ * answers `401 invalid_client` for them, which tells Claude to register
+ * again.
  */
 
 /** An address range in CIDR notation, such as `160.79.104.0/21`. */
@@ -166,7 +168,7 @@ function validateRegistration(ctx: KoaContextWithOIDC | undefined, key: string, 
   if (ctx?.oidc.route !== "registration") {
     // Registration refuses it below, as it does every grant type but the code flow's.
     if (key === "grant_types" && Array.isArray(value) && value.includes(DEVICE_CODE_GRANT) && metadata.client_id !== BRIDGE_CLIENT_ID) {
-      refuse("grant_types may not hold the device code grant: only the Open Gamer MCP bridge uses it");
+      refuse("grant_types may not hold the device code grant: only the Ogre MCP bridge uses it");
     }
     return;
   }
@@ -339,8 +341,9 @@ export interface RegistrationMiddlewareOptions {
 /**
  * Koa middleware for the provider (`provider.use`). It answers a registration
  * request over the limit with 429 and `Retry-After`, and, after the
- * token endpoint issues a token, sets the client's `last_used_at`. A failed
- * update is logged, and the token response goes out.
+ * token endpoint issues a token, sets the `last_used_at` of the client and of
+ * the token's grant. A failed update is logged, and the token response goes
+ * out.
  */
 export function registrationMiddleware({ pool, path, settings, log }: RegistrationMiddlewareOptions): Parameters<Provider["use"]>[0] {
   const limiter = new RegistrationLimiter(settings);
@@ -361,7 +364,10 @@ export function registrationMiddleware({ pool, path, settings, log }: Registrati
     const oidc = (ctx as Partial<KoaContextWithOIDC>).oidc;
     if (oidc?.route === "token" && ctx.status === 200 && oidc.client !== undefined) {
       try {
-        await pool.query("update oidc_models set last_used_at = now() where model = 'Client' and oidc_id = $1", [oidc.client.clientId]);
+        await pool.query(
+          "update oidc_models set last_used_at = now() where (model = 'Client' and oidc_id = $1) or (model = 'Grant' and oidc_id = $2)",
+          [oidc.client.clientId, oidc.entities.Grant?.jti ?? null],
+        );
       } catch (err) {
         log(`oauth client last use not recorded: code=${failureCode(err)}`);
       }

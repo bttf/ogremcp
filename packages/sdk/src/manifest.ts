@@ -1,5 +1,5 @@
 // Generated from manifest.schema.json by manifest.test.ts. Do not edit.
-// After a schema change, regenerate with: pnpm --filter @ogmcp/sdk test -u
+// After a schema change, regenerate with: pnpm --filter @ogremcp/sdk test -u
 
 export type LocateEntry = LocatePath | LocatePrompt;
 
@@ -16,7 +16,7 @@ export interface Manifest {
    */
   version: string;
   /**
-   * The compatible `@ogmcp/sdk` version range, e.g. `^0.1.0`.
+   * The compatible `@ogremcp/sdk` version range, e.g. `^0.1.0`.
    */
   sdk: string;
   /**

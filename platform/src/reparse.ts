@@ -2,7 +2,7 @@
 // stored uploads of `DATABASE_URL`, and stores the results as ingest would.
 // See `reparse-uploads.ts` for what it writes.
 //
-//   pnpm --filter @ogmcp/platform reparse [options]
+//   pnpm --filter @ogremcp/platform reparse [options]
 //   node platform/dist/reparse.js [options]
 //
 //   --kit <key>               only this kit's uploads; may repeat

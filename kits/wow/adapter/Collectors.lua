@@ -1,17 +1,17 @@
 -- Collectors -----------------------------------------------------------------
 --
--- Each collector returns one section of OpenGamerMCPDB.state
+-- Each collector returns one section of OgreMCPDB.state
 -- (docs/architecture.md §6.3). The sections carry the fields of the snapshot
 -- in bttf/wow-guide@df80260:shared/src/snapshot.ts, named in snake_case like
--- the rest of OpenGamerMCPDB. The interpreter parses them (§6.2); keep the two
+-- the rest of OgreMCPDB. The interpreter parses them (§6.2); keep the two
 -- in step.
 --
 -- API choices follow bttf/wow-guide@df80260:docs/api-probe.md. Every value is
 -- read through the Read* helpers below, which turn a secret value into nil, so
--- a secret never reaches OpenGamerMCPDB. Out-of-range values also become nil.
+-- a secret never reaches OgreMCPDB. Out-of-range values also become nil.
 --
 -- The collectors reuse IsSecret, IsSecretTable, PlainField, and Lookup from
--- OpenGamerMCP.lua.
+-- OgreMCP.lua.
 
 local _, ns = ...
 

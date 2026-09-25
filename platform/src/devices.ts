@@ -41,7 +41,7 @@ import { currentUser } from "./web-sessions.js";
  */
 
 /** The bridge's pre-registered public client (§8.1). It has no secret. */
-export const BRIDGE_CLIENT_ID = "ogmcp-bridge";
+export const BRIDGE_CLIENT_ID = "ogremcp-bridge";
 
 export const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
@@ -51,7 +51,7 @@ export const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
  */
 export const BRIDGE_CLIENT: ClientMetadata = {
   client_id: BRIDGE_CLIENT_ID,
-  client_name: "Open Gamer MCP bridge",
+  client_name: "Ogre MCP bridge",
   application_type: "native",
   token_endpoint_auth_method: "none",
   grant_types: [DEVICE_CODE_GRANT, "refresh_token"],
@@ -144,7 +144,7 @@ export class MissLimiter {
 }
 
 /** Set on `ctx.state` when a post's user code missed. */
-const MISSED = "ogmcpUserCodeMissed";
+const MISSED = "ogremcpUserCodeMissed";
 
 /**
  * What oidc-provider's `/device` answers the web UI's page, in JSON:

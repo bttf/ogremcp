@@ -1,7 +1,30 @@
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useState } from "react";
 
 /** What the user types to confirm Delete account. */
 export const DELETE_ACCOUNT_PHRASE = "delete my account";
+
+/** The user's tier and what applies to it, as `GET /api/v1/account` answers it (`AccountTier` in `platform/src/api.ts`). */
+export interface AccountTier {
+  tier: "free" | "paid";
+  /** Null: no limit. */
+  devices: number | null;
+  /** Null: no cap. */
+  tool_calls_per_day: number | null;
+  /** Null: kept. */
+  history_days: number | null;
+  history_tools: boolean;
+}
+
+/** The user's tier, or null when the service did not answer it. */
+async function loadTier(): Promise<AccountTier | null> {
+  try {
+    const res = await fetch("/api/v1/account", { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    return (await res.json()) as AccountTier;
+  } catch {
+    return null;
+  }
+}
 
 /** Sends a delete of the web UI's API (`platform/src/api.ts`). Answers whether the service did it. */
 async function sendDelete(path: string): Promise<boolean> {
@@ -14,18 +37,65 @@ async function sendDelete(path: string): Promise<boolean> {
 }
 
 /**
- * The Account page (§13.2). It holds Delete my data and Delete account
- * (§11), one card each; the tier and billing join it as cards of their own.
+ * The Account page (§13.2). It holds the user's tier (§14), Delete my data,
+ * and Delete account (§11), one card each. Billing joins it after G2
+ * (§19.1 D5).
  */
 export function Account() {
   return (
     <>
       <h1>Account</h1>
       <div className="og-cards">
+        <Tier />
         <DeleteData />
         <DeleteAccount />
       </div>
     </>
+  );
+}
+
+/**
+ * The user's tier and the limits the service applies to it, from its
+ * configuration. A self-host without limits shows no limit, no daily cap,
+ * and history kept.
+ */
+function Tier() {
+  const id = useId();
+  const [tier, setTier] = useState<AccountTier | "loading" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadTier().then((loaded) => {
+      if (!cancelled) setTier(loaded ?? "error");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <section className="og-card" aria-labelledby={`${id}-title`}>
+      <h2 id={`${id}-title`}>Tier</h2>
+      {tier === "loading" ? (
+        <p>Loading…</p>
+      ) : tier === "error" ? (
+        <p role="alert">Ogre MCP did not answer. Reload the page to try again.</p>
+      ) : (
+        <>
+          <p>You are on the {tier.tier === "paid" ? "paid" : "free"} tier.</p>
+          <dl className="og-facts">
+            <dt>Devices</dt>
+            <dd>{tier.devices === null ? "No limit" : tier.devices.toLocaleString()}</dd>
+            <dt>Tool calls per day</dt>
+            <dd>{tier.tool_calls_per_day === null ? "No daily cap" : tier.tool_calls_per_day.toLocaleString()}</dd>
+            <dt>Game state history</dt>
+            <dd>{tier.history_days === null ? "Kept" : `Kept for ${tier.history_days.toLocaleString()} ${tier.history_days === 1 ? "day" : "days"}`}</dd>
+            <dt>History tools</dt>
+            <dd>{tier.history_tools ? "Available" : "Not available"}</dd>
+          </dl>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -1,4 +1,4 @@
-import { type ToolResult, userError } from "@ogmcp/sdk";
+import { type ToolResult, userError } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 
 import { failureCode } from "./db.js";
@@ -133,6 +133,6 @@ export function createUsageMeter({ pool, caps = NO_TOOL_CALL_CAPS, now = () => n
 export function capReachedResult({ cap, resetAt }: CapReached): ToolResult {
   const reset = resetAt.toISOString().replace(".000Z", "Z");
   return userError(
-    `The player has used all ${cap} of today's Open Gamer MCP tool calls. The count resets at ${reset} (midnight UTC). Until then, every Open Gamer MCP tool answers with this message.`,
+    `The player has used all ${cap} of today's Ogre MCP tool calls. The count resets at ${reset} (midnight UTC). Until then, every Ogre MCP tool answers with this message.`,
   );
 }

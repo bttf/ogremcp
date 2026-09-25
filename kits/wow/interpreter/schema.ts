@@ -1,4 +1,4 @@
-// Schemas of OpenGamerMCPDB, the table the adapter writes
+// Schemas of OgreMCPDB, the table the adapter writes
 // (docs/architecture.md §6.3, kits/wow/adapter/Storage.lua).
 //
 // The sections are adapted from bttf/wow-guide@df80260:shared/src/snapshot.ts
@@ -352,7 +352,7 @@ export const stateSchema = z.object({
   recent_path: nilable(list(recentPathEntrySchema)),
 });
 
-/** OpenGamerMCPDB. `schema` is checked before the rest (index.ts). */
+/** OgreMCPDB. `schema` is checked before the rest (index.ts). */
 export const dbSchema = z.object({
   /** The adapter schema version. */
   schema: z.number().int(),

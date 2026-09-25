@@ -27,7 +27,7 @@ const CLIENT_ID = "https://agent.example/oauth/client-metadata.json";
 const CAPTURED_AT = new Date("2026-09-21T12:00:00Z");
 
 /** A SavedVariables file of a Classic Era character, with synthetic data (§6.3). */
-const SAVED_VARIABLES = `OpenGamerMCPDB = {
+const SAVED_VARIABLES = `OgreMCPDB = {
   ["schema"] = 1,
   ["client"] = { ["project_id"] = 2, ["interface"] = 11509 },
   ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
@@ -40,7 +40,7 @@ const SAVED_VARIABLES = `OpenGamerMCPDB = {
 const search: ScopedSearch = async () => [];
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
   let eventsPool: Pool;

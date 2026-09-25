@@ -9,8 +9,9 @@ import { join } from "node:path";
 import type { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { createApp } from "./app.js";
+import { type AppOptions, createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { DEFAULT_INGEST } from "./ingest.js";
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -30,7 +31,7 @@ let kits: KitRegistry;
 
 // The real registry, over adapter zips written for these tests.
 beforeAll(() => {
-  adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+  adaptersDir = mkdtempSync(join(tmpdir(), "ogremcp-adapters-"));
   writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
   kits = loadKitRegistry({ adaptersDir });
 });
@@ -42,10 +43,14 @@ afterEach(() => {
   server = undefined;
 });
 
-async function serve(pool: Pool, bridgeDownloadUrl?: string, contactEmail?: string): Promise<string> {
+async function serve(
+  pool: Pool,
+  bridgeDownloadUrl?: string,
+  options: Pick<AppOptions, "ingest" | "toolCallCaps" | "retention" | "contactEmail"> = {},
+): Promise<string> {
   const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
   const auth = { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: BASE };
-  const app = createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits, bridgeDownloadUrl, contactEmail });
+  const app = createApp({ health: { checkDatabase: () => Promise.resolve() }, auth, kits, bridgeDownloadUrl, ...options });
   server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -62,8 +67,8 @@ describe("without a web session", () => {
   });
 
   it("GET /api/v1/contact answers the contact email, or null when none is configured (§13.2)", async () => {
-    const withEmail = await serve({} as Pool, undefined, "privacy@ogmcp.example");
-    expect(await (await fetch(`${withEmail}/api/v1/contact`)).json()).toEqual({ email: "privacy@ogmcp.example" });
+    const withEmail = await serve({} as Pool, undefined, { contactEmail: "privacy@ogremcp.example" });
+    expect(await (await fetch(`${withEmail}/api/v1/contact`)).json()).toEqual({ email: "privacy@ogremcp.example" });
     server?.close();
     const without = await serve({} as Pool);
     const res = await fetch(`${without}/api/v1/contact`);
@@ -72,7 +77,7 @@ describe("without a web session", () => {
   });
 
   it("GET /api/v1/setup answers 401", async () => {
-    const base = await serve({} as Pool, "https://downloads.example/ogmcp-bridge");
+    const base = await serve({} as Pool, "https://downloads.example/ogremcp-bridge");
     const res = await fetch(`${base}/api/v1/setup`);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "signed_out" });
@@ -90,7 +95,7 @@ describe("without a web session", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -119,7 +124,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
     if (user === undefined) throw new Error("no user row");
     const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
     const { token } = await sessions.create(user.id);
-    return { ...user, cookie: `ogmcp_session=${token}` };
+    return { ...user, cookie: `ogremcp_session=${token}` };
   }
 
   it("GET /api/v1/me answers the signed-in user's uuid and linked providers, and no serial id", async () => {
@@ -138,10 +143,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
 
   it("GET /api/v1/setup answers the MCP URL, and the download URL only when one is configured (§13.2)", async () => {
     const user = await signIn();
-    const configured = await serve(pool, "https://downloads.example/ogmcp-bridge");
+    const configured = await serve(pool, "https://downloads.example/ogremcp-bridge");
     const res = await fetch(`${configured}/api/v1/setup`, { headers: { cookie: user.cookie } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mcp_url: `${BASE}/mcp`, bridge_download_url: "https://downloads.example/ogmcp-bridge" });
+    expect(await res.json()).toEqual({ mcp_url: `${BASE}/mcp`, bridge_download_url: "https://downloads.example/ogremcp-bridge" });
     server?.close();
 
     const unconfigured = await serve(pool);
@@ -149,6 +154,24 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
       mcp_url: `${BASE}/mcp`,
       bridge_download_url: null,
     });
+  });
+
+  it("GET /api/v1/account answers the tier and the limits the service enforces, and 401 without a web session (§14)", async () => {
+    const user = await signIn();
+    const base = await serve(pool, undefined, {
+      ingest: { ...DEFAULT_INGEST, devicesPerUser: { free: 1, paid: 5 } },
+      toolCallCaps: { free: 200, paid: 2000 },
+      retention: { freeRetentionDays: 30, downgradeGraceDays: 30 },
+    });
+
+    const signedOut = await fetch(`${base}/api/v1/account`);
+    expect(signedOut.status).toBe(401);
+    expect(await signedOut.json()).toEqual({ error: "signed_out" });
+
+    const res = await fetch(`${base}/api/v1/account`, { headers: { cookie: user.cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ tier: "free", devices: 1, tool_calls_per_day: 200, history_days: 30, history_tools: false });
   });
 
   it("the Games API enables and disables a kit for the signed-in user (§13.2, §11)", async () => {

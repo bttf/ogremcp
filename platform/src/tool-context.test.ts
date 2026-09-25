@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import type { Character } from "@ogmcp/sdk";
+import type { Character } from "@ogremcp/sdk";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -21,7 +21,7 @@ function at(hour: number): Date {
 }
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 

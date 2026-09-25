@@ -150,11 +150,11 @@ describe("sign-in without the database", () => {
 
   it("sets a __Host- sign-in cookie for each provider over https", async () => {
     const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
-    const base = await serve({ pool: noDatabase, sessions, providers: fakeProviders().providers, publicBaseUrl: "https://ogmcp.example" });
+    const base = await serve({ pool: noDatabase, sessions, providers: fakeProviders().providers, publicBaseUrl: "https://ogremcp.example" });
     for (const provider of ["google", "discord"]) {
       const res = await fetch(`${base}/auth/${provider}`, { redirect: "manual" });
       expect(res.headers.getSetCookie()).toEqual([
-        expect.stringMatching(new RegExp(`^__Host-ogmcp_signin_${provider}=[^;]+; Max-Age=600; Path=/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$`)),
+        expect.stringMatching(new RegExp(`^__Host-ogremcp_signin_${provider}=[^;]+; Max-Age=600; Path=/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$`)),
       ]);
     }
   });
@@ -177,7 +177,7 @@ describe("sign-in without the database", () => {
 });
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () => {
-  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
 
@@ -239,7 +239,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(authorize.searchParams.get("scope")).toBe("openid");
     expect(authorize.searchParams.get("redirect_uri")).toBe(`${BASE}/auth/google/callback`);
     expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(begin.headers.getSetCookie()[0]).toMatch(/^ogmcp_signin_google=.+; Max-Age=600; Path=\/; Expires=.+; HttpOnly; SameSite=Lax$/);
+    expect(begin.headers.getSetCookie()[0]).toMatch(/^ogremcp_signin_google=.+; Max-Age=600; Path=\/; Expires=.+; HttpOnly; SameSite=Lax$/);
 
     const done = await first.request(`/auth/google/callback?code=sub-1&state=${authorize.searchParams.get("state")}`);
     expect(done.status).toBe(302);
@@ -248,11 +248,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(tokenRequests[0]?.get("redirect_uri")).toBe(`${BASE}/auth/google/callback`);
     const verifier = tokenRequests[0]?.get("code_verifier") ?? "";
     expect(createHash("sha256").update(verifier).digest("base64url")).toBe(authorize.searchParams.get("code_challenge"));
-    const sessionCookie = done.headers.getSetCookie().find((line) => line.startsWith("ogmcp_session="));
+    const sessionCookie = done.headers.getSetCookie().find((line) => line.startsWith("ogremcp_session="));
     expect(sessionCookie).toMatch(/; Path=\/; Expires=.+; HttpOnly; SameSite=Lax$/);
 
     // The table holds the token's hash, and the hash finds the row.
-    const token = first.cookie("ogmcp_session") ?? "";
+    const token = first.cookie("ogremcp_session") ?? "";
     const { rows } = await pool.query<{ token_hash: Buffer }>("select token_hash from web_sessions");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.token_hash.equals(hashSessionToken(token))).toBe(true);
@@ -304,7 +304,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     const res = await signIn(player, "discord", "200", true);
     expect(res.status).toBe(409);
     expect(await res.text()).toBe(
-      "This Discord account is already linked to another Open Gamer MCP account, so it was not connected to yours. Accounts are never merged.",
+      "This Discord account is already linked to another Ogre MCP account, so it was not connected to yours. Accounts are never merged.",
     );
     expect(await owner("discord", "200")).toBe(other);
     expect(await count("oauth_identities")).toBe(2);
@@ -355,7 +355,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     expect(await count("web_sessions")).toBe(0);
-    expect(player.cookie("ogmcp_session")).toBeUndefined();
+    expect(player.cookie("ogremcp_session")).toBeUndefined();
   });
 
   it("expires a web session, and renews it when less than the window is left", async () => {
@@ -363,7 +363,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("sign-in against Postgres", () 
     const userId = rows[0]?.id ?? "";
     let now = new Date("2026-09-01T00:00:00Z");
     const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: true, now: () => now });
-    expect(sessions.cookieName).toBe("__Host-ogmcp_session");
+    expect(sessions.cookieName).toBe("__Host-ogremcp_session");
     const { token, expiresAt } = await sessions.create(userId);
     expect(expiresAt).toEqual(new Date("2026-10-01T00:00:00Z"));
 

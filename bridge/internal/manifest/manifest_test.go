@@ -34,10 +34,10 @@ func TestParseWoWManifest(t *testing.T) {
 	if m.Root.Verify != "_*_" {
 		t.Errorf("root.verify = %q", m.Root.Verify)
 	}
-	if m.Adapter == nil || m.Adapter.Install != "_*_/Interface/AddOns/OpenGamerMCP" || len(m.Adapter.Process) == 0 {
+	if m.Adapter == nil || m.Adapter.Install != "_*_/Interface/AddOns/OgreMCP" || len(m.Adapter.Process) == 0 {
 		t.Errorf("adapter = %+v", m.Adapter)
 	}
-	if len(m.Sources) != 1 || m.Sources[0].ID != "savedvariables" || m.Sources[0].Path != "_*_/WTF/Account/*/SavedVariables/OpenGamerMCP.lua" {
+	if len(m.Sources) != 1 || m.Sources[0].ID != "savedvariables" || m.Sources[0].Path != "_*_/WTF/Account/*/SavedVariables/OgreMCP.lua" {
 		t.Errorf("sources = %+v", m.Sources)
 	}
 	if m.Flavors["classic_era"].Status != "supported" {

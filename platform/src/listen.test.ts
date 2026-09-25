@@ -29,7 +29,7 @@ describe("startServer", () => {
       await once(server, "listening");
       const port = (server.address() as AddressInfo).port;
       expect(port).toBeGreaterThan(0);
-      expect(io.lines).toEqual([`ogmcp platform listening on :${port}`]);
+      expect(io.lines).toEqual([`ogremcp platform listening on :${port}`]);
       expect(io.exits).toEqual([]);
     } finally {
       server.close();

@@ -3,7 +3,7 @@
 // of HKEY_CURRENT_USER on Windows.
 //
 // Adapted from bttf/wow-guide@df80260, bridge/internal/autostart, with the
-// names changed to Open Gamer MCP's.
+// names changed to Ogre MCP's.
 package autostart
 
 import (
@@ -18,10 +18,10 @@ import (
 
 // Label names the LaunchAgent. It is the app's CFBundleIdentifier
 // (macos/Info.plist).
-const Label = "software.redpine.ogmcp"
+const Label = "software.redpine.ogremcp"
 
 // RunValueName is the name of the value under the Run key.
-const RunValueName = "OpenGamerMCP"
+const RunValueName = "OgreMCP"
 
 // ErrUnsupported is returned by New on a system without a login item here.
 var ErrUnsupported = errors.New("start at login is not supported on this system")

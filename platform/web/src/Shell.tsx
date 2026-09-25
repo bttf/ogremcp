@@ -33,7 +33,7 @@ export function Shell() {
     <div className="og-page">
       <div className="og-column">
         <header className="og-header">
-          <div className="og-header__title">Open Gamer MCP</div>
+          <div className="og-header__title">Ogre MCP</div>
           {session.status === "signed-in" && (
             <>
               <nav className="og-nav" aria-label="Main">

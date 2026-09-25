@@ -22,7 +22,7 @@ import (
 )
 
 // ErrLocked means another process holds the lock.
-var ErrLocked = errors.New("another Open Gamer MCP bridge is running for this user")
+var ErrLocked = errors.New("another Ogre MCP bridge is running for this user")
 
 // Lock is held while a bridge runs.
 type Lock struct {
@@ -36,7 +36,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not find the user config directory: %w", err)
 	}
-	return filepath.Join(dir, "ogmcp-bridge", "bridge.lock"), nil
+	return filepath.Join(dir, "ogremcp-bridge", "bridge.lock"), nil
 }
 
 // Acquire takes the lock on the file at path without waiting. It returns
