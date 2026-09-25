@@ -31,8 +31,9 @@ export interface AgentGrant {
   /** When the user approved the agent, ISO 8601. */
   approved_at: string | null;
   /**
-   * When the token endpoint last issued the grant an access token, ISO 8601,
-   * or null. The agent uses each token for up to its lifetime
+   * When the token endpoint last issued the grant a token, ISO 8601, or null:
+   * the Grant row's `last_used_at` (migration 0014), which outlives the
+   * tokens. The agent uses each token for up to its lifetime
    * (`OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES`), so it may have been used since.
    */
   last_used_at: string | null;
@@ -66,9 +67,7 @@ export async function listAgentGrants(pool: Pool, provider: Provider, userUuid: 
     `select g.uuid as id,
             g.payload->>'clientId' as client_id,
             to_timestamp((g.payload->>'iat')::double precision) as approved_at,
-            (select to_timestamp(max((t.payload->>'iat')::double precision))
-               from oidc_models t
-              where t.model = 'AccessToken' and t.grant_id = g.oidc_id) as last_used_at
+            g.last_used_at
        from oidc_models g
       where g.model = 'Grant'
         and g.payload->>'accountId' = $1
