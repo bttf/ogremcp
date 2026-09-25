@@ -33,8 +33,8 @@ In priority order:
    wire format? Does it keep the package seams in §5?
 3. **Security.** Secrets in the repo, secrets in logs, missing auth on an
    endpoint, unvalidated input reaching the database, SQL built by string
-   concatenation. The repo is private today and public at P9 (§5); history is
-   not rewritten, so treat a committed secret as already published.
+   concatenation. The repo is public (§5), and history is not rewritten, so a
+   committed secret is published.
 4. **Acceptance criteria.** Every criterion in the issue and the § it cites,
    met or not. Name the ones that are not.
 5. **Simplification and reuse.** Code that duplicates something already in the

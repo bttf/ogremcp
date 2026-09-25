@@ -23,7 +23,7 @@ Written for humans and for implementer agents that turn it into Linear issues an
 - Build nothing tagged `[later]` or `[policy]`, nothing in §17, and no speculative abstractions (§2).
 - On a `[decide]`, a gap, or a contradiction: stop and ask. Don't choose silently.
 - Values marked *proposed* (limits, TTLs, sizes) are starting points. Make them config, not constants.
-- Build order and dependencies: §18. Mapping from the previous plan: §20.
+- Build order and dependencies: §18.
 
 ## 1. What Ogre MCP is `[policy]`
 
@@ -128,8 +128,8 @@ ogremcp/
 - **Kit pinning:** first-class kits are workspace packages, so the monorepo commit is the pin. At build time the platform zips each kit's `adapter/` and serves it with the kit's `manifest.json` (§8.2), so one commit defines manifest, adapter, and interpreter together.
 - **Releases:** the bridge and the addon share one GitHub Releases page, split by tag prefix: `bridge-v…` and `addon-v…`. Bridge self-update only considers `bridge-v` tags (§7). The CurseForge/Wago packager builds `kits/wow/adapter` from that subfolder on `addon-v` tags. GoReleaser's built-in tag-prefix (monorepo) support may be Pro-only; confirm the free path in P0.
 - **Deploys:** Railway rebuilds the platform when `platform/`, `packages/sdk/`, `kits/`, or root workspace files change, and skips bridge-only changes. Set this with watch paths; the prototype hit this (RED-266).
-- **Visibility:** Blizzard requires addon code to be public before distribution, so the whole repo goes public at the P9 listings, not at G2. By then, §20 and anything else private must be removed.
-- The repo is `bttf/ogremcp` under the personal account until P9. It moves to the `ogremcp` org when it goes public (§19.1 D4). Repo renames and transfers keep redirects. What happens to the prototype repo: D2.
+- **Visibility:** Blizzard requires addon code to be public before distribution. The repo went public on 2026-09-25, before the P9 listings (owner decision), after the previous-plan mapping was removed from this doc. Git history was not rewritten.
+- The repo is `bttf/ogremcp` under the personal account, public since 2026-09-25. It moves to the `ogremcp` org at P9 (§19.1 D4). Repo renames and transfers keep redirects. What happens to the prototype repo: D2.
 - `[later]`: community kits live in their own repos and depend on `@ogremcp/sdk` from npm. Extract `ogremcp-kit-template` from the WoW kit when a second kit exists.
 
 \*Decided (§19.1 D11): AGPL-3.0-or-later on the platform so nobody can run a closed hosted clone; MIT elsewhere to maximize contributors. Each path has its own `LICENSE` file, and a root note says which license covers which path. Files outside these paths are MIT. Contributions use a DCO (`Signed-off-by`), not a CLA, and CI checks every commit for the sign-off.
@@ -258,7 +258,7 @@ interface ToolContext<State> {
   ```
 
 - **Character key** is the player GUID; `name`/`realm` are for display and tool arguments.
-- **Sections** carry what the prototype's tools returned (§20), plus three fields that had no home: `character` holds `in_combat` and `resting`, and `location` holds `hearth` (the hearthstone bind point).
+- **Sections** carry what the prototype's tools returned, plus three fields that had no home: `character` holds `in_combat` and `resting`, and `location` holds `hearth` (the hearthstone bind point).
 - The adapter never decides the flavor. It stamps raw facts and the interpreter maps them (§6.3.1), so a mapping fix ships server-side and applies to old uploads on re-parse.
 - **At `PLAYER_LOGOUT`** (which also fires on reload), the adapter re-collects every section, then stamps `captured_at`, so state and stamp both match the moment SavedVariables flush. Without this, polled values such as position would lag by up to one poll interval. If a collector fails at logout, keep its last polled value.
 - `recent_path` is a bounded breadcrumb recorded during play (zone/subzone changes with timestamps, last N). It lives inside the snapshot, so it works without history tools and on the free tier. On Forever it covers only the time since the last reload (§6.3.1).
@@ -720,7 +720,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | ID | Decision | Blocks | Notes |
 |---|---|---|---|
 | D1 | Platform stack: HTTP framework, DB access + migrations, UI rendering; JS workspace tool | P0 | **Decided 2026-09-24 (RED-274):** keep the prototype's stack: Express 5, raw `pg`, in-repo SQL migrations, a Vite + React single-page app, pnpm (§13.1). It hosts `oidc-provider` (Koa-based; mountable in Express) and lets the most prototype code be copied. |
-| D2 | Existing prototype (the current WoW Guide MCP): evolve it into this repo, or rewrite and salvage? | P0 | **Decided 2026-09-24 (RED-275):** rewrite and salvage in a new monorepo, `bttf/ogmcp` (renamed `bttf/ogremcp` on 2026-09-25, D4). Its cutover items (data, connectors, the prototype repo) come after G1. Also covers: moving prototype users and snapshots before the prototype on Railway + Supabase shuts down; the existing claude.ai and Claude Code connectors that point at it; and what happens to `bttf/wow-guide`. Keep §20.1's lessons either way. |
+| D2 | Existing prototype (the current WoW Guide MCP): evolve it into this repo, or rewrite and salvage? | P0 | **Decided 2026-09-24 (RED-275):** rewrite and salvage in a new monorepo, `bttf/ogmcp` (renamed `bttf/ogremcp` on 2026-09-25, D4). Its cutover items (data, connectors, the prototype repo) come after G1. Also covers: moving prototype users and snapshots before the prototype on Railway + Supabase shuts down; the existing claude.ai and Claude Code connectors that point at it; and what happens to `bttf/wow-guide`. Its lessons now live in their sections (§6.3, §6.3.1). |
 | D3 | Screenshots: the prototype's `/transmit` takes one and exposes `get_screenshot`; this doc drops them. Keep (as a second `file` source) or drop? | P1, P6 | **Decided 2026-09-24 (RED-288):** drop for v1. `/transmit` only reloads, and there is no `get_screenshot`. A screenshot source can be added later as a new `sources[].type` (§6.1). |
 | D4 | Domain and GitHub org | G2 | **Decided 2026-09-25 (RED-356):** rename the project to **Ogre MCP** (Open Game Relay Engine), slug `ogremcp` (RED-364). The service runs at `ogremcp.redpine.software`, a subdomain of a domain the owner already holds (owner, 2026-09-25); `ogremcp.com` is not registered. GitHub org `ogremcp`. The repo is renamed to `bttf/ogremcp` now and moves to the org at P9 (§5). On 2026-09-25 `ogremcp.com`, the GitHub name `ogremcp`, and the npm scope `@ogremcp` were unregistered. The name overlaps with OgreBot (ISXOgre), an EverQuest automation tool whose "MCP" means Master Control Panel; the owner accepted the overlap. Google's production consent screen needs a domain we own; `redpine.software` serves. |
 | D5 | Billing provider, and whether billing ships at beta or after | P10 | **Decided 2026-09-25 (RED-348):** the public beta ships the free tier only. The cap numbers are measured first (§14). The billing provider is chosen after G2, before the paid tier launches (RED-355). |
@@ -740,38 +740,3 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 - **Season of Discovery:** whether to register `classic_sod`, and its search scope.
 - ChatGPT connector plan requirements; Perplexity's exact static-client flow.
 - Kit deprecation policy (§6.5).
-
-## 20. Previous plan → this doc
-
-For moving from the Linear project "WoW Guide" (Red Pine workspace: milestones M1–M11, RED-214–273) to a new project, "Ogre MCP", with milestones per §18.4. First, mark In Review issues whose code is merged as Done. Leave done issues in WoW Guide as history. Move open issues that still apply to the new project, rewritten to fit §18 and cite their §. Close superseded issues with a link to the § that replaces them. Don't delete anything. When done, mark WoW Guide completed with a link to the new project. Remove this section before the repo goes public (P9, §5).
-
-| Previous plan | Now |
-|---|---|
-| Name "Caddie" (briefly "Squire"); kit `caddie-kit-wow-classic` | Ogre MCP (`ogremcp`); `kits/wow`, one kit for every flavor (§6.4) |
-| "Connector" meaning the per-game bundle | "Kit" (§3) |
-| Monorepo (addon / bridge / cloud / shared) | Still one monorepo, re-laid out as packages with enforced seams (§5) |
-| Supabase for DB and auth | Postgres + `openid-client` + `oidc-provider` (§13.1) |
-| v1 = personal/local (M1–M5); public = v2 (M6–M11) | Hosted remote MCP from the start: dogfood gate, then public beta (§18) |
-| Forever as the first target | Classic Era first; Forever joins as `experimental` (§6.4) |
-| Pixel-encode realtime in v2 | `[later]`, only if the combat-log spike falls short (§15) |
-| iOS app | Dropped (§17) |
-| Installer installs bridge + addon | Installer installs the bridge; the bridge installs and updates the addon (§7) |
-| Prototype tools `get_player_state`, `get_location`, `get_quests`, `get_inventory`, `get_skills`, `get_recent_path` | `wow_get_state` sections (§10.4) |
-| Prototype `get_screenshot` and the screenshot in `/transmit` | Dropped (D3) |
-| Prototype `search_game_info` | Same name, now takes `game` and `flavor` (§10.3) |
-| Prototype `/wgmark` map pin | Dropped (§1) |
-| Prototype spoiler detail levels | Dropped (§10.5) |
-| Prototype snapshot diagnostics pages | Dropped (§13.2) |
-| Prototype agent rules | Not carried over; §10.5 is complete |
-| Prototype on Railway + Supabase, its connectors, `bttf/wow-guide` | D2 |
-
-### 20.1 Prototype lessons to keep
-
-Carry these over whatever D2 decides. Each now lives in its section:
-
-- Forever reports project ID 1 with interface `16xxx`, and doesn't read SavedVariables back after a reload (§6.3.1).
-- The adapter's guard for values the client marks secret (§6.3).
-- Zip-safe, crash-safe adapter install (§7).
-- Host/Origin checks on `/mcp` (§9).
-- Railway watch paths (RED-266, §5).
-- Lua's 200-local limit (RED-268, §6.3).
