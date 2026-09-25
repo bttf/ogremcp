@@ -165,7 +165,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		c.showErrors("fetch", map[string]string{"kits": "Could not fetch the kits: " + err.Error()})
 		return
 	}
-	c.Model.LoginKnown()
+	c.Model.LoginWorks()
 	names := map[string]string{}
 	for _, k := range list {
 		names[k.Kit] = cmp.Or(k.Name, k.Kit)
@@ -231,6 +231,7 @@ type uploads interface {
 // followUploads shows the uploader's status: the last upload, a login the
 // server ended, and each instance's error.
 func (c *Controller) followUploads(ctx context.Context, u uploads) {
+	var last time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -239,6 +240,11 @@ func (c *Controller) followUploads(ctx context.Context, u uploads) {
 		}
 		st := u.Status()
 		c.Model.SetLastUpload(st.LastUpload)
+		if st.LastUpload.After(last) {
+			// The server took an upload made with the login.
+			last = st.LastUpload
+			c.Model.LoginWorks()
+		}
 		// LoginRequired stays set until Resume, so it can be older than the
 		// latest login. The login has ended only when the auth client holds
 		// none. While a login's keychain save is retried, AccessToken answers
@@ -436,7 +442,7 @@ func (c *Controller) retrySave(ctx context.Context) {
 			c.Log.Warn("could not refresh the login", "error", err.Error())
 		}
 		c.Log.Info("the keychain saved the login")
-		c.Model.LoginSaved()
+		c.Model.LoginWorks()
 		c.resumeAll()
 		return
 	}

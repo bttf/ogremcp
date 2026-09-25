@@ -13,8 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bttf/ogmcp/bridge/internal/adapter"
 	"github.com/bttf/ogmcp/bridge/internal/auth"
+	"github.com/bttf/ogmcp/bridge/internal/kits"
 	"github.com/bttf/ogmcp/bridge/internal/upload"
+	"github.com/bttf/ogmcp/bridge/internal/watch"
 )
 
 // fakeAuth approves each login. The keychain saves only once saveOK is set;
@@ -59,12 +62,15 @@ func (f *fakeAuth) AccessToken(context.Context) (string, error) {
 func (f *fakeAuth) Do(*http.Request) (*http.Response, error)       { return nil, errors.New("unused") }
 func (f *fakeAuth) DoUpload(*http.Request) (*http.Response, error) { return nil, errors.New("unused") }
 
-// staleUploads is an uploader whose LoginRequired is still set from before
-// the latest login.
-type staleUploads struct{ changed chan struct{} }
+// fakeUploads is an uploader with a fixed status. Its Changed is unbuffered,
+// so a second send waits until followUploads has handled the first.
+type fakeUploads struct {
+	changed chan struct{}
+	status  upload.Status
+}
 
-func (u staleUploads) Changed() <-chan struct{} { return u.changed }
-func (u staleUploads) Status() upload.Status    { return upload.Status{LoginRequired: true} }
+func (u fakeUploads) Changed() <-chan struct{} { return u.changed }
+func (u fakeUploads) Status() upload.Status    { return u.status }
 
 // A login whose keychain save fails keeps its tokens and says so, while
 // uploads resume on them. A stale LoginRequired from the uploader does not
@@ -90,7 +96,8 @@ func TestLoginWhenTheKeychainDoesNotSave(t *testing.T) {
 		SaveRetry: time.Millisecond,
 	}
 	c.resume = func() { resumes.Add(1) }
-	uploads := staleUploads{changed: make(chan struct{})}
+	// The uploader's LoginRequired is still set from before the login.
+	uploads := fakeUploads{changed: make(chan struct{}), status: upload.Status{LoginRequired: true}}
 	go c.followUploads(t.Context(), uploads)
 	unsavedNote := "Logged in, but the keychain did not save the login. Retrying; until then, quitting logs you out."
 
@@ -100,8 +107,7 @@ func TestLoginWhenTheKeychainDoesNotSave(t *testing.T) {
 		t.Errorf("%d resumes after the login, want 1", resumes.Load())
 	}
 
-	// A file change while the save is retried. The second send waits until
-	// the first is handled.
+	// A file change while the save is retried.
 	uploads.changed <- struct{}{}
 	uploads.changed <- struct{}{}
 	if got := m.State().Login; got != LoginUnsaved {
@@ -131,6 +137,43 @@ func TestLoginWhenTheKeychainDoesNotSave(t *testing.T) {
 	want := "https://ogmcp.example/device?user_code=BCDF-GHJK"
 	if !slices.Equal(opened, []string{want, want}) {
 		t.Errorf("opened %q", opened)
+	}
+}
+
+// A keychain that could not be read shows "Not logged in" and offers a
+// login. A later call that works, a fetch or an upload, shows the login, so
+// the user does not make a second one.
+func TestLoginWorksAfterAKeychainReadError(t *testing.T) {
+	m := &Model{}
+	c := &Controller{Auth: &fakeAuth{saveOK: true}, Model: m, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	p := parts{
+		watcher: watch.New(time.Second, time.Minute, nil, func(watch.Change) {}),
+		updater: adapter.New(nil, nil),
+	}
+	readErr := fmt.Errorf("%w: %w", auth.ErrNotRead, errors.New("the keychain is locked"))
+	check := func(when, status, login string) {
+		t.Helper()
+		if v := m.View(time.Now()); v.Status != status || v.Login != login {
+			t.Errorf("%s: status %q, login item %q", when, v.Status, v.Login)
+		}
+	}
+
+	c.onFetch(t.Context(), p, nil, readErr)
+	check("after the read error", "Not logged in", "Log in…")
+	c.onFetch(t.Context(), p, []kits.Kit{}, nil)
+	check("after a fetch", "Last upload: none yet", "")
+	if s := m.State(); s.Error != "" {
+		t.Errorf("error line after a fetch: %q", s.Error)
+	}
+
+	c.onFetch(t.Context(), p, nil, readErr)
+	at := time.Date(2026, 9, 24, 18, 30, 0, 0, time.Local)
+	uploads := fakeUploads{changed: make(chan struct{}), status: upload.Status{LastUpload: at}}
+	go c.followUploads(t.Context(), uploads)
+	uploads.changed <- struct{}{}
+	uploads.changed <- struct{}{}
+	if got := m.State().Login; got != LoginDone {
+		t.Errorf("after an upload: login state %v, want LoginDone", got)
 	}
 }
 

@@ -380,8 +380,11 @@ func (m *Model) LoginEnded() { m.setUnlessWaiting(LoginNeeded) }
 // SaveFailing records that the keychain did not save the bridge's login.
 func (m *Model) SaveFailing() { m.setUnlessWaiting(LoginUnsaved) }
 
-// LoginSaved records that the keychain saved the bridge's login.
-func (m *Model) LoginSaved() { m.setUnlessWaiting(LoginDone) }
+// LoginWorks records that the bridge holds a login that works: the server
+// answered a call made with it, or the keychain saved it. It ends any other
+// state but a running login's, such as the "Not logged in" of a keychain
+// that could not be read.
+func (m *Model) LoginWorks() { m.setUnlessWaiting(LoginDone) }
 
 // LoginKnown records that the server answered with the bridge's login, or
 // that the bridge holds one it could not check, as when offline.
