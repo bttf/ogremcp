@@ -182,7 +182,7 @@ function logRefusal(req: Request, status: number, reason: string): void {
   logger.warn("MCP request refused", {
     status,
     reason,
-    method: typeof method === "string" && LOGGED_METHODS.has(method) ? method : "other",
+    rpc_method: typeof method === "string" && LOGGED_METHODS.has(method) ? method : "other",
     protocol_version: version === undefined ? "absent" : PROTOCOL_VERSION.test(version) ? version : "other",
   });
 }

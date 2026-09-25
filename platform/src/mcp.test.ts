@@ -480,7 +480,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
         user_uuid: user,
         status: 400,
         reason: "Bad Request: Unsupported protocol version",
-        method: "tools/list",
+        rpc_method: "tools/list",
         protocol_version: "2099-01-01",
       },
     ]);
