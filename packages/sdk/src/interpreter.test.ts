@@ -7,6 +7,13 @@ describe("ParseError", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("ParseError");
     expect(error.message).toBe("Update the OpenGamerMCP addon, then /transmit again.");
+    expect(error).not.toHaveProperty("adapterSchema");
+    expect(error).not.toHaveProperty("flavor");
+  });
+
+  it("carries the facts read before the failure (§16.1)", () => {
+    const error = new ParseError("Bad data.", { adapterSchema: 1, flavor: "classic_era" });
+    expect(error).toMatchObject({ message: "Bad data.", adapterSchema: 1, flavor: "classic_era" });
   });
 });
 

@@ -7,7 +7,15 @@ import { NotFound } from "./NotFound.js";
 export interface AdminMetrics {
   window: { days: number; since: string; until: string };
   bridges: { bridge_version: string | null; os: string | null; devices: number; requests: number; errors: Record<string, number> }[];
-  parses: { kit: string | null; kit_version: string | null; uploads: number; failed: number }[];
+  parses: {
+    kit: string | null;
+    kit_version: string | null;
+    version_total: boolean;
+    adapter_schema: number | null;
+    flavor: string | null;
+    uploads: number;
+    failed: number;
+  }[];
   unsupported_flavors: { kit: string | null; flavor: string | null; rejections: number; users: number }[];
   snapshot_age: { tool: string; reads: number; p50: number; p90: number; p99: number }[];
   tools: { tool: string; calls: number; errors: number; with_sections: number }[];
@@ -175,13 +183,18 @@ function Metrics({ metrics }: { metrics: AdminMetrics }) {
         ])}
       />
 
-      <h2>Parse errors by kit version</h2>
-      <p className="og-hint">A failed parse does not record its adapter schema or flavor yet, so the rate is by kit version only.</p>
+      <h2>Parse errors</h2>
+      <p className="og-hint">
+        Parsed uploads by kit version, then by adapter schema and flavor. A failed parse shows none for each it failed before
+        reading.
+      </p>
       <Table
-        head={["Kit", "Kit version", "Uploads", "Failed", "Rate"]}
+        head={["Kit", "Kit version", "Adapter schema", "Flavor", "Uploads", "Failed", "Rate"]}
         rows={metrics.parses.map((row) => [
           row.kit ?? "none",
           row.kit_version ?? "none",
+          row.version_total ? "all" : (row.adapter_schema?.toString() ?? "none"),
+          row.version_total ? "all" : (row.flavor ?? "none"),
           row.uploads,
           row.failed,
           percent(row.failed, row.uploads),

@@ -119,6 +119,24 @@ describe("malformed input is a ParseError", () => {
   });
 });
 
+describe("a ParseError records the facts read before the failure (§16.1)", () => {
+  const era = () => files.era;
+  const tbc = () => era().replace('["project_id"] = 2', '["project_id"] = 5').replace('["interface"] = 11509', '["interface"] = 20506');
+  const badLevel = (text: string) => text.replace('["level"] = 12,', '["level"] = "12",');
+  it.each([
+    ["a wrong type in the state", () => badLevel(era()), { adapterSchema: 1, flavor: "classic_era" }],
+    ["a wrong type in a TBC Classic client's state", () => badLevel(tbc()), { adapterSchema: 1, flavor: "tbc_classic" }],
+    ["client facts of a wrong type", () => era().replace('["interface"] = 11509', '["interface"] = "11509"'), { adapterSchema: 1 }],
+    ["a newer schema", () => era().replace('["schema"] = 1,', '["schema"] = 2,'), { adapterSchema: 2 }],
+    ["no OpenGamerMCPDB", () => "OtherDB = {}", {}],
+  ])("%s", (_, input, facts) => {
+    const error = catchError(() => parse(input()));
+    expect(error).toBeInstanceOf(ParseError);
+    const { adapterSchema, flavor } = error as ParseError;
+    expect({ adapterSchema, flavor }).toEqual(facts);
+  });
+});
+
 function catchError(fn: () => unknown): Error {
   try {
     fn();

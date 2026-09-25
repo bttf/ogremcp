@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -150,5 +150,74 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("migrate against Postgres", () 
     } finally {
       rmSync(dir, { recursive: true });
     }
+  });
+});
+
+describe.skipIf(TEST_DATABASE_URL === undefined)("0013 against Postgres", () => {
+  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  let admin: Pool;
+  let pool: Pool;
+
+  beforeAll(async () => {
+    admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
+    await admin.query(`create database "${name}"`);
+    const url = new URL(TEST_DATABASE_URL ?? "");
+    url.pathname = `/${name}`;
+    pool = createPool({ url: url.toString(), queryTimeoutMs: 10_000, max: 2 });
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    try {
+      await admin.query(`drop database if exists "${name}" with (force)`);
+    } finally {
+      await admin.end();
+    }
+  });
+
+  /** Applies the repo's files up to `version`, and answers the names applied. */
+  async function migrateThrough(version: number): Promise<string[]> {
+    const dir = tempDir();
+    try {
+      for (const file of await listMigrationFiles()) {
+        if (file.version <= version) copyFileSync(file.path, join(dir, file.name));
+      }
+      return (await migrate(pool, { dir })).map((file) => file.name);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  }
+
+  it("lets a failed upload keep a flavor, over existing failed and rejected rows", async () => {
+    await migrateThrough(12);
+    const { rows: users } = await pool.query<{ id: string }>("insert into users default values returning id");
+    const { rows: devices } = await pool.query<{ id: string }>("insert into devices (user_id, name) values ($1, 'Test bridge') returning id", [
+      users[0]?.id,
+    ]);
+    const upload = (status: string, flavor: string | null) =>
+      pool.query(
+        `insert into uploads (user_id, device_id, kit, source_id, instance, sha256, content_gzip, mtime, kit_version,
+                              adapter_schema, parse_status, parse_error, flavor)
+         values ($1, $2, 'wow', 'savedvariables', $3, $3, '\\x00', null, '0.1.0', 1, $4, $5, $6)`,
+        [users[0]?.id, devices[0]?.id, randomBytes(32).toString("hex"), status, status === "failed" ? "Bad data." : null, flavor],
+      );
+    const checkViolation = { code: "23514" };
+
+    await upload("parsed", null);
+    await upload("failed", null);
+    await upload("rejected", "tbc_classic");
+    await expect(upload("failed", "classic_era")).rejects.toMatchObject(checkViolation);
+
+    expect(await migrateThrough(13)).toEqual(["0013_upload_failed_flavor.sql"]);
+    await upload("failed", "classic_era");
+    await expect(upload("parsed", "classic_era")).rejects.toMatchObject(checkViolation);
+    await expect(upload("rejected", null)).rejects.toMatchObject(checkViolation);
+    const { rows } = await pool.query("select parse_status, flavor from uploads order by id");
+    expect(rows).toEqual([
+      { parse_status: "parsed", flavor: null },
+      { parse_status: "failed", flavor: null },
+      { parse_status: "rejected", flavor: "tbc_classic" },
+      { parse_status: "failed", flavor: "classic_era" },
+    ]);
   });
 });
