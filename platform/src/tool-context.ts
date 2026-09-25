@@ -40,7 +40,7 @@ import type { Pool } from "pg";
  * bttf/wow-guide@df80260.
  */
 
-/** The history limit and the result size cap (*proposed*, §0). `config.ts` reads them from the environment. */
+/** The limits of tool calls (*proposed*, §0). `config.ts` reads them from the environment. */
 export interface ToolContextSettings {
   /** `HISTORY_MAX_SNAPSHOTS`: the most snapshots one `history` call returns. A larger `limit` is cut to it. */
   maxHistoryLimit: number;
@@ -50,9 +50,11 @@ export interface ToolContextSettings {
    * and trims to it; the envelope (`tool-envelope.ts`) checks it.
    */
   maxResultBytes: number;
+  /** `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns per game (§10.3). */
+  listGamesCharacters: number;
 }
 
-export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024 };
+export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024, listGamesCharacters: 5 };
 
 /**
  * A user-facing condition of a tool call (§10.5). Its message is plain
