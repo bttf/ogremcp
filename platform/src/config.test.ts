@@ -16,6 +16,7 @@ import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
+import { DEFAULT_RETENTION } from "./retention.js";
 import { DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 import { NO_TOOL_CALL_CAPS } from "./usage.js";
@@ -47,6 +48,7 @@ describe("loadConfig", () => {
       firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
       searchCache: DEFAULT_SEARCH_CACHE,
       toolCallCaps: NO_TOOL_CALL_CAPS,
+      retention: DEFAULT_RETENTION,
       bridgeDownloadUrl: null,
       adminUserUuids: [],
       logLevel: "info",
@@ -149,6 +151,17 @@ describe("loadConfig", () => {
     expect(loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "50" }).toolCallCaps).toEqual({ free: 50, paid: null });
     expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_PAID: "0" })).toThrow("TOOL_CALLS_PER_DAY_PAID must be a whole number of 1 or more");
     expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "2147483648" })).toThrow("TOOL_CALLS_PER_DAY_FREE must be at most 2147483647");
+  });
+
+  it("reads off or 0 as no limit for FREE_RETENTION_DAYS and DEVICES_PER_USER_FREE, and bounds the retention days (§11, §14)", () => {
+    const off = loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "off", DEVICES_PER_USER_FREE: " OFF " });
+    expect(off.retention.freeRetentionDays).toBeNull();
+    expect(off.ingest.devicesPerUser.free).toBeNull();
+    expect(loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "0", DEVICES_PER_USER_FREE: "0" }).ingest.devicesPerUser.free).toBeNull();
+    expect(loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "36500" }).retention.freeRetentionDays).toBe(36500);
+    expect(() => loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "36501" })).toThrow("FREE_RETENTION_DAYS must be off or a whole number from 1 to 36500");
+    expect(() => loadConfig({ DATABASE_URL: url, DOWNGRADE_GRACE_DAYS: "36501" })).toThrow("DOWNGRADE_GRACE_DAYS must be at most 36500");
+    expect(() => loadConfig({ DATABASE_URL: url, DEVICES_PER_USER_FREE: "none" })).toThrow("DEVICES_PER_USER_FREE must be off or a whole number");
   });
 
   it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {

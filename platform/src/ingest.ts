@@ -123,7 +123,7 @@ export interface IngestSettings {
  * of the user's upload slots. Null is no limit.
  */
 export interface DeviceLimits {
-  readonly free: number;
+  readonly free: number | null;
   readonly paid: number | null;
 }
 

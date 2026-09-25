@@ -567,6 +567,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     expect((await post(a.accessToken, upload(savedVariables(CAPTURED_AT, "Westfall")))).res.status).toBe(201);
   });
 
+  it("does not limit a free user when DEVICES_PER_USER_FREE is off, as on a self-host (§13.3)", async () => {
+    const unlimited = await serve({ ...DEFAULT_INGEST, devicesPerUser: { free: null, paid: null } });
+    const user = await newUserOf("free");
+    const [a, b] = [await token(user), await token(user)];
+    expect((await post(a.accessToken, upload(savedVariables(CAPTURED_AT)), unlimited)).res.status).toBe(201);
+    expect((await post(b.accessToken, upload(savedVariables(CAPTURED_AT)), unlimited)).res.status).toBe(201);
+  });
+
   it("gives the slot to one of two devices whose first uploads race (§8.3)", async () => {
     const good = upload(savedVariables(CAPTURED_AT));
     // A few rounds, since a race does not always overlap.
