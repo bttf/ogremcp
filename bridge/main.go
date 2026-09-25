@@ -7,11 +7,13 @@
 //	                game folder (§6.1), remember it, and print it
 //	    -root DIR   answer the folder prompt with DIR; without it the prompt
 //	                is skipped
-//	    -watch      keep running, and fetch and locate again every refresh
-//	                interval
+//	    -watch      keep running, fetch and locate again every refresh
+//	                interval, and watch the kits' sources (§7): print each
+//	                settled change of a source instance
 //
 // The server is OGMCP_BASE_URL, or the development default below. The game
-// folders and the refresh interval are in the settings file (package config).
+// folders, the refresh interval, and the debounce delay are in the settings
+// file (package config).
 package main
 
 import (
@@ -22,12 +24,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/bttf/ogmcp/bridge/internal/auth"
 	"github.com/bttf/ogmcp/bridge/internal/config"
 	"github.com/bttf/ogmcp/bridge/internal/keychain"
 	"github.com/bttf/ogmcp/bridge/internal/kits"
 	"github.com/bttf/ogmcp/bridge/internal/locate"
+	"github.com/bttf/ogmcp/bridge/internal/watch"
 )
 
 // version is set by the build's ldflags: the bridge-v tag without its prefix,
@@ -104,7 +108,7 @@ func (f folderFlag) PickFolder(context.Context, string) (string, error) {
 func listKits(args []string) error {
 	flags := flag.NewFlagSet("bridge kits", flag.ContinueOnError)
 	rootFlag := flags.String("root", "", "answer the folder prompt with this folder; without it the prompt is skipped")
-	watch := flags.Bool("watch", false, "keep running, and fetch and locate again every refresh interval")
+	follow := flags.Bool("watch", false, "keep running, fetch and locate again every refresh interval, and print each settled change of a source instance")
 	if err := flags.Parse(args); errors.Is(err, flag.ErrHelp) {
 		return nil
 	} else if err != nil {
@@ -133,6 +137,18 @@ func listKits(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	var watcher *watch.Watcher
+	if *follow {
+		watcher = watch.New(settings.DebounceDelay(), settings.Interval(), nil, func(c watch.Change) {
+			fmt.Printf("%s %s %s: changed at %s\n", c.Kit, c.SourceID, c.Instance[:12], c.ModTime.Format(time.RFC3339))
+		})
+		go func() {
+			if err := watcher.Run(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "Could not watch the game folders:", err)
+			}
+		}()
+	}
+
 	env := locate.DefaultEnv()
 	show := func(list []kits.Kit, err error) {
 		if err != nil {
@@ -142,6 +158,7 @@ func listKits(args []string) error {
 		if len(list) == 0 {
 			fmt.Println("No kits are enabled for this account.")
 		}
+		var located []watch.Kit
 		for _, k := range list {
 			if k.Err != nil {
 				fmt.Printf("%s: %v\n", k.Kit, k.Err)
@@ -153,6 +170,7 @@ func listKits(args []string) error {
 				continue
 			}
 			fmt.Printf("%s %s: %s\n", k.Kit, k.Manifest.Version, root)
+			located = append(located, watch.Kit{Kit: k.Kit, Root: root, Sources: k.Manifest.Sources})
 			if settings.Roots[k.Kit] != root {
 				if settings.Roots == nil {
 					settings.Roots = map[string]string{}
@@ -163,10 +181,13 @@ func listKits(args []string) error {
 				}
 			}
 		}
+		if watcher != nil {
+			watcher.SetKits(located)
+		}
 	}
 
 	api := kits.New(base, client)
-	if *watch {
+	if *follow {
 		kits.NewPoller(api, settings.Interval(), show).Run(ctx)
 		return nil
 	}
