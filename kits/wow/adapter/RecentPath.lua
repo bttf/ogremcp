@@ -8,7 +8,8 @@
 --
 --   captured_at   GetServerTime() at the collection that saw the change
 --   map_id        the location section's map_id, nil when unreadable
---   zone          GetRealZoneText()
+--   zone          the location section's zone: the name of the zone map that
+--                 map_id lies in, else GetRealZoneText()
 --   subzone       GetSubZoneText(), "" where the zone has no subzone
 --   x, y          the position on map_id, from 0 to 1; nil in an instance
 --   in_instance   the first return of IsInInstance()
@@ -16,11 +17,17 @@
 -- Every collection reads the place and appends it when it differs from the
 -- newest entry. The map ID decides a zone change when both have one, because
 -- GetRealZoneText can briefly name a building while the map ID stays the same
--- (bttf/wow-guide@df80260:addon/Storage.lua, ZoneChanged). The zone text
--- decides only when a map ID is missing, as in an instance. A subzone that
--- differs is a change too. A place whose zone has not resolved, as just after
--- a loading screen, is not recorded, and a value that could not be read is
--- never a change.
+-- (bttf/wow-guide@df80260:addon/Storage.lua, ZoneChanged). For the same
+-- reason the zone comes from the zone map where there is one (CollectLocation
+-- in Collectors.lua), so there a building name is never the zone, not even in
+-- the first entry of a session. The zone text decides only when a map ID is
+-- missing, as in an instance. A subzone that differs is a change too. A place
+-- with no zone name from either the map or the zone text, as can happen just
+-- after a loading screen, is not recorded, and a value that could not be read
+-- is never a change. A map ID can arrive before the zone text. That place is
+-- recorded with the zone map's name and possibly an empty subzone, and a
+-- subzone change less than RECENT_PATH_MIN_INTERVAL seconds later replaces
+-- it, as below.
 --
 -- A subzone change keeps the zone of the newest entry, so a building name
 -- read on the same map never becomes the zone. A subzone change less than
@@ -31,10 +38,13 @@
 --
 -- recent_path is the one section carried across reloads (§6.3.1). The first
 -- collection of a session takes the entries of the OpenGamerMCPDB the client
--- loaded, when that table belongs to the same character. A client that does
--- not read SavedVariables back, as WoW Forever builds 69893 and 69913 do,
--- leaves OpenGamerMCPDB empty, so there the path starts at the reload. The
--- adapter checks the table, never the client.
+-- loaded, when that table belongs to the same character. The zone of a
+-- carried entry is read again from its map ID, so an entry written while
+-- GetRealZoneText named a building takes the name of its zone map. An entry
+-- whose map gives no zone name keeps its zone. A client that does not read
+-- SavedVariables back, as WoW Forever builds 69893 and 69913 do, leaves
+-- OpenGamerMCPDB empty, so there the path starts at the reload. The adapter
+-- checks the table, never the client.
 
 local _, ns = ...
 
@@ -55,6 +65,7 @@ local ReadInteger = ns.ReadInteger
 local ReadBoolean = ns.ReadBoolean
 local ReadTable = ns.ReadTable
 local Api = ns.Api
+local ZoneName = ns.ZoneName
 local CollectLocation = ns.CollectLocation
 
 -- The entries, oldest first. nil until the first collection of the session.
@@ -109,6 +120,7 @@ local function Carried(guid)
 	for _, t in ipairs(entries or {}) do
 		local entry = ReadEntry(t)
 		if entry then
+			entry.zone = ZoneName(entry.map_id) or entry.zone
 			out[#out + 1] = entry
 		end
 	end
