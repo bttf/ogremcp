@@ -2,7 +2,7 @@
 
 > **Source of truth for implementers.** If code and this doc disagree, raise it. Don't silently diverge.
 >
-> The name is **Open Gamer MCP**; use `ogmcp` in repos, packages, services, and other identifiers. Domain and GitHub org are not locked yet (§19).
+> The name is **Ogre MCP** (Open Game Relay Engine); use `ogremcp` in repos, packages, services, and other identifiers. The domain is `ogremcp.com` and the GitHub org is `ogremcp` (§19.1 D4). The project was named Open Gamer MCP (`ogmcp`) until 2026-09-25. Until RED-364 lands, the code and the rest of this doc still use the old name.
 
 ## 0. How to use this doc
 
@@ -129,7 +129,7 @@ ogmcp/
 - **Releases:** the bridge and the addon share one GitHub Releases page, split by tag prefix: `bridge-v…` and `addon-v…`. Bridge self-update only considers `bridge-v` tags (§7). The CurseForge/Wago packager builds `kits/wow/adapter` from that subfolder on `addon-v` tags. GoReleaser's built-in tag-prefix (monorepo) support may be Pro-only; confirm the free path in P0.
 - **Deploys:** Railway rebuilds the platform when `platform/`, `packages/sdk/`, `kits/`, or root workspace files change, and skips bridge-only changes. Set this with watch paths; the prototype hit this (RED-266).
 - **Visibility:** Blizzard requires addon code to be public before distribution, so the whole repo goes public at the P9 listings, not at G2. By then, §20 and anything else private must be removed.
-- Create the repo under the personal account (`bttf`) until the org exists (§19.1 D4). Repo transfers keep redirects. What happens to the prototype repo: D2.
+- The repo is `bttf/ogremcp` under the personal account until P9. It moves to the `ogremcp` org when it goes public (§19.1 D4). Repo renames and transfers keep redirects. What happens to the prototype repo: D2.
 - `[later]`: community kits live in their own repos and depend on `@ogmcp/sdk` from npm. Extract `ogmcp-kit-template` from the WoW kit when a second kit exists.
 
 \*Decided (§19.1 D11): AGPL-3.0-or-later on the platform so nobody can run a closed hosted clone; MIT elsewhere to maximize contributors. Each path has its own `LICENSE` file, and a root note says which license covers which path. Files outside these paths are MIT. Contributions use a DCO (`Signed-off-by`), not a CLA, and CI checks every commit for the sign-off.
@@ -341,7 +341,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
   - **Links:** the bridge follows folder links on the install path, so a linked `Interface/AddOns` works. If the adapter folder itself is a link (a developer's checkout), the bridge never replaces or removes it and the tray says updates are skipped. Owner decision, 2026-09-24.
   - **Disabled kits:** the bridge leaves a disabled kit's addon installed, stops updating it, and never deletes it.
 - **Installer:** installs the bridge only, per-user, so self-update never needs admin rights. Windows: Inno Setup into `%LOCALAPPDATA%`. macOS: a notarized `.app` in a `.dmg`, installed to `~/Applications`, not the usual drag to `/Applications`. If it's launched from anywhere else (the dmg, Downloads), it offers to move itself there.
-- **Signing:** Windows via Azure Trusted Signing; macOS via Developer ID signing plus notarization. Neither is ready: Apple Developer Program enrollment is unconfirmed and no signing secrets are in CI yet (§19.1 D6).
+- **Signing:** macOS via Developer ID signing plus notarization. It needs the owner's Apple Developer Program enrollment and the signing secrets in CI. Windows builds ship unsigned at the public beta, so SmartScreen warns on first run. `[later]`: Windows code signing (§19.1 D6).
 - **Self-update:** check GitHub Releases for `bridge-v` tags only (§5). Verify the checksum and a detached signature (e.g. an ed25519 key embedded in the binary), then install. **Windows:** swap the binary. **macOS:** replace the whole `.app` bundle, then relaunch; swapping the binary inside a signed, notarized bundle breaks its signature.
 - **Listings:** also publish the addon on CurseForge and Wago for discovery, pointing to the bridge download. They build from `addon-v` tags, and the repo must be public first (§5). Listing text and the TOC `Title` and `Notes` never say or imply that an addon feature needs payment or a tier, and name no prices (§14, D10).
 
@@ -507,12 +507,13 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | `events` | Tool-call and ingest events (§16) |
 | `issues` | `report_issue` records (§16.2) |
 | `usage_daily` | Tool calls per user per day (§14) |
-| `subscriptions` | Billing state (§14; provider: §19.1 D5) |
+| `subscriptions` | Billing state (§14). `[later]`: billing comes after G2 (§19.1 D5). |
 
 - **Parse on ingest.** Store the typed state in `snapshots` and return parse errors to the bridge. Failed uploads are kept with their error so they can be re-parsed.
 - **Keep raw bytes** with the kit version and adapter schema, so old uploads can be re-parsed when an interpreter improves.
 - **Order by `snapshot_at`**, not insert time, because offline uploads arrive late. Indexes: `(user_id, kit, snapshot_at DESC)` and `(user_id, kit, flavor, character_key, snapshot_at DESC)`.
 - **Retention by tier:** free keeps 30 days of uploads and snapshots; paid keeps them forever. A daily job deletes expired rows. After a paid-to-free downgrade, history older than 30 days is kept for a 30-day grace period, then deleted (§19.1 D9).
+- **Expired auth rows:** a daily job deletes OAuth rows past their `expires_at` and expired `web_sessions` rows. Rows with no expiry, such as clients, stay. Owner decision, 2026-09-25.
 - **Stints** (§3) are derived from gaps between snapshots (proposed: more than 30 minutes). There is no separate tracking.
 - **Delete my data** hard-deletes the user's uploads, snapshots, events, and issues. **Delete account** also removes devices, agent grants, identities, and the user. `search_cache` isn't user-linked and stays, so a cached query can outlive the delete until its TTL. Delete my data keeps `usage_daily`, so it can't reset the day's cap; Delete account removes it.
 - Rough volume: ~8 KB compressed × 30 uploads/day × 1,000 users ≈ 240 MB/day. Free-tier retention bounds most of it; paid grows forever. Monitor it.
@@ -562,7 +563,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | Agent consent | Approve an agent's OAuth request |
 | Devices | List, rename, revoke |
 | Connected agents | List, revoke |
-| Account | Tier, billing, delete my data, delete account |
+| Account | Tier, delete my data, delete account. `[later]`: billing (§14). |
 | `/admin` | §16 queries. Restricted to `ADMIN_USER_UUIDS` (env). |
 | Privacy and terms | Required before public launch, e.g. for Google's OAuth consent screen |
 
@@ -592,7 +593,7 @@ No snapshot diagnostics pages. Players see their state through their agent.
 - **Everyone:** the per-device ingest rate limit and the 5 MB cap (§8.3).
 - **Cap reached:** tools return a plain-language message with the reset time (the next UTC midnight, §10.5). Every tool call that runs counts, except one that fails through the service's fault (`search_unavailable`, an internal error), which is refunded (owner decision, 2026-09-25). With no cap set, calls are still counted, so the numbers can be measured.
 - **Cap numbers: measure, then set** (config). They depend on Firecrawl's per-call cost and the cache hit rate.
-- **Billing:** `[decide]` D5. Needed before the paid tier launches.
+- `[later]` **Billing:** the public beta ships the free tier only. Billing and the paid tier launch after G2, and the provider is chosen then (§19.1 D5).
 
 ## 15. Data freshness roadmap `[later]`
 
@@ -680,15 +681,15 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | **G1** | **Dogfood gate** (§18.2) | | P5–P7 |
 | P8 | Observability: events, logs, `/admin`, `report_issue` | §16 | P6 |
 | P9 | Distribution: signing, installers, self-update, release tags, repo goes public, CurseForge/Wago listings, Windows test pass | §5, §7, §18.2 | P5, D6, D10 |
-| P10 | Tiers: caps, device limit, retention job, `wow_get_history`, billing | §11, §14 | P6, D5, D9 |
+| P10 | Tiers: caps, device limit, retention job, `wow_get_history`. Billing comes after G2 (D5). | §11, §14 | P6, D9 |
 | P11 | Launch readiness: delete data/account, privacy and terms, remaining web UI pages, client compatibility pass, self-host image | §11, §13 | P8–P10, D4 |
 | **G2** | **Public beta gate** (§18.2) | | P11 |
 
 ### 18.2 Gates
 
 - **G1 Dogfood:** on a macOS or Windows PC with WoW Classic Era (macOS alone is enough), install the dev bridge and approve the device; the addon installs. Play, then `/transmit`. In claude.ai, add the MCP URL and approve OAuth. Ask "where should I go next?" The agent calls `wow_get_state` and `search_game_info` and gives a correct, spoiler-free, grounded suggestion, and `snapshot_at` matches the transmit.
-- **G2 Public beta:** a stranger on Windows or macOS can sign up, run a signed installer, connect Claude, ChatGPT, or Perplexity, and get grounded answers. They can revoke devices and agents and delete their data. Caps are enforced, and `/admin` shows the §16.1 metrics.
-- **Windows testing:** Windows is v1. Before G2, the G1 check also passes on Windows with signed P9 builds. Tester: **TBD, owner names before P9.**
+- **G2 Public beta:** a stranger on Windows or macOS can sign up, run the installer (signed on macOS, unsigned on Windows, §7), connect Claude, ChatGPT, or Perplexity, and get grounded answers. They can revoke devices and agents and delete their data. Caps are enforced, and `/admin` shows the §16.1 metrics.
+- **Windows testing:** Windows is v1. Before G2, the G1 check also passes on Windows with the P9 builds. Tester: **TBD, owner names before P9.**
 
 ### 18.3 Spikes
 
@@ -716,9 +717,9 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | D1 | Platform stack: HTTP framework, DB access + migrations, UI rendering; JS workspace tool | P0 | **Decided 2026-09-24 (RED-274):** keep the prototype's stack: Express 5, raw `pg`, in-repo SQL migrations, a Vite + React single-page app, pnpm (§13.1). It hosts `oidc-provider` (Koa-based; mountable in Express) and lets the most prototype code be copied. |
 | D2 | Existing prototype (the current WoW Guide MCP): evolve it into this repo, or rewrite and salvage? | P0 | **Decided 2026-09-24 (RED-275):** rewrite and salvage in a new monorepo, `bttf/ogmcp`. Its cutover items (data, connectors, the prototype repo) come after G1. Also covers: moving prototype users and snapshots before the prototype on Railway + Supabase shuts down; the existing claude.ai and Claude Code connectors that point at it; and what happens to `bttf/wow-guide`. Keep §20.1's lessons either way. |
 | D3 | Screenshots: the prototype's `/transmit` takes one and exposes `get_screenshot`; this doc drops them. Keep (as a second `file` source) or drop? | P1, P6 | **Decided 2026-09-24 (RED-288):** drop for v1. `/transmit` only reloads, and there is no `get_screenshot`. A screenshot source can be added later as a new `sources[].type` (§6.1). |
-| D4 | Domain and GitHub org | G2 | Check availability of `ogmcp` and `opengamermcp` (domains and GitHub org). Google's production consent screen likely needs a domain we own. |
-| D5 | Billing provider, and whether billing ships at beta or after | P10 | |
-| D6 | Code signing: Azure Trusted Signing eligibility (or an alternative) for Windows; Apple Developer Program enrollment plus Developer ID and notarization secrets in CI for macOS | P9 | §7 |
+| D4 | Domain and GitHub org | G2 | **Decided 2026-09-25 (RED-356):** rename the project to **Ogre MCP** (Open Game Relay Engine), slug `ogremcp` (RED-364). Domain `ogremcp.com`, GitHub org `ogremcp`. The repo is renamed to `bttf/ogremcp` now and moves to the org at P9 (§5). On 2026-09-25 the domain, the GitHub name, and the npm scope `@ogremcp` were unregistered. The name overlaps with OgreBot (ISXOgre), an EverQuest automation tool whose "MCP" means Master Control Panel; the owner accepted the overlap. Google's production consent screen likely needs the domain. |
+| D5 | Billing provider, and whether billing ships at beta or after | P10 | **Decided 2026-09-25 (RED-348):** the public beta ships the free tier only. The cap numbers are measured first (§14). The billing provider is chosen after G2, before the paid tier launches (RED-355). |
+| D6 | Code signing: Azure Trusted Signing eligibility (or an alternative) for Windows; Apple Developer Program enrollment plus Developer ID and notarization secrets in CI for macOS | P9 | **Decided 2026-09-25 (RED-340):** macOS builds are Developer ID signed and notarized; the owner enrolls in the Apple Developer Program and provides the CI secrets. Windows builds ship unsigned at the public beta; Windows signing is `[later]` (§7). |
 | D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | **Decided 2026-09-24 (RED-299):** CIMD on in v1, with DCR as the fallback (§9). Static clients moved to `[later]` after S1 (2026-09-25). Spike S2 (RED-298) found that `oidc-provider` 9.12 supports CIMD natively. |
 | D8 | Experimental flavors: what does "opt-in" mean? | P4 | **Decided 2026-09-24 (RED-310):** no gate in v1; `experimental` only adds caveats (§6.1). |
 | D9 | Paid → free downgrade: grace period before history older than 30 days is deleted | P10 | **Decided 2026-09-24 (RED-349):** 30 days (§11). |
@@ -728,7 +729,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 
 ### 19.2 Parked (non-blocking)
 
-- Trademark check on "Open Gamer MCP" in the software/games classes.
+- Trademark check on "Ogre MCP" in the software/games classes.
 - Tool-call cap numbers and the annual price.
 - **Forever:** finish its detection facts (`season_id`, GUID) and fixture (§6.3.1), re-test the SavedVariables bug on each new build, then settle its search sources, combat-log support, and how far its content diverges from Classic.
 - **Season of Discovery:** whether to register `classic_sod`, and its search scope.
