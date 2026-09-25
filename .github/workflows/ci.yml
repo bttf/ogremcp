@@ -111,9 +111,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # No pnpm here, so no package-manager cache.
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          package-manager-cache: false
 
       - run: node scripts/check-adapter-version.mjs "$BASE_SHA"
         env:
