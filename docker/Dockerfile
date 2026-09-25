@@ -33,20 +33,30 @@ COPY platform platform
 RUN pnpm install --offline --frozen-lockfile --filter "@ogmcp/platform..." \
  && pnpm --filter "@ogmcp/platform..." run build
 
-# The platform with its production dependencies only. Each workspace package
-# it depends on is copied in with the files its package.json lists.
-RUN pnpm deploy --offline --legacy --prod --filter @ogmcp/platform /prod/platform
+# The production dependencies only, installed from the lockfile in place of
+# the build's. The store already holds them.
+RUN rm -rf node_modules packages/*/node_modules kits/*/node_modules platform/node_modules \
+ && pnpm install --offline --frozen-lockfile --prod --filter "@ogmcp/platform..."
+
+# What the service reads at run time, in the repo's layout: the dependencies,
+# and each package's package.json, LICENSE, build output, and data files. A
+# new first-class kit is added here too. @ogmcp/sdk has no dependencies, so it
+# has no node_modules.
+RUN mkdir /prod \
+ && tar -cf - \
+      node_modules \
+      packages/sdk/package.json packages/sdk/LICENSE packages/sdk/dist packages/sdk/src/manifest.schema.json \
+      kits/wow/package.json kits/wow/LICENSE kits/wow/dist kits/wow/manifest.json kits/wow/node_modules \
+      platform/package.json platform/LICENSE platform/dist platform/migrations platform/node_modules \
+    | tar -xf - -C /prod
 
 FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production \
     PORT=4790
 WORKDIR /app
-# Only what the service reads at run time. Root owns it, and the service runs
-# as the node user, so the service cannot change it.
-COPY --from=build /prod/platform/package.json /prod/platform/LICENSE platform/
-COPY --from=build /prod/platform/node_modules platform/node_modules
-COPY --from=build /prod/platform/dist platform/dist
-COPY --from=build /prod/platform/migrations platform/migrations
+# Root owns the files, and the service runs as the node user, so the service
+# cannot change them.
+COPY --from=build /prod ./
 USER node
 EXPOSE 4790
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
