@@ -152,6 +152,17 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ DATABASE_URL: url, TOOL_CALLS_PER_DAY_FREE: "2147483648" })).toThrow("TOOL_CALLS_PER_DAY_FREE must be at most 2147483647");
   });
 
+  it("reads off or 0 as no limit for FREE_RETENTION_DAYS and DEVICES_PER_USER_FREE, and bounds the retention days (§11, §14)", () => {
+    const off = loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "off", DEVICES_PER_USER_FREE: " OFF " });
+    expect(off.retention.freeRetentionDays).toBeNull();
+    expect(off.ingest.devicesPerUser.free).toBeNull();
+    expect(loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "0", DEVICES_PER_USER_FREE: "0" }).ingest.devicesPerUser.free).toBeNull();
+    expect(loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "36500" }).retention.freeRetentionDays).toBe(36500);
+    expect(() => loadConfig({ DATABASE_URL: url, FREE_RETENTION_DAYS: "36501" })).toThrow("FREE_RETENTION_DAYS must be off or a whole number from 1 to 36500");
+    expect(() => loadConfig({ DATABASE_URL: url, DOWNGRADE_GRACE_DAYS: "36501" })).toThrow("DOWNGRADE_GRACE_DAYS must be at most 36500");
+    expect(() => loadConfig({ DATABASE_URL: url, DEVICES_PER_USER_FREE: "none" })).toThrow("DEVICES_PER_USER_FREE must be off or a whole number");
+  });
+
   it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {
     const config = loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: " https://downloads.example/ogmcp-bridge " });
     expect(config.bridgeDownloadUrl).toBe("https://downloads.example/ogmcp-bridge");

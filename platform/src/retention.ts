@@ -7,7 +7,8 @@ import { logger } from "./log.js";
  * Retention by tier (§11, §14): a free user keeps `freeRetentionDays` of
  * uploads and snapshots, and a paid user keeps them forever.
  * `startRetention` deletes a free user's expired rows at start and once a
- * day.
+ * day. `freeRetentionDays` null (`FREE_RETENTION_DAYS=off`, as on a self-host)
+ * keeps every user's history forever, and the job does not run.
  *
  * - An upload's age is counted from `uploads.received_at`, when the server
  *   stored it. Its snapshot is deleted with it, whatever its `snapshot_at`.
@@ -43,8 +44,8 @@ import { logger } from "./log.js";
  */
 
 export interface RetentionSettings {
-  /** `FREE_RETENTION_DAYS`: how many days of uploads and snapshots a free user keeps. */
-  freeRetentionDays: number;
+  /** `FREE_RETENTION_DAYS`: how many days of uploads and snapshots a free user keeps. Null is forever. */
+  freeRetentionDays: number | null;
   /** `DOWNGRADE_GRACE_DAYS`: how many days after a downgrade to free a user keeps all their history (D9). */
   downgradeGraceDays: number;
 }
@@ -99,7 +100,8 @@ export interface RetentionOptions {
 /**
  * Deletes every free user's expired uploads and snapshots, in batches, and
  * logs one line. Throws on the first batch that fails, after its line; the
- * batches before it stay deleted.
+ * batches before it stay deleted. Deletes nothing, and logs nothing, when
+ * `freeRetentionDays` is null.
  */
 export async function deleteExpiredHistory({
   pool,
@@ -107,6 +109,7 @@ export async function deleteExpiredHistory({
   batchSize = RETENTION_BATCH,
 }: RetentionOptions): Promise<DeletedHistory> {
   const deleted: DeletedHistory = { uploads: 0, snapshots: 0 };
+  if (settings.freeRetentionDays === null) return deleted;
   try {
     for (;;) {
       const { rows } = await pool.query<DeletedHistory>(DELETE_BATCH, [settings.freeRetentionDays, settings.downgradeGraceDays, batchSize]);
@@ -126,9 +129,11 @@ export async function deleteExpiredHistory({
 /**
  * Runs `deleteExpiredHistory` now and then every `RETENTION_INTERVAL_MS` in
  * this process, which has no other scheduler. Each replica runs it. The timer
- * does not keep the process alive. Returns a function that stops it.
+ * does not keep the process alive. Returns a function that stops it. Starts
+ * nothing when `freeRetentionDays` is null.
  */
 export function startRetention(options: RetentionOptions): () => void {
+  if (options.settings?.freeRetentionDays === null) return () => {};
   const run = (): void => {
     // A failed run has logged its line. The next run starts over.
     deleteExpiredHistory(options).catch(() => {});

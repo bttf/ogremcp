@@ -131,6 +131,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("history retention against Post
     expect(await history(user)).toEqual({ [recent]: true });
   });
 
+  it("deletes nothing when FREE_RETENTION_DAYS is off", async () => {
+    const user = await newUser("free");
+    const old = await upload(user, 400);
+    expect(await deleteExpiredHistory({ pool, settings: { freeRetentionDays: null, downgradeGraceDays: 30 } })).toEqual({ uploads: 0, snapshots: 0 });
+    expect(await history(user)).toEqual({ [old]: true });
+    await pool.query("delete from uploads where user_id = $1", [user.id]);
+  });
+
   it("runs in batches, and two runs at once delete each row once and skip a row another transaction holds", async () => {
     const users = [await newUser("free"), await newUser("free")];
     const ids: string[] = [];

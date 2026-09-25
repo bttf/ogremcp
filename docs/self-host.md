@@ -131,6 +131,10 @@ Every line of `.env` reaches the service. `platform/.env.example` describes
 each setting. Any of them may go in `.env`, except `DATABASE_URL` and `PORT`,
 which `docker-compose.yml` sets.
 
+A self-host has no limits unless you set them. `selfhost.env.example` turns
+off the device limit and history retention, and leaves the tool-call caps
+unset.
+
 ## Update
 
 ```sh

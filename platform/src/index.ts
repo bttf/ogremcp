@@ -155,9 +155,13 @@ logger.info(`tool calls per day: free ${caps.free ?? "no cap"}, paid ${caps.paid
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
 
 // Deletes free users' expired uploads and snapshots (§11, §14), now and once
-// a day. Paid users keep theirs.
+// a day. Paid users keep theirs. FREE_RETENTION_DAYS=off keeps everyone's.
 const { freeRetentionDays, downgradeGraceDays } = config.retention;
-logger.info(`history retention: free ${freeRetentionDays} days, or all of it for ${downgradeGraceDays} days after a downgrade; paid forever`);
+logger.info(
+  freeRetentionDays === null
+    ? "history retention: off, every user keeps their history forever"
+    : `history retention: free ${freeRetentionDays} days, or all of it for ${downgradeGraceDays} days after a downgrade; paid forever`,
+);
 startRetention({ pool, settings: config.retention });
 
 const app = createApp({

@@ -12,7 +12,9 @@
 --   user who was downgraded before this migration gets no grace.
 -- - uploads_user_received replaces uploads_user. The job reads a free user's
 --   uploads by received_at, and the user delete reads them by user_id, which
---   the new index starts with.
+--   the new index starts with. The old index is dropped first: its drop
+--   locks the table exclusively, and a create before it would hold a
+--   weaker lock and then upgrade it, which can deadlock with an ingest.
 --
 -- Adding a nullable column without a default, a function, a trigger, and an
 -- index, and dropping an index, rewrite no rows.
@@ -36,8 +38,8 @@ create trigger users_tier_changed
   when (old.tier is distinct from new.tier)
   execute function users_tier_changed();
 
-create index uploads_user_received on uploads (user_id, received_at);
-
 drop index uploads_user;
+
+create index uploads_user_received on uploads (user_id, received_at);
 
 commit;

@@ -75,7 +75,8 @@ export interface Config {
    * `INGEST_DEVICE_BURST`, the rate limit per device (§8.3, `ingest.ts`); and
    * `DEVICES_PER_USER_FREE` and `DEVICES_PER_USER_PAID`, the device limit of
    * each tier (§8.3, §14). Each one unset is `DEFAULT_INGEST`'s: one device
-   * on the free tier, and no limit on the paid tier.
+   * on the free tier, and no limit on the paid tier. `DEVICES_PER_USER_FREE`
+   * `off` is no limit.
    */
   ingest: IngestSettings;
   /**
@@ -114,9 +115,10 @@ export interface Config {
   toolCallCaps: ToolCallCaps;
   /**
    * `FREE_RETENTION_DAYS`: how many days of uploads and snapshots a free user
-   * keeps. `DOWNGRADE_GRACE_DAYS`: how many days after a downgrade to free a
-   * user keeps all their history (§11, §19.1 D9, `retention.ts`). Each one
-   * unset is `DEFAULT_RETENTION`'s.
+   * keeps, or `off`: forever. `DOWNGRADE_GRACE_DAYS`: how many days after a
+   * downgrade to free a user keeps all their history (§11, §19.1 D9,
+   * `retention.ts`). Each one unset is `DEFAULT_RETENTION`'s, and at most
+   * 36500.
    */
   retention: RetentionSettings;
   /**
@@ -168,11 +170,30 @@ const DAY_SECONDS = 24 * 60 * 60;
 /** The largest Postgres `integer`. A count or cap that reaches the database as one must fit it. */
 const INT_MAX = 2_147_483_647;
 
-function positiveInt(name: string, value: string | undefined, fallback: number): number {
+/**
+ * The most days a retention setting takes: 100 years. The retention job
+ * subtracts them from the current time, which stays in Postgres's range.
+ */
+const MAX_DAYS = 36_500;
+
+function positiveInt(name: string, value: string | undefined, fallback: number, max = INT_MAX): number {
   if (value === undefined || value.trim() === "") return fallback;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a whole number of 1 or more`);
-  if (n > INT_MAX) throw new Error(`${name} must be at most ${INT_MAX}`);
+  if (n > max) throw new Error(`${name} must be at most ${max}`);
+  return n;
+}
+
+/**
+ * A limit that `off` or 0 turns off: a whole number from 1 to `max`, or null
+ * for off. Unset is `fallback`. A self-host sets it off (§13.3).
+ */
+function limitOrOff(name: string, value: string | undefined, fallback: number | null, max = INT_MAX): number | null {
+  const raw = (value ?? "").trim().toLowerCase();
+  if (raw === "") return fallback;
+  if (raw === "off" || Number(raw) === 0) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > max) throw new Error(`${name} must be off or a whole number from 1 to ${max}`);
   return n;
 }
 
@@ -426,7 +447,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       ),
       deviceBurst: positiveInt("INGEST_DEVICE_BURST", env["INGEST_DEVICE_BURST"], DEFAULT_INGEST.deviceBurst),
       devicesPerUser: {
-        free: positiveInt("DEVICES_PER_USER_FREE", env["DEVICES_PER_USER_FREE"], DEFAULT_INGEST.devicesPerUser.free),
+        free: limitOrOff("DEVICES_PER_USER_FREE", env["DEVICES_PER_USER_FREE"], DEFAULT_INGEST.devicesPerUser.free),
         paid: optionalPositiveInt("DEVICES_PER_USER_PAID", env["DEVICES_PER_USER_PAID"]),
       },
     },
@@ -452,8 +473,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       paid: optionalPositiveInt("TOOL_CALLS_PER_DAY_PAID", env["TOOL_CALLS_PER_DAY_PAID"]),
     },
     retention: {
-      freeRetentionDays: positiveInt("FREE_RETENTION_DAYS", env["FREE_RETENTION_DAYS"], DEFAULT_RETENTION.freeRetentionDays),
-      downgradeGraceDays: positiveInt("DOWNGRADE_GRACE_DAYS", env["DOWNGRADE_GRACE_DAYS"], DEFAULT_RETENTION.downgradeGraceDays),
+      freeRetentionDays: limitOrOff("FREE_RETENTION_DAYS", env["FREE_RETENTION_DAYS"], DEFAULT_RETENTION.freeRetentionDays, MAX_DAYS),
+      downgradeGraceDays: positiveInt("DOWNGRADE_GRACE_DAYS", env["DOWNGRADE_GRACE_DAYS"], DEFAULT_RETENTION.downgradeGraceDays, MAX_DAYS),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     logLevel: logLevel(env["LOG_LEVEL"]),
