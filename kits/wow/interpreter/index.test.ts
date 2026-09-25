@@ -1,7 +1,7 @@
 // The interpreter against the SavedVariables files that the adapter's Lua
 // tests write from two stub worlds (test/adapter_test.lua, synthetic data
-// only), and against malformed input. RED-293 adds a golden fixture from a
-// real client.
+// only), against the golden fixture from a real Classic Era client
+// (fixtures/classic_era, §6.4), and against malformed input.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { detect } from "./detect.js";
 import { MESSAGE_MAX } from "./errors.js";
 import { DEFAULT_LIMITS, interpreter } from "./index.js";
+import { SECTIONS } from "./sections.js";
 
 vi.mock("./detect.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./detect.js")>();
@@ -74,6 +75,19 @@ describe.each(["era", "forever"] as const)("the %s stub world's file", (client) 
     // Snapshots store the state as jsonb (§11).
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
   });
+});
+
+it("parses the Classic Era golden fixture (§6.4)", () => {
+  const parsed = parse(readFileSync(new URL("../fixtures/classic_era/OpenGamerMCP.lua", import.meta.url)));
+  expect(parsed).toMatchObject({
+    flavor: "classic_era",
+    rules: [],
+    character: { key: "Player-9999-0A1B2C3D", name: "Testchar", realm: "Test Realm" },
+    capturedAt: expect.any(Date),
+    adapterSchema: 1,
+  });
+  for (const section of SECTIONS) expect(parsed.state[section], section).not.toBeNull();
+  expect(parsed.state.recent_path).toContainEqual(expect.objectContaining({ zone: "Redridge Mountains" }));
 });
 
 it.each([0, -1, 9_000_000_000_000, 253_402_300_000])("reads captured_at %d as unknown", (stamp) => {
