@@ -100,6 +100,25 @@ jobs:
 
       - run: pnpm lint:seams
 
+  # §7: a PR that changes a kit's adapter/ must raise that kit's TOC
+  # ## Version above the base branch's. Rule: scripts/check-adapter-version.mjs.
+  adapter-version:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - run: node scripts/check-adapter-version.mjs "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
   # The Go module in bridge/.
   bridge:
     runs-on: ubuntu-latest
