@@ -10,7 +10,7 @@ import type { Snapshot, ToolContext, ToolResult } from "@ogmcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
-import { SECTIONS } from "./sections.js";
+import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
 
 const SNAPSHOT_AT = new Date("2026-09-24T12:00:00.000Z");
 const snapshots = {} as Record<"era" | "forever", Snapshot<WowState>>;
@@ -129,4 +129,43 @@ it("rejects an unknown section with a user-facing message", async () => {
   expect(result.isError).toBe(true);
   expect(result.content[0]?.text).toContain('There is no section "bags".');
   expect(ctx.latest).not.toHaveBeenCalled();
+});
+
+it("puts the class and proficiency caveat beside better bag items, and lists at most 3", async () => {
+  const snapshot = structuredClone(snapshots.era);
+  const inventory = snapshot.state.inventory;
+  if (inventory === null) throw new Error("The era stub has no inventory.");
+  // Four heads with more armor than the equipped one (41).
+  for (const armor of [50, 60, 70, 80]) {
+    inventory.items.push({
+      item_id: 4000 + armor,
+      name: "Test Helm",
+      count: 1,
+      quality: 2,
+      item_level: 15,
+      min_level: 10,
+      equip_loc: "INVTYPE_HEAD",
+      type: "Armor",
+      sub_type: "Mail",
+      sell_price: 400,
+      stats: { armor },
+    });
+  }
+
+  const data = content((await call({ sections: ["inventory"] }, snapshot)).result);
+  const gear = (data.state.inventory as { gear: { slot: string; better: { value: number }[] }[] }).gear;
+  expect(gear[0]).toMatchObject({ slot: "HeadSlot", comparison: "better_in_bags", caveat: GEAR_CAVEAT, better_total: 4 });
+  expect(gear[0]?.better.map((item) => item.value)).toEqual([80, 70, 60]);
+  expect(gear[1]).toMatchObject({ slot: "MainHandSlot", better: [] });
+  expect(gear[1]).not.toHaveProperty("caveat");
+});
+
+it("gives a path time out of a Date's range as null", async () => {
+  const snapshot = structuredClone(snapshots.era);
+  const [place] = snapshot.state.recent_path ?? [];
+  if (place === undefined) throw new Error("The era stub has no recent_path.");
+  place.captured_at = Number.MAX_SAFE_INTEGER;
+
+  const data = content((await call({ sections: ["recent_path"] }, snapshot)).result);
+  expect(data.state.recent_path).toMatchObject([{ captured_at: null, zone: "Test Forest" }]);
 });

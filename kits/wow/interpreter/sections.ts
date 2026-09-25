@@ -123,6 +123,16 @@ function withQualityWord<T extends { quality: number | null }>(item: T) {
   return { ...item, quality: item.quality === null ? null : (QUALITY_WORDS[item.quality] ?? null) };
 }
 
+/** Most better bag items listed for one slot. `better_total` counts them all. */
+const MAX_BETTER_PER_SLOT = 3;
+
+/**
+ * The caveat of a slot where a bag item is better or fills the empty slot: the
+ * comparison cannot tell whether the character can use the item.
+ */
+export const GEAR_CAVEAT =
+  "Class and weapon or armor proficiency are not in the data and are not checked: this character may not be able to use the bag item.";
+
 /**
  * The items with their quality as a word, and `gear`: per equipment slot, the
  * equipped item and whether a bag item for the slot is better (gear.ts).
@@ -144,11 +154,13 @@ function buildInventory(inventory: Inventory, level: number | null) {
       slot: entry.slot,
       equipped: entry.equipped && { item_id: entry.equipped.item_id, name: entry.equipped.name },
       comparison: honest(entry.comparison),
+      ...((entry.comparison === "better_in_bags" || entry.comparison === "fills_empty_slot") && { caveat: GEAR_CAVEAT }),
       measure: entry.measure,
       candidates: entry.candidates,
       not_compared: entry.notCompared,
       above_level: entry.aboveLevel,
-      better: entry.better.map(({ item, measure, value, equippedValue }) => ({
+      better_total: entry.better.length,
+      better: entry.better.slice(0, MAX_BETTER_PER_SLOT).map(({ item, measure, value, equippedValue }) => ({
         item_id: item.item_id,
         name: item.name,
         measure,
@@ -201,9 +213,9 @@ function due(line: ReturnType<typeof skillLine>, top: number | null): boolean {
 }
 
 /**
- * Places, newest first, with `captured_at` as an ISO 8601 instant. `moved` is
- * the compass direction of travel from the place before, when both are on one
- * map with a position.
+ * Places, newest first, with `captured_at` as an ISO 8601 instant, or null
+ * when it is out of a Date's range. `moved` is the compass direction of
+ * travel from the place before, when both are on one map with a position.
  */
 function buildRecentPath(path: RecentPath) {
   return path
@@ -216,7 +228,7 @@ function buildRecentPath(path: RecentPath) {
           ? directionBetween({ x: percent(before.x), y: percent(before.y) }, { x: x_percent, y: y_percent })
           : null;
       return {
-        captured_at: new Date(captured_at * 1000).toISOString(),
+        captured_at: isoTime(captured_at),
         ...place,
         x_percent,
         y_percent,
@@ -225,4 +237,10 @@ function buildRecentPath(path: RecentPath) {
       };
     })
     .reverse();
+}
+
+/** Unix seconds as an ISO 8601 instant, or null out of a Date's range, where `toISOString` throws. */
+function isoTime(seconds: number): string | null {
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
