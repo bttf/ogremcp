@@ -33,6 +33,9 @@ type Doer interface {
 type Entry struct {
 	// Kit is the manifest's kit, such as "wow".
 	Kit string `json:"kit"`
+	// Name is the kit's display name, such as "World of Warcraft", or "" from
+	// a server that sends none. The manifest has none.
+	Name string `json:"name"`
 	// ManifestVersion is the manifest's version.
 	ManifestVersion string `json:"manifest_version"`
 	// Adapter is nil for a kit without an adapter.

@@ -151,6 +151,7 @@ func answer(w http.ResponseWriter, status int, body map[string]any) {
 type memStore struct {
 	mu     sync.Mutex
 	token  string
+	getErr error
 	setErr error
 	events *events
 }
@@ -158,7 +159,7 @@ type memStore struct {
 func (m *memStore) Get() (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.token, nil
+	return m.token, m.getErr
 }
 
 func (m *memStore) Set(token string) error {
@@ -265,13 +266,23 @@ func TestLogin(t *testing.T) {
 	}
 }
 
+// A keychain that cannot be read is not a login required: the bridge cannot
+// tell, and the tray says so.
+func TestKeychainReadError(t *testing.T) {
+	_, store, c, _ := setup(t)
+	store.getErr = errors.New("keychain locked")
+	if _, err := c.AccessToken(t.Context()); !errors.Is(err, ErrNotRead) || errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("AccessToken with an unreadable keychain: got %v", err)
+	}
+}
+
 func TestRefreshSavesBeforeUse(t *testing.T) {
 	s, store, c, now := setup(t)
 	store.token = "rt-0"
 
 	// The keychain refuses the new refresh token: its access token is not used.
 	store.setErr = errors.New("keychain locked")
-	if _, err := c.AccessToken(t.Context()); err == nil || errors.Is(err, ErrLoginRequired) {
+	if _, err := c.AccessToken(t.Context()); !errors.Is(err, ErrNotSaved) {
 		t.Fatalf("AccessToken with a failing save: got %v", err)
 	}
 	if err := getKits(t, c, s.URL); err == nil {

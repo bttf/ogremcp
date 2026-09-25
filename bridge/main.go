@@ -1,5 +1,15 @@
 // Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
-// Until the tray UI (P5), it has four development commands:
+//
+// Without arguments it is the tray app, which the macOS .app and the login
+// item start: an icon in the menu bar or the notification area. Its menu
+// shows the last upload, the latest error, and the adapters' states, logs in
+// with the device flow (§8.1), shows the folder picker when a game folder is
+// not found (§6.1), and turns start at login on and off. It fetches the kits,
+// installs and updates the adapters, watches the sources, and uploads each
+// settled change, as bridge run and bridge adapter -watch do together. It
+// logs to a file (package logfile) and not to a terminal.
+//
+// It also has four development commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
@@ -20,6 +30,9 @@
 //	                printing it. Takes -root. Logs in again when the server
 //	                ends the login
 //
+// One bridge process runs per OS user (package lock): the tray app and each
+// command hold a lock while they run, and a second one exits.
+//
 // The server is OGMCP_BASE_URL, or the development default below. The game
 // folders, the refresh interval, the debounce delay, and the upload cap are
 // in the settings file (package config).
@@ -33,6 +46,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bttf/ogmcp/bridge/internal/auth"
@@ -40,6 +54,7 @@ import (
 	"github.com/bttf/ogmcp/bridge/internal/keychain"
 	"github.com/bttf/ogmcp/bridge/internal/kits"
 	"github.com/bttf/ogmcp/bridge/internal/locate"
+	"github.com/bttf/ogmcp/bridge/internal/lock"
 	"github.com/bttf/ogmcp/bridge/internal/watch"
 )
 
@@ -52,8 +67,22 @@ var version = "dev"
 const defaultBaseURL = "https://ogmcp-production.up.railway.app"
 
 func main() {
-	if len(os.Args) < 2 {
-		return
+	// Finder on old macOS versions passes -psn_0_NNNN to an app.
+	if len(os.Args) < 2 || strings.HasPrefix(os.Args[1], "-psn_") {
+		os.Exit(runTray())
+	}
+	switch os.Args[1] {
+	case "login", "kits", "adapter", "run":
+		held, err := acquireLock()
+		if errors.Is(err, lock.ErrLocked) {
+			fmt.Fprintln(os.Stderr, "bridge:", err.Error()+"; quit the tray app or the other bridge command first")
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bridge: could not take the single-instance lock:", err)
+			os.Exit(1)
+		}
+		defer held.Release()
 	}
 	switch os.Args[1] {
 	case "login":
@@ -77,9 +106,19 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch] | bridge run [-root DIR]")
+		fmt.Fprintln(os.Stderr, "usage: bridge | bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch] | bridge run [-root DIR]")
 		os.Exit(2)
 	}
+}
+
+// acquireLock takes the lock that keeps a second bridge process of this OS
+// user from running (package lock). The caller holds it until it exits.
+func acquireLock() (*lock.Lock, error) {
+	path, err := lock.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return lock.Acquire(path)
 }
 
 // newClient returns the auth client of the server and its base URL.

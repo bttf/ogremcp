@@ -50,6 +50,7 @@ export const ADAPTER_SHA256_HEADER = "X-Adapter-Sha256";
  *   "kits": [
  *     {
  *       "kit": "wow",
+ *       "name": "World of Warcraft",
  *       "manifest_version": "0.1.0",
  *       "adapter": { "version": "0.1.0", "sha256": "<lower-case hex SHA-256 of the zip>" }
  *     }
@@ -64,6 +65,11 @@ export interface KitList {
 export interface KitListEntry {
   /** The manifest's `kit`, e.g. `wow`: the `{kit}` of the other two routes. */
   kit: string;
+  /**
+   * The kit's name from `KIT_NAMES`, e.g. `World of Warcraft`. The manifest
+   * has none, and the bridge's tray names the game with it (§7).
+   */
+  name: string;
   /** The manifest's `version` (§6.1). */
   manifest_version: string;
   /** Null for a kit without an adapter (§6.1). */
@@ -108,6 +114,7 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
         .filter((kit) => enabled.has(kit.key))
         .map((kit) => ({
           kit: kit.key,
+          name: kit.name,
           manifest_version: kit.manifest.version,
           adapter: kit.adapter === null ? null : { version: kit.adapter.version, sha256: kit.adapter.sha256 },
         })),

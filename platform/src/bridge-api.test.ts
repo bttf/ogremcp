@@ -143,7 +143,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
 
     await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [bridge.userId]);
     const list: KitList = {
-      kits: [{ kit: "wow", manifest_version: wow.manifest.version, adapter: { version: wow.adapter.version, sha256: wow.adapter.sha256 } }],
+      kits: [{ kit: "wow", name: "World of Warcraft", manifest_version: wow.manifest.version, adapter: { version: wow.adapter.version, sha256: wow.adapter.sha256 } }],
     };
     expect(await (await get("/api/v1/kits", bridge.accessToken)).json()).toEqual(list);
 

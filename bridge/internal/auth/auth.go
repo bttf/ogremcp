@@ -72,6 +72,13 @@ var (
 	ErrDenied        = errors.New("the login was denied on the web page")
 	ErrExpired       = errors.New("the login code expired before it was approved; log in again")
 	ErrInvalid       = errors.New("the server no longer knows this login code; log in again")
+	// ErrNotRead means the Store could not be read, so the bridge cannot
+	// tell whether it holds a login.
+	ErrNotRead = errors.New("could not read the refresh token from the keychain")
+	// ErrNotSaved means a new refresh token could not be saved to the Store.
+	// The new tokens stay in memory, unused, and each call tries the save
+	// again. A Login that returns it was approved.
+	ErrNotSaved = errors.New("could not save the refresh token to the keychain")
 )
 
 // errRefused is a refresh token the server refused.
@@ -197,7 +204,7 @@ func (c *Client) token(ctx context.Context, refused string) (string, error) {
 	if c.refresh == "" {
 		stored, err := c.store.Get()
 		if err != nil {
-			return "", fmt.Errorf("could not read the refresh token from the keychain: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrNotRead, err)
 		}
 		if stored == "" {
 			return "", ErrLoginRequired
@@ -310,7 +317,7 @@ func (c *Client) adopt(t tokenAnswer) error {
 // tokens stay unused. Called with mu held.
 func (c *Client) save() error {
 	if err := c.store.Set(c.refresh); err != nil {
-		return fmt.Errorf("could not save the refresh token to the keychain: %w", err)
+		return fmt.Errorf("%w: %w", ErrNotSaved, err)
 	}
 	c.unsaved = false
 	return nil
