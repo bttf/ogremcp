@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { BRIDGE_CLIENT_ID, createDevice } from "./devices.js";
-import type { IngestAnswer, IngestMeta } from "./ingest.js";
+import { DEFAULT_INGEST, type IngestAnswer, type IngestMeta, type IngestSettings } from "./ingest.js";
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -78,8 +78,24 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   let provider: Provider;
   let adaptersDir: string;
   let kits: KitRegistry;
-  let server: Server | undefined;
+  let sessions: WebSessions;
+  const servers: Server[] = [];
   let base: string;
+
+  /** Serves the app with the ingest limits `ingest`, and answers its base URL. */
+  async function serve(ingest: IngestSettings): Promise<string> {
+    const app = createApp({
+      health: { checkDatabase: () => Promise.resolve() },
+      auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
+      oidc: provider,
+      kits,
+      ingest,
+    });
+    const server = createServer(app).listen(0, "127.0.0.1");
+    servers.push(server);
+    await once(server, "listening");
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
 
   beforeAll(async () => {
     adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
@@ -100,20 +116,13 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
       response_types: ["code"],
     });
     provider = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 0, log: () => {} });
-    const sessions = new WebSessions({ pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
-    const app = createApp({
-      health: { checkDatabase: () => Promise.resolve() },
-      auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
-      oidc: provider,
-      kits,
-    });
-    server = createServer(app).listen(0, "127.0.0.1");
-    await once(server, "listening");
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    sessions = new WebSessions({ pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: false });
+    // The tests post one instance several times in a row. The rate limit's test has its own server.
+    base = await serve({ ...DEFAULT_INGEST, burst: 1_000 });
   });
 
   afterAll(async () => {
-    server?.close();
+    for (const server of servers) server.close();
     rmSync(adaptersDir, { recursive: true, force: true });
     await pool?.end();
     try {
@@ -165,11 +174,15 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   }
 
   /** Posts an upload as the bridge sends it: `meta` as a form field, `file` as a file part. */
-  async function post(accessToken: string, { gz, meta }: { gz: Buffer; meta: IngestMeta }): Promise<{ res: Response; body: IngestAnswer | null }> {
+  async function post(
+    accessToken: string,
+    { gz, meta }: { gz: Buffer; meta: IngestMeta },
+    to = base,
+  ): Promise<{ res: Response; body: IngestAnswer | null }> {
     const form = new FormData();
     form.append("meta", JSON.stringify(meta));
     form.append("file", new Blob([new Uint8Array(gz)]), "OpenGamerMCP.lua.gz");
-    const res = await fetch(`${base}/api/v1/ingest`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: form });
+    const res = await fetch(`${to}/api/v1/ingest`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: form });
     const text = await res.text();
     return { res, body: text === "" ? null : (JSON.parse(text) as IngestAnswer) };
   }
@@ -343,5 +356,21 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     );
     expect(rows.find((row) => row.uuid === fromAlice.body?.snapshot_uuid)).toMatchObject({ user_id: alice.id, device_id: aliceToken.deviceId });
     expect(rows.find((row) => row.uuid === fromBob.body?.snapshot_uuid)).toMatchObject({ user_id: bob.id, device_id: bobToken.deviceId });
+  });
+
+  it("answers rate_limited with Retry-After to an upload of one instance over the limit, and not to another instance", async () => {
+    const limited = await serve({ ...DEFAULT_INGEST, burst: 1 });
+    const { accessToken, deviceId } = await token(await newUser());
+    expect((await post(accessToken, upload(savedVariables(CAPTURED_AT)), limited)).res.status).toBe(201);
+
+    const again = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Westfall")), limited);
+    expect(again.res.status).toBe(429);
+    expect(again.res.headers.get("retry-after")).toMatch(/^[1-5]$/);
+    expect(again.body).toEqual({ status: "rate_limited", message: expect.any(String) });
+
+    // Another account's SavedVariables on the same device has a bucket of its own.
+    const other = upload(savedVariables(CAPTURED_AT), { instance: sha256("_classic_era_/WTF/Account/OTHER/SavedVariables/OpenGamerMCP.lua") });
+    expect((await post(accessToken, other, limited)).res.status).toBe(201);
+    expect(await uploadsOf(deviceId)).toHaveLength(2);
   });
 });

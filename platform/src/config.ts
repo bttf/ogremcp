@@ -63,8 +63,10 @@ export interface Config {
    */
   deviceCodeMisses: MissSettings;
   /**
-   * `INGEST_MAX_UNCOMPRESSED_BYTES`: the cap on an upload's uncompressed
-   * bytes (§8.3, `ingest.ts`). Unset, `DEFAULT_INGEST`'s.
+   * `INGEST_MAX_UNCOMPRESSED_BYTES`, the cap on an upload's uncompressed
+   * bytes, and `INGEST_RATE_PER_MINUTE` and `INGEST_BURST`, the rate limit
+   * per device and source instance (§8.3, `ingest.ts`). Each one unset is
+   * `DEFAULT_INGEST`'s.
    */
   ingest: IngestSettings;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
@@ -326,6 +328,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     },
     ingest: {
       maxBytes: positiveInt("INGEST_MAX_UNCOMPRESSED_BYTES", env["INGEST_MAX_UNCOMPRESSED_BYTES"], DEFAULT_INGEST.maxBytes),
+      ratePerMinute: positiveInt("INGEST_RATE_PER_MINUTE", env["INGEST_RATE_PER_MINUTE"], DEFAULT_INGEST.ratePerMinute),
+      burst: positiveInt("INGEST_BURST", env["INGEST_BURST"], DEFAULT_INGEST.burst),
     },
     production: env["NODE_ENV"] === "production",
   };

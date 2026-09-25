@@ -8,6 +8,7 @@ import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";
 import type { Pool, PoolClient } from "pg";
 
+import { UploadLimiter } from "./ingest-limit.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
 
@@ -26,7 +27,12 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *    gets 401 with an RFC 6750 challenge and no body, as a bad token does.
  * 2. The parts are read with hard limits, so nothing large is buffered:
  *    `META_MAX_BYTES` for `meta`, `maxCompressedBytes` for `file`. Over
- *    either: 413 `too_large`.
+ *    either: 413 `too_large`. `meta` is checked as soon as it is read, and
+ *    the upload is counted against the rate limit of its `(device, kit,
+ *    source_id, instance)` (§8.3, `UploadLimiter`). Over it: 429
+ *    `rate_limited` with `Retry-After` in whole seconds, and nothing of the
+ *    `file` part that follows `meta` is buffered. (A `file` part sent before
+ *    `meta` is buffered within its limit first, and not decompressed.)
  * 3. `file` is decompressed with an output limit of `maxBytes`, so a gzip
  *    bomb stops there (§8.3). Over it: 413 `too_large`.
  * 4. In one transaction that locks the device row: an upload whose sha256 is
@@ -57,10 +63,17 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
 export interface IngestSettings {
   /** `INGEST_MAX_UNCOMPRESSED_BYTES`: the cap on an upload's uncompressed bytes (§8.3). */
   maxBytes: number;
+  /** `INGEST_RATE_PER_MINUTE`: uploads of one source instance of one device, per minute (§8.3). */
+  ratePerMinute: number;
+  /** `INGEST_BURST`: uploads of one source instance of one device, at once (§8.3). */
+  burst: number;
 }
 
-/** 5 MB of uncompressed bytes (§8.3), as the WoW interpreter counts them. */
-export const DEFAULT_INGEST: IngestSettings = { maxBytes: 5 * 1024 * 1024 };
+/**
+ * 5 MB of uncompressed bytes (§8.3), as the WoW interpreter counts them.
+ * One upload per 5 seconds per instance, after a burst of 3 (§8.3).
+ */
+export const DEFAULT_INGEST: IngestSettings = { maxBytes: 5 * 1024 * 1024, ratePerMinute: 12, burst: 3 };
 
 /** The most bytes the `meta` part may have. The §8.3 JSON is a few hundred. */
 export const META_MAX_BYTES = 16 * 1024;
@@ -74,7 +87,7 @@ export function maxCompressedBytes(maxBytes: number): number {
   return maxBytes + Math.ceil(maxBytes / 1024) + 1024;
 }
 
-export type IngestStatus = "stored" | "duplicate" | "parse_error" | "too_large" | "bad_request";
+export type IngestStatus = "stored" | "duplicate" | "parse_error" | "too_large" | "rate_limited" | "bad_request";
 
 /** The answer's body (§8.3). A 401 has none. */
 export interface IngestAnswer {
@@ -136,8 +149,10 @@ const validateMeta = ajv.compile<IngestMeta>({
 
 /** An answer to send. */
 interface Outcome {
-  http: 200 | 201 | 400 | 413 | 422;
+  http: 200 | 201 | 400 | 413 | 422 | 429;
   answer: IngestAnswer;
+  /** The `Retry-After` header, in whole seconds. */
+  retryAfter?: number;
 }
 
 function badRequest(message: string): Outcome {
@@ -146,6 +161,10 @@ function badRequest(message: string): Outcome {
 
 function tooLarge(message: string): Outcome {
   return { http: 413, answer: { status: "too_large", message } };
+}
+
+function rateLimited(seconds: number): Outcome {
+  return { http: 429, answer: { status: "rate_limited", message: `Too many uploads of this file. Try again in ${seconds} s.` }, retryAfter: seconds };
 }
 
 const MIB = 1024 * 1024;
@@ -164,15 +183,21 @@ export interface IngestOptions {
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
 export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestHandler {
+  const limiter = new UploadLimiter(settings);
   return async (req, res) => {
     const token = currentToken(res);
     const device = token === null ? undefined : await findDevice(pool, token);
     if (device === undefined) return refuseDevice(res);
 
-    const parts = await readParts(req, maxCompressedBytes(settings.maxBytes));
+    // The limit's key is in `meta`, so it is taken as `meta` is read, before the file part.
+    const parts = await readParts(req, maxCompressedBytes(settings.maxBytes), (text) => {
+      const checked = checkMeta(text, kits);
+      if ("http" in checked) return checked;
+      const wait = limiter.take(uploadKey(device, checked));
+      return wait > 0 ? rateLimited(wait) : checked;
+    });
     if ("http" in parts) return reply(req, res, parts);
-    const meta = checkMeta(parts.meta, kits);
-    if ("http" in meta) return reply(req, res, meta);
+    const meta = parts.meta;
 
     let bytes: Buffer;
     try {
@@ -194,9 +219,10 @@ export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestH
 
 const gunzipAsync = promisify(gunzip);
 
-function reply(req: Request, res: Response, { http, answer }: Outcome): void {
+function reply(req: Request, res: Response, { http, answer, retryAfter }: Outcome): void {
   // The rest of an unread body is dropped with the connection.
   if (!req.complete) res.set("Connection", "close");
+  if (retryAfter !== undefined) res.set("Retry-After", String(retryAfter));
   res.status(http).json(answer);
 }
 
@@ -224,10 +250,16 @@ async function findDevice(pool: Pool, token: VerifiedToken): Promise<Device | un
 }
 
 /**
- * Reads the `meta` field and the `file` part, within their limits. On a
- * refusal it stops reading; `reply` then closes the connection.
+ * Reads the `meta` field and the `file` part, within their limits.
+ * `readMeta` checks `meta` as soon as it is read, before the part after it.
+ * On a refusal, by a limit or by `readMeta`, it stops reading; `reply` then
+ * closes the connection.
  */
-function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; file: Buffer } | Outcome> {
+function readParts(
+  req: Request,
+  maxFileBytes: number,
+  readMeta: (text: string) => CheckedMeta | Outcome,
+): Promise<{ meta: CheckedMeta; file: Buffer } | Outcome> {
   return new Promise((resolve) => {
     let parser: busboy.Busboy;
     try {
@@ -241,7 +273,7 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
       resolve(badRequest("The request must be multipart/form-data."));
       return;
     }
-    let meta: string | undefined;
+    let meta: CheckedMeta | undefined;
     let file: Buffer | undefined;
     let settled = false;
     function fail(outcome: Outcome): void {
@@ -255,7 +287,9 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
     parser.on("field", (name, value, info) => {
       if (name !== "meta") return fail(badRequest(PARTS));
       if (info.valueTruncated) return fail(tooLarge(`The meta part is over ${META_MAX_BYTES} bytes.`));
-      meta = value;
+      const checked = readMeta(value);
+      if ("http" in checked) return fail(checked);
+      meta = checked;
     });
     parser.on("file", (name, stream) => {
       // busboy destroys the stream with an error when the body ends inside
@@ -264,6 +298,11 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
       if (name !== "file") {
         stream.resume();
         return fail(badRequest(PARTS));
+      }
+      // Refused at `meta`: the file is not read.
+      if (settled) {
+        stream.resume();
+        return;
       }
       const chunks: Buffer[] = [];
       stream.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -287,6 +326,11 @@ function readParts(req: Request, maxFileBytes: number): Promise<{ meta: string; 
     });
     req.pipe(parser);
   });
+}
+
+/** The rate limit's key: the upload's dedup key, `(device, kit, source_id, instance)` (§8.3). */
+function uploadKey(device: Device, meta: CheckedMeta): string {
+  return JSON.stringify([device.id, meta.kit.key, meta.sourceId, meta.instance]);
 }
 
 /** `meta`, checked. */
