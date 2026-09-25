@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # Every branch and tag: git describe finds the previous bridge-v tag,
-          # and the next step reads origin/main.
+          # and the next step reads refs/remotes/origin/main.
           fetch-depth: 0
           persist-credentials: false
 
@@ -78,12 +78,12 @@ jobs:
             echo "::error::${TAG} is not bridge-v followed by a version such as 1.2.3."
             exit 1
           fi
-          if ! git rev-parse --verify --quiet origin/main > /dev/null; then
+          if ! git rev-parse --verify --quiet refs/remotes/origin/main > /dev/null; then
             echo "::error::The checkout did not fetch main."
             exit 1
           fi
           TAG_SHA=$(git rev-parse "${TAG}^{commit}")
-          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+          if ! git merge-base --is-ancestor "$TAG_SHA" refs/remotes/origin/main; then
             echo "::error::${TAG} points at ${TAG_SHA}, which is not on main. Tag a commit on main."
             exit 1
           fi
