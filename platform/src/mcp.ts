@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response, type Router } from "express";
 import type Provider from "oidc-provider";
 
 import { failureCode } from "./db.js";
 import { logger } from "./log.js";
 import { currentToken, requireToken, resourcesOf, type VerifiedToken } from "./oidc-tokens.js";
+import type { ToolRegistry } from "./tools.js";
 
 /**
  * Discovery for the MCP endpoint and the checks in front of it (§9).
@@ -31,6 +32,8 @@ import { currentToken, requireToken, resourcesOf, type VerifiedToken } from "./o
  *   GET, which would open a stream, and DELETE, which would end a session,
  *   get 405, as does every method other than POST. The body is at most
  *   `MAX_MCP_BODY_BYTES`. Every error on the route is a JSON-RPC error.
+ * - `tools/list` and `tools/call` serve the tools of the token's user, from
+ *   the tool registry (`tools.ts`, §10).
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
@@ -81,6 +84,8 @@ export interface McpOptions {
    * exact origin. Default: `defaultMcpAllowedOrigins(publicBaseUrl)`.
    */
   allowedOrigins?: readonly string[];
+  /** The tools `tools/list` lists and `tools/call` calls (§10). */
+  tools: ToolRegistry;
   /** Receives one line per request that failed with an error. Default: `logger.error`. */
   log?: (line: string) => void;
 }
@@ -124,16 +129,31 @@ const SERVER_INFO = { name: "ogmcp", version: platformVersion() };
  * carries a JSON Schema (§6.2), and `McpServer` takes zod schemas only and
  * always claims `listChanged`.
  *
- * The tool list is empty for now. RED-326 lists and calls the tools of the
- * user's enabled games here, and RED-331 sets the server's `instructions`
- * (§10.5).
+ * `tools/call` of a tool the user does not have, an unknown name or a tool of
+ * a game the user has not enabled, is a protocol error. The SDK sends a
+ * thrown error's message to the client, and a Postgres error's message can
+ * repeat a row, so any other error is logged by its code alone and sent as
+ * "Internal error".
+ *
+ * RED-331 sets the server's `instructions` (§10.5).
  */
-function createMcpServer(agent: VerifiedToken): Server {
+function createMcpServer(agent: VerifiedToken, tools: ToolRegistry, log: (line: string) => void): Server {
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
-  const tools: Tool[] = [];
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
-  server.setRequestHandler(CallToolRequestSchema, () => {
-    throw new McpError(ErrorCode.InvalidParams, "Unknown tool");
+  async function internal<T>(method: string, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      log(`MCP request failed: ${method} code=${failureCode(err)}`);
+      throw new McpError(ErrorCode.InternalError, "Internal error");
+    }
+  }
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: await internal("tools/list", () => tools.list(agent.userUuid)),
+  }));
+  server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+    const result = await internal("tools/call", () => tools.call(agent.userUuid, params.name, params.arguments));
+    if (result === null) throw new McpError(ErrorCode.InvalidParams, "Unknown tool");
+    return result;
   });
   return server;
 }
@@ -217,7 +237,7 @@ export function mcpRouter(options: McpOptions): Router {
   const serve: RequestHandler = async (req, res) => {
     const agent = currentToken(res);
     if (agent === null) throw new Error("no access token");
-    const server = createMcpServer(agent);
+    const server = createMcpServer(agent, options.tools, log);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

@@ -12,6 +12,8 @@ import { logger, requestLog } from "./log.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
 import { securityHeaders } from "./security-headers.js";
+import type { ToolContextSettings } from "./tool-context.js";
+import { createToolRegistry } from "./tools.js";
 import { webFiles, webPages } from "./web.js";
 
 export interface AppOptions {
@@ -31,9 +33,13 @@ export interface AppOptions {
   webRoot?: string;
   /**
    * The first-class kits, for the Games API of `auth`'s web UI and, with
-   * `oidc`, the bridge's kit endpoints (§8.2). Left out, neither is served.
+   * `oidc`, the bridge's kit endpoints (§8.2) and the kit tools on `/mcp`
+   * (§10). Left out, the Games API and the bridge's kit endpoints are not
+   * served, and `/mcp` lists no kit tool.
    */
   kits?: KitRegistry;
+  /** The `ToolContext` settings of kit tool calls (`HISTORY_MAX_SNAPSHOTS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  toolContext?: ToolContextSettings;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
   /** The `INGEST_` names: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
@@ -60,6 +66,7 @@ export function createApp({
   mcpAllowedOrigins,
   webRoot,
   kits,
+  toolContext,
   bridgeDownloadUrl,
   ingest,
   ingestLog,
@@ -78,7 +85,9 @@ export function createApp({
   app.use(healthRouter(health));
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
-    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, log }));
+    // The registry checks the platform tools' names: a bad one stops the start (§10.1).
+    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, log });
+    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest, ingestLog }));
   }

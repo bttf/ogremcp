@@ -75,6 +75,23 @@ describe("loadKitRegistry", () => {
     );
   });
 
+  it("refuses a tool name that breaks §10.1 by its full name, and a ninth tool (§10.2)", () => {
+    const withTools = (names: string[], manifest: unknown = wowManifest): KitSource => ({
+      ...wow,
+      manifest,
+      interpreter: { ...wow.interpreter, tools: names.map((name) => ({ ...wow.interpreter.tools[0]!, name })) },
+    });
+    expect(() => checkKits([withTools(["wow_state"])])).toThrow('@ogmcp/kit-wow: Tool name "wow_state" must be wow_{verb}_{noun}');
+    // The manifest schema allows a 55-character tool_prefix; the tool's full name is 65 characters.
+    const prefix = "w".repeat(55);
+    expect(() => checkKits([withTools([`${prefix}_get_state`], { ...wowManifest, tool_prefix: prefix })])).toThrow(
+      /^@ogmcp\/kit-wow: Tool name "w+_get_state" is longer than 64 characters\.$/,
+    );
+    const nine = Array.from({ length: 9 }, (_, i) => `wow_get_state${i}`);
+    expect(() => checkKits([withTools(nine.slice(0, 8))])).not.toThrow();
+    expect(() => checkKits([withTools(nine)])).toThrow("@ogmcp/kit-wow: the kit has 9 tools, and a kit may have at most 8 (§10.2).");
+  });
+
   it("refuses two kits with the same tool_prefix", () => {
     const other: KitSource = { ...wow, package: "@ogmcp/kit-other", manifest: { ...wowManifest, kit: "other" } };
     expect(() => loadKitRegistry({ sources: [wow, other], adaptersDir })).toThrow(
