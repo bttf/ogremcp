@@ -75,6 +75,10 @@ describe("manifest schema", () => {
     },
   );
 
+  it.each(["Wow?.exe", "Wow[TB].exe", "bin/Wow.exe", "bin\\Wow.exe"])("rejects the process glob %s", (glob) => {
+    expect(validate({ ...example, adapter: { ...example.adapter, process: [glob] } })).toBe(false);
+  });
+
   // manifest.ts is generated from the schema, so the two cannot drift.
   it("matches the generated TS types in manifest.ts", async () => {
     const types = await compile(schema as JSONSchema, "Manifest", {
