@@ -8,9 +8,10 @@ import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
 import type { PageFetch } from "./pages.js";
+import { reportIssue } from "./report-issue.js";
 import type { ScopedSearch, SearchUsage } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
-import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
+import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type SnapshotRef, type ToolContextSettings, type ToolUser } from "./tool-context.js";
 import { errorResult, gameOffResult, kitToolResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js";
@@ -39,7 +40,9 @@ import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js"
  * cost. The args summary is the `sections` the tool's schema names and a
  * `flavor` that is a kit's flavor key; a platform tool adds a query through
  * `ToolCallNotes`. No other argument is recorded: `character` and the like
- * are free text. A kit tool's snapshot is its envelope's `snapshot_at`.
+ * are free text. A kit tool's snapshot is its envelope's `snapshot_at`, and
+ * the row names it by uuid: the snapshot its `ToolContext` read with that
+ * `snapshot_at`. `report_issue` attaches it (§16.2).
  *
  * Names are checked at startup: kit tools in `checkKits`, and platform tools,
  * and platform tools against kit tools, in `createToolRegistry` (§10.1).
@@ -49,6 +52,8 @@ import { capReachedResult, createUsageMeter, type UsageMeter } from "./usage.js"
 export interface PlatformToolContext {
   pool: Pool;
   user: ToolUser;
+  /** The OAuth client ID of the agent that called. */
+  agentClient: string;
   /** The kits the user has enabled, in registry order. */
   games: readonly Kit[];
   /** The tool call limits, such as `LIST_GAMES_CHARACTERS`. */
@@ -67,6 +72,8 @@ export interface ToolCallNotes extends SearchUsage {
   query?: string;
   /** When the snapshot the call returned was captured. */
   snapshotAt?: Date;
+  /** The uuid of the snapshot whose state a kit tool call returned. */
+  snapshotUuid?: string;
   /** Why an `isError` result is one, when not `user_error`. */
   error?: ToolCallError;
 }
@@ -89,7 +96,7 @@ export interface PlatformTool {
 }
 
 /** The platform tools (§10.3), in the order `tools/list` lists them. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo, fetchGamePage];
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo, fetchGamePage, reportIssue];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -97,7 +104,10 @@ export interface ToolRegistryOptions {
   kits?: KitRegistry;
   /** Default: `PLATFORM_TOOLS`. */
   platformTools?: readonly PlatformTool[];
-  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`, `FETCH_PAGE_MAX_CHARS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /**
+   * The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`,
+   * `FETCH_PAGE_MAX_CHARS`, `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
+   */
   settings?: ToolContextSettings;
   /** Game-scoped search, for `search_game_info` (§12). Default: null, and the tool answers `search_unavailable`. */
   search?: ScopedSearch | null;
@@ -194,7 +204,7 @@ export function createToolRegistry({
         answer = { result: capReachedResult(capped), error: "cap_reached" };
       } else if (tool !== undefined) {
         schema = tool.def.inputSchema;
-        answer = await answerCall(tool, args, { pool, user, games, settings, search, fetchPage, event }, log);
+        answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, search, fetchPage, event }, log);
       } else {
         // A client can keep a turned-off game's tools until a new chat (§10.2).
         const off = allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ kit, def }))).find(({ def }) => def.name === name);
@@ -215,6 +225,7 @@ export function createToolRegistry({
         query: event.query ?? null,
         error: answer.error === "user_error" ? (event.error ?? "user_error") : answer.error,
         snapshotAt: answer.error === null ? (snapshotAt ?? null) : null,
+        snapshotUuid: answer.error === null ? (event.snapshotUuid ?? null) : null,
         cacheHit: event.cacheHit ?? null,
         searchCredits: event.searchCredits ?? null,
       });
@@ -231,8 +242,13 @@ async function answerCall(tool: UserTool, args: unknown, ctx: PlatformToolContex
       const result = await tool.def.handler(args, ctx);
       return { result, error: result.isError === true ? "user_error" : null };
     }
-    const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
-    return kitToolResult(result, tool.def.name, settings.maxResultBytes, log);
+    const reads: SnapshotRef[] = [];
+    const onRead = (snapshots: SnapshotRef[]) => reads.push(...snapshots);
+    const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings, onRead }));
+    const answer = kitToolResult(result, tool.def.name, settings.maxResultBytes, log);
+    const at = envelopeSnapshotAt(answer)?.getTime();
+    ctx.event.snapshotUuid = reads.find((read) => read.snapshotAt.getTime() === at)?.uuid;
+    return answer;
   } catch (err) {
     return errorResult(err, tool.def.name, log);
   }
