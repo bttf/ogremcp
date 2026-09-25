@@ -111,7 +111,7 @@ export interface Flavor {
    */
   status: "supported" | "experimental";
   /**
-   * The flavor's search scope (§12). Each entry is a URL prefix with a scheme, a host, and a path that starts with `/`, not a bare domain. Empty means no vetted sources yet.
+   * The flavor's search scope (§12). Each entry is an https URL prefix, not a bare domain: a host, then a path that starts and ends with `/`, with no query or fragment, e.g. `https://www.wowhead.com/classic/`. The final `/` keeps `/classic/` from admitting `/classic-ptr/`. Empty means no vetted sources yet.
    */
   search: string[];
 }

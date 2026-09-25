@@ -23,6 +23,7 @@ import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
+import { searchGameInfo } from "./search-game-info.js";
 import { WebSessions } from "./web-sessions.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -33,6 +34,15 @@ const ISSUER = "https://ogmcp.example";
 
 /** `list_games` as `tools/list` lists it, for every user (§10.3). */
 const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: listGames.annotations };
+/** `search_game_info` as `tools/list` lists it, for every user (§10.3). */
+const SEARCH_GAME_INFO = {
+  name: searchGameInfo.name,
+  description: searchGameInfo.description,
+  inputSchema: searchGameInfo.inputSchema,
+  annotations: searchGameInfo.annotations,
+};
+/** The platform tools, as `tools/list` lists them. */
+const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
@@ -281,7 +291,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
     expect(list.status).toBe(200);
-    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [LIST_GAMES] } });
+    // A user with no game enabled gets the platform tools alone.
+    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: PLATFORM } });
   });
 
   /** When the snapshot of `SAVED_VARIABLES` was captured. */
@@ -345,7 +356,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       id: 1,
       result: {
         tools: [
-          LIST_GAMES,
+          ...PLATFORM,
           {
             name: "wow_get_state",
             description: wowGetState?.description,
@@ -386,7 +397,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     const port = await serve(pool, provider, kits);
     // A snapshot from before the user disabled the game.
     const agent = await player({ wow: false, snapshot: true });
-    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [LIST_GAMES] } });
+    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: PLATFORM } });
     // A client can keep the tool list of a chat from before the game was turned off.
     expect(await rpc(port, agent, "tools/call", { name: "wow_get_state" })).toEqual({
       jsonrpc: "2.0",
