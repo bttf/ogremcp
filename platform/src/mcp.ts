@@ -253,13 +253,13 @@ export function mcpRouter(options: McpOptions): Router {
   // JSON-RPC errors, never the app's plain text. A body error's message
   // quotes the body, so only its type and status are read. Anything else is
   // logged by its code alone, as the app's handler does.
-  const rpcErrors: ErrorRequestHandler = (err: unknown, req, res, next) => {
+  const rpcErrors: ErrorRequestHandler = (err: unknown, _req, res, next) => {
     if (res.headersSent) return next(err);
     const { type, status } = (err ?? {}) as { type?: unknown; status?: unknown };
     if (type === "entity.parse.failed") return sendRpcError(res, 400, -32700, "Parse error");
     if (type === "entity.too.large") return sendRpcError(res, 413, -32600, "Request too large");
     if (typeof status === "number" && status >= 400 && status < 500) return sendRpcError(res, status, -32600, "Invalid request");
-    log(`request failed: ${req.method} ${req.path} code=${failureCode(err)}`);
+    log(`request failed: code=${failureCode(err)}`);
     sendRpcError(res, 500, -32603, "Internal error");
   };
 

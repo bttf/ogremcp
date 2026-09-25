@@ -200,12 +200,12 @@ export interface IngestOptions {
   pool: Pool;
   kits: KitRegistry;
   settings: IngestSettings;
-  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log (`writeLine`). */
+  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log, at `warn`. */
   log?: (line: string) => void;
 }
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
-export function ingestHandler({ pool, kits, settings, log = writeLine }: IngestOptions): RequestHandler {
+export function ingestHandler({ pool, kits, settings, log = (line) => writeLine("warn", line) }: IngestOptions): RequestHandler {
   const limiter = new UploadLimiter(settings);
   return async (req, res) => {
     const token = currentToken(res);

@@ -50,6 +50,12 @@ interface RequestContext {
   route: () => string | undefined;
   /** `users.uuid`, once the request's web session or access token names the user. */
   userUuid?: string;
+  /**
+   * Set after the access line. Work the request started can outlive it, such
+   * as a pooled connection's error listener, and its lines must not name the
+   * request or its user.
+   */
+  ended?: boolean;
 }
 
 const requests = new AsyncLocalStorage<RequestContext>();
@@ -72,13 +78,13 @@ export function configureLogger(settings: LoggerSettings): void {
   if (settings.write !== undefined) write = settings.write;
 }
 
-/** One line, as the logger writes it, in the current request's context. */
+/** One line, as the logger writes it, in the current request's context while the request runs. */
 export function formatLine(level: LogLevel, msg: string, fields: LogFields = {}, context = requests.getStore()): string {
   const line: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   line["level"] = level;
   line["time"] = new Date().toISOString();
   line["msg"] = msg;
-  if (context !== undefined) {
+  if (context !== undefined && context.ended !== true) {
     line["request_id"] = context.requestId;
     const route = context.route();
     if (route !== undefined) line["route"] = route;
@@ -90,9 +96,9 @@ export function formatLine(level: LogLevel, msg: string, fields: LogFields = {},
   return JSON.stringify(line);
 }
 
-/** Writes a line `formatLine` made. It is written whatever `LOG_LEVEL` is. */
-export function writeLine(line: string): void {
-  write(line);
+/** Writes a line `formatLine` made at `level`, when `LOG_LEVEL` lets that level through. */
+export function writeLine(level: LogLevel, line: string): void {
+  if (LOG_LEVELS.indexOf(level) >= minimum) write(line);
 }
 
 function emit(level: LogLevel, msg: string, fields?: LogFields, context?: RequestContext): void {
@@ -184,6 +190,7 @@ export function requestLog({ trustEdgeRequestId }: RequestLogOptions): RequestHa
         },
         context,
       );
+      context.ended = true;
     };
     res.once("finish", done);
     res.once("close", done);
@@ -194,16 +201,22 @@ export function requestLog({ trustEdgeRequestId }: RequestLogOptions): RequestHa
 // The colour codes oidc-provider adds to its notices on a terminal.
 const COLOUR = /\x1b\[[0-9;]*m/g;
 
+// How Node starts a process warning, such as a deprecation, which it prints with `console.error`.
+const NODE_WARNING = /^\(node:\d+\) /;
+
 /**
  * Sends what the process prints with `console` through the logger:
  * `console.debug` at `debug`, `log` and `info` at `info`, `warn` at `warn`,
- * and `error` at `error`. oidc-provider prints its notices with
- * `console.info` and its warnings with `console.warn`, and has no hook for
- * them. `index.ts` calls it at start.
+ * and `error` at `error`, but a Node process warning at `warn`.
+ * oidc-provider prints its notices with `console.info` and its warnings with
+ * `console.warn`, and has no hook for them. `index.ts` calls it at start.
  */
 export function captureConsole(): void {
   const levels = { debug: "debug", log: "info", info: "info", warn: "warn", error: "error" } as const;
   for (const [name, level] of Object.entries(levels)) {
-    console[name as keyof typeof levels] = (...args: unknown[]) => emit(level, format(...args).replace(COLOUR, ""));
+    console[name as keyof typeof levels] = (...args: unknown[]) => {
+      const text = format(...args).replace(COLOUR, "");
+      emit(NODE_WARNING.test(text) ? "warn" : level, text);
+    };
   }
 }

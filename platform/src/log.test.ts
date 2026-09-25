@@ -2,11 +2,12 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import express from "express";
 import type { Pool } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "./app.js";
-import { configureLogger } from "./log.js";
+import { configureLogger, logger, requestLog, setUserUuid } from "./log.js";
 import { createOidcProvider } from "./oidc.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
@@ -113,6 +114,25 @@ describe("log", () => {
       { level: "info", msg: "DELETE /api/v1/devices/:uuid 500", ...context, method: "DELETE", status: 500, duration_ms: expect.any(Number) },
     ]);
     expect(lines.join("\n")).not.toContain(device);
+  });
+
+  it("leaves a request's ID, route, and user off a line written after the request ended", async () => {
+    let release = (): void => {};
+    const app = express();
+    app.use(requestLog({ trustEdgeRequestId: false }));
+    app.get("/later", (_req, res) => {
+      setUserUuid(USER_UUID);
+      // Work the request started that runs after it, as a pooled connection's error listener does.
+      void new Promise<void>((resolve) => (release = resolve)).then(() => logger.error("database pool error code=57P01"));
+      res.end();
+    });
+    server = createServer(app).listen(0, "127.0.0.1");
+    await once(server, "listening");
+    await (await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/later`)).text();
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    release();
+    await vi.waitFor(() => expect(lines).toHaveLength(2));
+    expect(entries()[1]).toEqual({ level: "error", time: expect.stringMatching(TIME), msg: "database pool error code=57P01" });
   });
 
   it("writes no header, cookie, query string, body, code, or token of an OAuth request", async () => {
