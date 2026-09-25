@@ -16,13 +16,21 @@ import type { Pool } from "pg";
  *
  * - `Name-Realm` names a character by name and realm, and a bare name by name
  *   alone. A name has no hyphen, so it ends at the first one. Both compare
- *   without regard to case.
+ *   without regard to case. Realms also compare without whitespace, `-`, and
+ *   `.`, as chat shows them: `Brannic-LivingFlame` names Brannic of Living
+ *   Flame.
  * - The snapshots of every matching character key are read: the key stays
  *   the same when a character is renamed or moves realm, and a deleted
  *   character's name can come back with a new key.
- * - Matches with more than one `Name-Realm` and more than one key are
- *   ambiguous. An ambiguous name rejects with a `UserFacingError` that lists
- *   the matches as `Name-Realm`, newest first. No match rejects with one too.
+ * - Matches with more than one key and more than one `Name-Realm` and
+ *   flavor pair are ambiguous: the same `Name-Realm` in two flavors is two
+ *   characters. An ambiguous name rejects with a `UserFacingError` that lists
+ *   the matches as `Name-Realm (flavor)`, newest first. No match rejects with
+ *   one too.
+ *
+ * A bad `since`, `limit`, or `character` also rejects with a
+ * `UserFacingError`, so that the agent gets a tool result it can act on
+ * (§10.5).
  *
  * Paid-only gating of `history` is not here yet (§14).
  *
@@ -89,6 +97,7 @@ interface CharacterRow {
   character_key: string;
   character_name: string;
   character_realm: string;
+  flavor: string;
 }
 
 interface Query {
@@ -100,12 +109,13 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
   /** The keys of the character `wanted` names (see the module comment). */
   async function characterKeys(wanted: string, flavor: string | undefined): Promise<string[]> {
     const params: unknown[] = [user.id, kit];
-    let sql = "select character_key, character_name, character_realm from snapshots where user_id = $1 and kit = $2 and character_key is not null";
+    let sql =
+      "select character_key, character_name, character_realm, flavor from snapshots where user_id = $1 and kit = $2 and character_key is not null";
     if (flavor !== undefined) {
       params.push(flavor);
       sql += ` and flavor = $${params.length}`;
     }
-    sql += " group by character_key, character_name, character_realm order by max(snapshot_at) desc";
+    sql += " group by character_key, character_name, character_realm, flavor order by max(snapshot_at) desc";
     const { rows } = await pool.query<CharacterRow>(sql, params);
 
     const matches = rows.filter((row) => sameCharacter(row, wanted));
@@ -119,11 +129,13 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
     const keys = [...new Set(matches.map((row) => row.character_key))];
     const names = new Map<string, string>();
     for (const row of matches) {
-      const name = `${row.character_name}-${row.character_realm}`;
+      const name = `${row.character_name}-${row.character_realm} (${row.flavor})`;
       if (!names.has(name.toLowerCase())) names.set(name.toLowerCase(), name);
     }
     if (keys.length > 1 && names.size > 1) {
-      throw new UserFacingError(`More than one of your characters has that name: ${[...names.values()].join(", ")}. Name one as Name-Realm.`);
+      throw new UserFacingError(
+        `More than one of your characters has that name: ${[...names.values()].join(", ")}. Name one as Name-Realm, with its flavor when two share a Name-Realm.`,
+      );
     }
     return keys;
   }
@@ -139,7 +151,8 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
       sql += ` and flavor = $${params.length}`;
     }
     if (q.character !== undefined) {
-      const keys = await characterKeys(q.character.trim(), flavor);
+      if (typeof q.character !== "string") throw new UserFacingError("character must be a name or Name-Realm.");
+      const keys = await characterKeys(q.character, flavor);
       // One key is the common case, and an equality keeps the index's order.
       params.push(keys.length === 1 ? keys[0] : keys);
       sql += keys.length === 1 ? ` and character_key = $${params.length}` : ` and character_key = any($${params.length}::text[])`;
@@ -161,19 +174,27 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
       return snapshot ?? null;
     },
     async history(q) {
-      if (!(q.since instanceof Date) || Number.isNaN(q.since.getTime())) throw new RangeError("history: since must be a valid Date");
-      if (!Number.isInteger(q.limit) || q.limit < 1) throw new RangeError("history: limit must be a whole number of 1 or more");
+      if (!(q.since instanceof Date) || Number.isNaN(q.since.getTime())) throw new UserFacingError("since must be a valid date and time.");
+      if (!Number.isInteger(q.limit) || q.limit < 1) throw new UserFacingError("limit must be a whole number of 1 or more.");
       return read(q, q.since, Math.min(q.limit, settings.maxHistoryLimit));
     },
   };
 }
 
-/** Whether `wanted`, a `Name-Realm` or a bare name, names the row's character. Case-insensitive. */
+/**
+ * Whether `wanted`, a `Name-Realm` or a bare name, names the row's character.
+ * Case-insensitive, and realms compare in `realmKey` form.
+ */
 function sameCharacter(row: CharacterRow, wanted: string): boolean {
   const w = wanted.toLowerCase();
   const hyphen = w.indexOf("-");
-  if (hyphen === -1) return row.character_name.toLowerCase() === w;
-  return row.character_name.toLowerCase() === w.slice(0, hyphen) && row.character_realm.toLowerCase() === w.slice(hyphen + 1);
+  if (hyphen === -1) return row.character_name.toLowerCase() === w.trim();
+  return row.character_name.toLowerCase() === w.slice(0, hyphen).trim() && realmKey(row.character_realm) === realmKey(w.slice(hyphen + 1));
+}
+
+/** A realm as chat writes it, lowercase: without whitespace, `-`, and `.`. `Azjol-Nerub` is `azjolnerub`. */
+function realmKey(realm: string): string {
+  return realm.toLowerCase().replace(/[\s.-]/g, "");
 }
 
 function toSnapshot(row: SnapshotRow): Snapshot<unknown> {

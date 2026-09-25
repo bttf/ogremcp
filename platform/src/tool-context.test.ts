@@ -97,6 +97,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
 
     const capped = await contextOf(user.uuid, { maxHistoryLimit: 2 });
     expect(times(await capped.history({ since: at(9), limit: 10 }))).toEqual([12, 11]);
+    await expect(ctx.history({ since: at(9), limit: 0 })).rejects.toThrow(UserFacingError);
   });
 
   it("filters by flavor", async () => {
@@ -124,6 +125,19 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     await expect(ctx.latest({ character: "Nobody" })).rejects.toThrow(UserFacingError);
   });
 
+  it("compares realms as chat writes them: without whitespace, hyphens, and dots", async () => {
+    const user = await newUser();
+    const brannic = { ...BRANNIC, realm: "Living Flame" };
+    const zoela = { ...ZOELA, realm: "Azjol-Nerub" };
+    await user.add(at(10), "classic_era", brannic);
+    await user.add(at(11), "classic_era", zoela);
+    const ctx = await contextOf(user.uuid);
+
+    expect((await ctx.latest({ character: "Brannic-LivingFlame" }))?.character).toEqual(brannic);
+    expect((await ctx.latest({ character: "Brannic - Living Flame" }))?.character).toEqual(brannic);
+    expect((await ctx.latest({ character: "Zoela-AzjolNerub" }))?.character).toEqual(zoela);
+  });
+
   it("rejects an ambiguous name with the matches as Name-Realm", async () => {
     const user = await newUser();
     await user.add(at(10), "classic_era", ZOELA);
@@ -132,10 +146,22 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
 
     const err = await ctx.latest({ character: "zoela" }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UserFacingError);
-    expect((err as Error).message).toContain("Zoela-Otherrealm, Zoela-Testrealm");
+    expect((err as Error).message).toContain("Zoela-Otherrealm (forever), Zoela-Testrealm (classic_era)");
     expect((await ctx.latest({ character: "zoela-otherrealm" }))?.character).toEqual(ZOELA_OTHER);
     // A flavor narrows the characters a name can match.
     expect((await ctx.latest({ character: "zoela", flavor: "classic_era" }))?.character).toEqual(ZOELA);
+  });
+
+  it("counts one Name-Realm in two flavors as two characters", async () => {
+    const user = await newUser();
+    const era = { ...ZOELA, realm: "Same" };
+    const forever = { ...ZOELA_OTHER, realm: "Same" };
+    await user.add(at(10), "classic_era", era);
+    await user.add(at(11), "forever", forever);
+    const ctx = await contextOf(user.uuid);
+
+    await expect(ctx.latest({ character: "Zoela-Same" })).rejects.toThrow("Zoela-Same (forever), Zoela-Same (classic_era)");
+    expect((await ctx.latest({ character: "Zoela-Same", flavor: "classic_era" }))?.character).toEqual(era);
   });
 
   it("never reads another user's snapshots", async () => {
