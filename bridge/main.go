@@ -9,7 +9,7 @@
 // settled change, as bridge run and bridge adapter -watch do together. It
 // logs to a file (package logfile) and not to a terminal.
 //
-// It also has four development commands:
+// It also has these commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
@@ -29,13 +29,21 @@
 //	                -watch, but upload each settled change (§8.3) instead of
 //	                printing it. Takes -root. Logs in again when the server
 //	                ends the login
+//	bridge server   print the server and where its URL comes from
+//	    set URL     save URL, a self-hosted server's origin (§13.3), as
+//	                the server in the settings file
+//	    reset       remove the server from the settings file, so the bridge
+//	                uses the hosted service
 //
 // One bridge process runs per OS user (package lock): the tray app and each
-// command hold a lock while they run, and a second one exits.
+// command hold a lock while they run, and a second one exits. bridge server
+// takes it only to change the server.
 //
-// The server is OGMCP_BASE_URL, or the development default below. The game
-// folders, the refresh interval, the debounce delay, and the upload cap are
-// in the settings file (package config).
+// The server is OGMCP_BASE_URL when it is set, for development, or else the
+// settings file's server_url, or else the hosted service
+// (config.File.Server). The tray's Server… item and bridge server set change
+// server_url. The game folders, the refresh interval, the debounce delay, and
+// the upload cap are in the settings file too (package config).
 package main
 
 import (
@@ -62,17 +70,21 @@ import (
 // or a commit hash for a dev build (docs/releases.md).
 var version = "dev"
 
-// defaultBaseURL is the platform's Railway domain, for development. The
-// production domain is not decided yet (§19.1 D4).
-const defaultBaseURL = "https://ogmcp-production.up.railway.app"
-
 func main() {
 	// Finder on old macOS versions passes -psn_0_NNNN to an app.
 	if len(os.Args) < 2 || strings.HasPrefix(os.Args[1], "-psn_") {
 		os.Exit(runTray())
 	}
+	locked := false
 	switch os.Args[1] {
 	case "login", "kits", "adapter", "run":
+		locked = true
+	case "server":
+		// The tray app keeps its own copy of the settings file, and would
+		// write it back without the change.
+		locked = len(os.Args) > 2
+	}
+	if locked {
 		held, err := acquireLock()
 		if errors.Is(err, lock.ErrLocked) {
 			fmt.Fprintln(os.Stderr, "bridge:", err.Error()+"; quit the tray app or the other bridge command first")
@@ -105,10 +117,24 @@ func main() {
 			fmt.Fprintln(os.Stderr, "bridge run:", err)
 			os.Exit(1)
 		}
+	case "server":
+		if err := server(os.Args[2:]); errors.Is(err, errUsage) {
+			usage()
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, "bridge server:", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge | bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch] | bridge run [-root DIR]")
-		os.Exit(2)
+		usage()
 	}
+}
+
+// errUsage is a command line that names no command.
+var errUsage = errors.New("usage")
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: bridge | bridge login | bridge kits [-root DIR] [-watch] | bridge adapter [-root DIR] [-watch] | bridge run [-root DIR] | bridge server [set URL | reset]")
+	os.Exit(2)
 }
 
 // acquireLock takes the lock that keeps a second bridge process of this OS
@@ -121,22 +147,41 @@ func acquireLock() (*lock.Lock, error) {
 	return lock.Acquire(path)
 }
 
-// newClient returns the auth client of the server and its base URL.
-func newClient() (*auth.Client, string, error) {
-	raw := os.Getenv("OGMCP_BASE_URL")
-	if raw == "" {
-		raw = defaultBaseURL
+// loadSettings reads the settings file (package config), and returns it with
+// its path.
+func loadSettings() (config.File, string, error) {
+	path, err := config.DefaultPath()
+	if err != nil {
+		return config.File{}, "", err
 	}
-	base, err := auth.ParseBaseURL(raw)
+	settings, err := config.Load(path)
+	return settings, path, err
+}
+
+// newClient returns the auth client of the server that settings and
+// OGMCP_BASE_URL name (config.File.Server), and its base URL.
+func newClient(settings config.File) (*auth.Client, string, error) {
+	base, err := settings.Server(os.Getenv(config.EnvServerURL))
 	if err != nil {
 		return nil, "", err
 	}
-	client, err := auth.New(base, version, keychain.Entry{Account: base})
+	client, err := newAuth(base)
 	return client, base, err
 }
 
+// newAuth returns the auth client of the server at base. Each server's
+// refresh token is in a keychain entry of its own, so a login for one server
+// is never sent to another.
+func newAuth(base string) (*auth.Client, error) {
+	return auth.New(base, version, keychain.Entry{Account: base})
+}
+
 func login() error {
-	client, base, err := newClient()
+	settings, _, err := loadSettings()
+	if err != nil {
+		return err
+	}
+	client, base, err := newClient(settings)
 	if err != nil {
 		return err
 	}
@@ -183,15 +228,11 @@ func listKits(args []string) error {
 		}
 		prompter = folderFlag(dir)
 	}
-	client, base, err := newClient()
+	settings, path, err := loadSettings()
 	if err != nil {
 		return err
 	}
-	path, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-	settings, err := config.Load(path)
+	client, base, err := newClient(settings)
 	if err != nil {
 		return err
 	}

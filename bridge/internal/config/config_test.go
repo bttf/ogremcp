@@ -34,3 +34,29 @@ func TestSaveAndLoad(t *testing.T) {
 		}
 	}
 }
+
+// OGMCP_BASE_URL wins over server_url, which wins over the default. A URL
+// the bridge would not send a token to is refused, never passed over.
+func TestServer(t *testing.T) {
+	const saved = "https://ogmcp.example.com"
+	cases := []struct {
+		env, saved, want string
+	}{
+		{"", "", DefaultServerURL},
+		{"", saved + "/", saved},
+		{"http://localhost:4790", saved, "http://localhost:4790"},
+	}
+	for _, c := range cases {
+		if got, err := (File{ServerURL: c.saved}).Server(c.env); got != c.want || err != nil {
+			t.Errorf("env %q, server_url %q: %q, %v; want %q", c.env, c.saved, got, err, c.want)
+		}
+	}
+	for _, bad := range []string{"http://ogmcp.example.com", "https://user:pw@ogmcp.example.com", "https://ogmcp.example.com/app", "ogmcp.example.com"} {
+		if got, err := (File{ServerURL: bad}).Server(""); err == nil {
+			t.Errorf("server_url %q: %q", bad, got)
+		}
+		if got, err := (File{ServerURL: saved}).Server(bad); err == nil {
+			t.Errorf("env %q: %q", bad, got)
+		}
+	}
+}
