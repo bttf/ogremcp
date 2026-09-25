@@ -16,6 +16,7 @@ import { parseUpload, writeSnapshot } from "./ingest.js";
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
+import { listGames } from "./list-games.js";
 import { MAX_MCP_BODY_BYTES } from "./mcp.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
@@ -28,6 +29,9 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in mcp.test.ts are skipped");
 
 const ISSUER = "https://ogmcp.example";
+
+/** `list_games` as `tools/list` lists it, for every user (§10.3). */
+const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: { readOnlyHint: true } };
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
@@ -247,7 +251,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     return { authorization: `Bearer ${token}`, "content-type": "application/json" };
   }
 
-  it("answers initialize and an empty tools/list, each on its own, with JSON and no session", async () => {
+  it("answers initialize and tools/list, each on its own, with JSON and no session", async () => {
     const port = await serve(pool, provider);
     const agent = await asAgent();
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
@@ -276,7 +280,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
     expect(list.status).toBe(200);
-    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [] } });
+    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [LIST_GAMES] } });
   });
 
   /** When the snapshot of `SAVED_VARIABLES` was captured. */
@@ -340,6 +344,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       id: 1,
       result: {
         tools: [
+          LIST_GAMES,
           {
             name: "wow_get_state",
             description: wowGetState?.description,
@@ -360,6 +365,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       character: { name: "Zoela", realm: "Testrealm" },
       state: { location: { zone: "Elwynn Forest" } },
     });
+    const games = (await rpc(port, zoela, "tools/call", { name: "list_games" })) as { result: { structuredContent: { last_active: unknown } } };
+    expect(games.result.structuredContent.last_active).toEqual({ game: "wow", flavor: "classic_era", snapshot_at: CAPTURED_AT.toISOString() });
 
     // Another user with WoW enabled and no snapshot sees none of Zoela's. The
     // ToolContext's UserFacingError reaches the agent as an isError result.
@@ -377,7 +384,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     const port = await serve(pool, provider, kits);
     // A snapshot from before the user disabled the game.
     const agent = await player({ wow: false, snapshot: true });
-    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [LIST_GAMES] } });
     for (const name of ["wow_get_state", "no_such_tool"]) {
       expect(await rpc(port, agent, "tools/call", { name })).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "MCP error -32602: Unknown tool" } });
     }

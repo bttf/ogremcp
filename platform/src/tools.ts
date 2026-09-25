@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 
 import { failureCode } from "./db.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
+import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser, UserFacingError } from "./tool-context.js";
 import { checkPlatformToolName } from "./tool-names.js";
@@ -28,6 +29,8 @@ export interface PlatformToolContext {
   user: ToolUser;
   /** The kits the user has enabled, in registry order. */
   games: readonly Kit[];
+  /** The tool call limits, such as `LIST_GAMES_CHARACTERS`. */
+  settings: ToolContextSettings;
 }
 
 /** A platform tool (§10.3): named `{verb}_{noun}`, with no prefix, and listed for every user. */
@@ -39,8 +42,8 @@ export interface PlatformTool {
   handler(args: unknown, ctx: PlatformToolContext): Promise<ToolResult>;
 }
 
-/** The platform tools (§10.3), in the order `tools/list` lists them. None yet: `list_games` is RED-328. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [];
+/** The platform tools (§10.3), in the order `tools/list` lists them. */
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -48,7 +51,7 @@ export interface ToolRegistryOptions {
   kits?: KitRegistry;
   /** Default: `PLATFORM_TOOLS`. */
   platformTools?: readonly PlatformTool[];
-  /** The `ToolContext` settings (`HISTORY_MAX_SNAPSHOTS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
   /** Receives one line per tool call that failed with an error that is not user-facing. Default: `logger.error`. */
   log?: (line: string) => void;
@@ -115,7 +118,7 @@ export function createToolRegistry({
       if (found === null || tool === undefined) return null;
       const { user, games } = found;
       try {
-        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games });
+        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, settings });
         return await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
       } catch (err) {
         return toolErrorResult(err, name, log);
