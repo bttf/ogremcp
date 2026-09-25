@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
+import { logger } from "./log.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser, UserFacingError } from "./tool-context.js";
 import { checkPlatformToolName } from "./tool-names.js";
 
@@ -52,7 +53,7 @@ export interface ToolRegistryOptions {
   platformTools?: readonly PlatformTool[];
   /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
-  /** Receives one line per tool call that failed with an error that is not user-facing. Default: `console.error`. */
+  /** Receives one line per tool call that failed with an error that is not user-facing. Default: `logger.error`. */
   log?: (line: string) => void;
 }
 
@@ -81,7 +82,7 @@ export function createToolRegistry({
   kits,
   platformTools = PLATFORM_TOOLS,
   settings = DEFAULT_TOOL_CONTEXT,
-  log = console.error,
+  log = logger.error,
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);
