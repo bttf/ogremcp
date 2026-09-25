@@ -5,6 +5,7 @@ import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
+import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
 
 /** Everything the platform reads from the environment. `platform/.env.example` lists the names. */
 export interface Config {
@@ -67,6 +68,11 @@ export interface Config {
    * bytes (§8.3, `ingest.ts`). Unset, `DEFAULT_INGEST`'s.
    */
   ingest: IngestSettings;
+  /**
+   * `HISTORY_MAX_SNAPSHOTS`: the most snapshots a kit tool's history read
+   * returns (§6.2, `tool-context.ts`). Unset, `DEFAULT_TOOL_CONTEXT`'s.
+   */
+  toolContext: ToolContextSettings;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -326,6 +332,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     },
     ingest: {
       maxBytes: positiveInt("INGEST_MAX_UNCOMPRESSED_BYTES", env["INGEST_MAX_UNCOMPRESSED_BYTES"], DEFAULT_INGEST.maxBytes),
+    },
+    toolContext: {
+      maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
     },
     production: env["NODE_ENV"] === "production",
   };
