@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { FIRECRAWL_SEARCH_URL } from "./firecrawl.js";
 import { configureLogger } from "./log.js";
-import { firecrawlScopedSearch, inScope, MAX_RESULTS, searchScope } from "./search.js";
+import { firecrawlScopedSearch, inScope, MAX_EXCERPT, MAX_RESULTS, searchScope, selectHits } from "./search.js";
 
 // The Classic Era scope of kits/wow/manifest.json.
 const PREFIXES = ["https://www.wowhead.com/classic/", "https://warcraft.wiki.gg/"];
@@ -34,6 +34,29 @@ describe("inScope (§12)", () => {
     ]) {
       expect(inScope(url, PREFIXES), url).toBeNull();
     }
+  });
+});
+
+describe("inScope's path check", () => {
+  it("drops a path that a server decoding before it resolves .. would read as another path", () => {
+    for (const url of [
+      "https://www.wowhead.com/classic/..%2ftbc/npc=448",
+      "https://www.wowhead.com/classic/..%2Ftbc/npc=448",
+      "https://www.wowhead.com/classic/..%5ctbc/npc=448",
+      "https://warcraft.wiki.gg/wiki/%E0%A4%A",
+    ]) {
+      expect(inScope(url, PREFIXES), url).toBeNull();
+    }
+    expect(inScope("https://warcraft.wiki.gg/wiki/Wanted:_%22Hogger%22", PREFIXES)).toBe("https://warcraft.wiki.gg/wiki/Wanted:_%22Hogger%22");
+  });
+});
+
+describe("selectHits", () => {
+  it("cuts a long snippet before making it plain text, so a pathological one stays fast", () => {
+    const started = performance.now();
+    const [hit] = selectHits([{ url: "https://warcraft.wiki.gg/wiki/Hogger", description: "![".repeat(40_000) }], PREFIXES);
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(hit?.excerpt.length).toBeLessThanOrEqual(MAX_EXCERPT);
   });
 });
 

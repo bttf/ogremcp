@@ -64,6 +64,12 @@ describe("manifest schema", () => {
     ["a kit ID that is not snake_case", { ...example, kit: "../x" }],
     ["a version that is not semver", { ...example, version: "0.1" }],
     ["the reserved flavor key unknown", { ...example, flavors: { unknown: example.flavors.forever } }],
+    ...["http://www.wowhead.com/classic/", "https://www.wowhead.com/classic", "https://warcraft.wiki.gg", "https://warcraft.wiki.gg/?x=/"].map(
+      (prefix): [string, unknown] => [
+        `the search prefix ${prefix}, which is not https or does not end in /`,
+        { ...example, flavors: { ...example.flavors, classic_era: { status: "supported", search: [prefix] } } },
+      ],
+    ),
   ])("rejects %s", (_case, manifest) => {
     expect(validate(manifest)).toBe(false);
   });

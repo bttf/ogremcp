@@ -36,6 +36,11 @@ export const MAX_TITLE = 200;
 export const MAX_EXCERPT = 800;
 /** Longest URL of a hit, in characters. A longer one drops the hit: a cut URL would be wrong. */
 export const MAX_URL = 500;
+/**
+ * Longest snippet `plainText` reads, in characters. A snippet is cut to it
+ * first: some of `plainText`'s patterns take time quadratic in their input.
+ */
+export const MAX_SNIPPET = 4000;
 
 /** What one search covers: one flavor of one kit. */
 export interface SearchScope {
@@ -91,18 +96,38 @@ export function providerQuery(query: string, prefixes: readonly string[]): strin
 }
 
 /**
- * The post-filter (§12). The URL as the parser writes it (`href`) when it
- * parses, is https, has no credentials or port, is at most `MAX_URL`
- * characters, and starts with one of `prefixes`; null otherwise. Each prefix
- * has a path, so a host that only starts with a prefix's host does not
- * match. The `href` is what the tool returns: the parser drops tabs and line
- * breaks that the raw URL can hold.
+ * The post-filter (§12), shared by search and page fetches. The URL as the
+ * parser writes it (`href`) when it parses, is https, has no credentials or
+ * port, has a path that cannot name another path (`escapesPath`), is at most
+ * `MAX_URL` characters, and starts with one of `prefixes`; null otherwise.
+ * Each prefix is https with a path that ends in `/` (the manifest schema), so
+ * a host or path segment that only starts with a prefix's does not match. The
+ * `href` is what the tool returns: the parser drops tabs and line breaks that
+ * the raw URL can hold.
  */
 export function inScope(url: string, prefixes: readonly string[]): string | null {
   const parsed = URL.parse(url);
   if (parsed === null || parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.port !== "") return null;
+  if (escapesPath(parsed.pathname)) return null;
   const { href } = parsed;
   return href.length <= MAX_URL && prefixes.some((prefix) => href.startsWith(prefix)) ? href : null;
+}
+
+/**
+ * Whether a parsed path could name a path outside its prefix on a server that
+ * decodes it before it resolves `..`: an encoded `/` or `\` (`%2f`, `%5c`),
+ * a segment that decodes to `..`, or an encoding that does not decode. The
+ * parser has already resolved the literal `..` segments.
+ */
+function escapesPath(pathname: string): boolean {
+  if (/%2f|%5c/i.test(pathname)) return true;
+  return pathname.split("/").some((segment) => {
+    try {
+      return decodeURIComponent(segment) === "..";
+    } catch {
+      return true;
+    }
+  });
 }
 
 /** The hits in scope, in Firecrawl's order, one per URL, with plain text cut to length. */
@@ -114,7 +139,7 @@ export function selectHits(hits: readonly FirecrawlHit[], prefixes: readonly str
     if (url === null || seen.has(url)) continue;
     seen.add(url);
     const title = clip((hit.title ?? "").replace(/\s+/g, " ").trim(), MAX_TITLE);
-    out.push({ title: title === "" ? url : title, url, excerpt: clip(plainText(hit.description ?? ""), MAX_EXCERPT) });
+    out.push({ title: title === "" ? url : title, url, excerpt: clip(plainText((hit.description ?? "").slice(0, MAX_SNIPPET)), MAX_EXCERPT) });
   }
   return out;
 }
