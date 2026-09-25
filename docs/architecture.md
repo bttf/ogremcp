@@ -424,9 +424,9 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Discovery:**
   - Protected Resource Metadata at `/.well-known/oauth-protected-resource` (RFC 9728). Unauthenticated `/mcp` requests get `401` with `WWW-Authenticate: Bearer resource_metadata="<url>"`.
   - Authorization server metadata at both `/.well-known/oauth-authorization-server` (RFC 8414) and `/.well-known/openid-configuration`. `oidc-provider` serves the latter natively; alias the former.
-  - Test each target client early (§18.3 S1), because they differ in what they probe.
-- **Client registration** (support all three):
-  - **Pre-registered public clients** for agents without dynamic registration (Perplexity): one static client per agent with its redirect URIs. The "Connect your agent" page shows the client ID to paste.
+  - Test each target client early (§18.3 S1), because they differ in what they probe. S1 (`docs/spikes/s1-client-auth.md`): Claude, Claude Code, and ChatGPT probe the path-form protected resource metadata and RFC 8414 metadata; ChatGPT also fetches `openid-configuration`.
+- **Client registration** (CIMD and DCR in v1; static clients `[later]`):
+  - **Pre-registered public clients** `[later]`: one static client per agent that supports neither CIMD nor DCR. S1 found no such target client: Claude, Claude Code, and ChatGPT use CIMD, and Perplexity's docs say it uses DCR. Owner decision, 2026-09-25. Revisit if the Perplexity test (RED-360) shows it needs one.
   - **CIMD** (URL-based client IDs), the MCP 2025-11-25 spec's preferred mechanism. On in v1 through `oidc-provider`'s `features.clientIdMetadataDocument` (§19.1 D7). Claude, Claude Code, and ChatGPT send CIMD client IDs.
   - **DCR**, the fallback for clients that don't send a CIMD client ID. Rate-limit the registration endpoint and garbage-collect long-unused clients. The token endpoint returns `401 invalid_client` for a deleted client, which tells Claude to re-register.
   - **Loopback redirects** for native clients such as Claude Code, which register `http://localhost:<port>/callback` and pick a random port at each login. Match loopback redirect URIs ignoring the port (RFC 8252 §7.3). Claude Code's CIMD document doesn't set `application_type: native`, so a client-metadata validator hook in `oidc-provider` treats a client as native when at least one redirect URI is `http` on `localhost`, `127.0.0.1`, or `[::1]` and every other one is `https` on a non-loopback host. Only the port is ignored. The consent page warns when the redirect URI is on a loopback host, because a local app receives the code.
@@ -555,7 +555,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | Sign in | Google / Discord |
 | Get started | One-time onboarding: download the bridge (one app for every game), approve it, connect an agent |
 | Games | Enable/disable kits; per-game in-game tips (e.g. `/transmit`, restart WoW after the addon's first install, close WoW to finish an addon update). The bridge picks up changes on its own (§7). |
-| Connect your agent | The MCP URL and steps for Claude, Claude Code, ChatGPT, and Perplexity (including Perplexity's static client ID) |
+| Connect your agent | The MCP URL and steps for Claude, Claude Code, ChatGPT, and Perplexity |
 | Device approval (`/device`) | Confirm a bridge's code |
 | Agent consent | Approve an agent's OAuth request |
 | Devices | List, rename, revoke |
@@ -668,7 +668,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | P0 | Foundations: monorepo layout, enforced seams, license files, CI, platform skeleton (service, Postgres, migrations, Railway deploy with watch paths), SDK types + manifest JSON Schema | §5, §6.1–6.2, §11, §13.1 | D1, D2, D11 |
 | P1 | WoW adapter + interpreter + Classic Era golden fixture | §6.2–6.4 | P0, D3 |
 | P2 | Accounts + web UI shell: login, web sessions, Games page | §13.1–13.2 | P0 |
-| P3 | OAuth server: consent and device-code flows, discovery, scopes, DCR, static clients; spike S1 | §8.1, §9 | P2, D7 |
+| P3 | OAuth server: consent and device-code flows, discovery, scopes, DCR, CIMD; spike S1 (static clients moved to `[later]` after S1) | §8.1, §9 | P2, D7 |
 | P4 | Ingest: kit loading, kit endpoints, ingest contract, dedup, limits | §5, §8.2–8.3, §11 | P1, P3, D8 |
 | P5 | Bridge (unsigned dev builds): login, locate, adapter install, watch, upload, tray | §7, §8 | P4 |
 | P6 | MCP server: `/mcp` (transport per D12, Host/Origin checks), `list_games`, `wow_get_state`, instructions, annotations | §9, §10 | P3, P4, D12 |
@@ -715,7 +715,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | D4 | Domain and GitHub org | G2 | Check availability of `ogmcp` and `opengamermcp` (domains and GitHub org). Google's production consent screen likely needs a domain we own. |
 | D5 | Billing provider, and whether billing ships at beta or after | P10 | |
 | D6 | Code signing: Azure Trusted Signing eligibility (or an alternative) for Windows; Apple Developer Program enrollment plus Developer ID and notarization secrets in CI for macOS | P9 | §7 |
-| D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | **Decided 2026-09-24 (RED-299):** CIMD on in v1, with DCR and static clients as fallbacks (§9). Spike S2 (RED-298) found that `oidc-provider` 9.12 supports CIMD natively. |
+| D7 | CIMD: does `oidc-provider` support it? If not, ship DCR + static clients and track it | P3 | **Decided 2026-09-24 (RED-299):** CIMD on in v1, with DCR as the fallback (§9). Static clients moved to `[later]` after S1 (2026-09-25). Spike S2 (RED-298) found that `oidc-provider` 9.12 supports CIMD natively. |
 | D8 | Experimental flavors: what does "opt-in" mean? | P4 | **Decided 2026-09-24 (RED-310):** no gate in v1; `experimental` only adds caveats (§6.1). |
 | D9 | Paid → free downgrade: grace period before history older than 30 days is deleted | P10 | **Decided 2026-09-24 (RED-349):** 30 days (§11). |
 | D10 | Review Blizzard's UI Add-On Development Policy against a paid hosted tier fed by a free addon | P9 | **Decided 2026-09-24 (RED-341):** keep the paid tier (§14), with the addon the same for every tier. No inquiry to Blizzard: the free tier still gives use of the service, with lower limits. The research is in RED-341. |
