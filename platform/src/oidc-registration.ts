@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { addressKey, httpsOrLoopback, nativeLoopbackRedirects } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { BRIDGE_CLIENT_ID, DEVICE_CODE_GRANT } from "./devices.js";
+import { logger } from "./log.js";
 import { type Bucket, level, type Limit, limit, waitSeconds } from "./token-bucket.js";
 
 /**
@@ -404,9 +405,9 @@ export interface ClientCleanupOptions {
   pool: Pool;
   /** `OAUTH_CLIENT_UNUSED_DAYS`. */
   unusedClientDays: number;
-  /** Receives one line per run that deleted clients. Default: `console.log`. */
+  /** Receives one line per run that deleted clients. Default: `logger.info`. */
   info?: (line: string) => void;
-  /** Receives one line per run that failed. Default: `console.error`. */
+  /** Receives one line per run that failed. Default: `logger.error`. */
   log?: (line: string) => void;
 }
 
@@ -416,7 +417,7 @@ export interface ClientCleanupOptions {
  * delete is the same on each. The timer does not keep the process alive.
  * Returns a function that stops it.
  */
-export function startClientCleanup({ pool, unusedClientDays, info = console.log, log = console.error }: ClientCleanupOptions): () => void {
+export function startClientCleanup({ pool, unusedClientDays, info = logger.info, log = logger.error }: ClientCleanupOptions): () => void {
   const run = (): void => {
     deleteUnusedClients(pool, unusedClientDays).then(
       (count) => {

@@ -3,6 +3,7 @@ import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogm
 import type { Pool } from "pg";
 
 import type { Kit, KitRegistry } from "./kits/registry.js";
+import { logger } from "./log.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
 import { errorResult, gameOffResult, kitToolResult } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
@@ -52,7 +53,7 @@ export interface ToolRegistryOptions {
   settings?: ToolContextSettings;
   /**
    * Receives one line per tool call that failed with an error that is not
-   * user-facing, or whose result was over the size cap. Default: `console.error`.
+   * user-facing, or whose result was over the size cap. Default: `logger.error`.
    */
   log?: (line: string) => void;
 }
@@ -84,7 +85,7 @@ export function createToolRegistry({
   kits,
   platformTools = PLATFORM_TOOLS,
   settings = DEFAULT_TOOL_CONTEXT,
-  log = console.error,
+  log = logger.error,
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);

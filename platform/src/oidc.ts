@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { type CimdFetchLimits, cimdConfiguration, DEFAULT_CIMD_FETCH_LIMITS, onLoopbackHost } from "./cimd.js";
 import { failureCode } from "./db.js";
 import { createDevice, DEFAULT_MISSES, DEVICE_PAGE_PATH, deviceFlowConfiguration, type MissSettings } from "./devices.js";
+import { logger, setRoute } from "./log.js";
 import { postgresAdapter } from "./oidc-adapter.js";
 import type { OidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, type RegistrationSettings, registrationConfiguration, registrationMiddleware } from "./oidc-registration.js";
@@ -98,6 +99,9 @@ const ROUTES = {
   credential: "/oauth/credential",
 } as const satisfies Configuration["routes"];
 
+/** The provider's paths that are whole routes, without a parameter. */
+const STATIC_PATHS: ReadonlySet<string> = new Set([...Object.values(ROUTES), ...DISCOVERY_PATHS]);
+
 /** Where an interaction of the device flow returns: `device_resume`. */
 const DEVICE_RESUME = /^\/device\/[^/]+$/;
 
@@ -122,7 +126,7 @@ export interface OidcOptions {
   /**
    * Receives one line per server error, and one per minute in which
    * outgoing fetches go over their limits (`cimd.ts`). Default:
-   * `console.error`.
+   * `logger.error`.
    */
   log?: (line: string) => void;
   /** The `CIMD_` settings of `config.ts`. Default: `DEFAULT_CIMD_FETCH_LIMITS`. */
@@ -147,7 +151,7 @@ export function createOidcProvider({
   trustProxyHops,
   tokenLifetimes = DEFAULT_TOKEN_LIFETIMES,
   registration = DEFAULT_REGISTRATION,
-  log = console.error,
+  log = logger.error,
   cimdFetchLimits = DEFAULT_CIMD_FETCH_LIMITS,
   deviceCodeMisses = DEFAULT_MISSES,
   testOnlyFetch,
@@ -195,12 +199,25 @@ export function createOidcProvider({
   }
   provider.proxy = trustProxyHops > 0;
   provider.maxIpsCount = trustProxyHops;
+  // The request's log lines name the pattern of oidc-provider's route, such
+  // as `/oauth/authorize/:uid`, once its router has matched one (`log.ts`).
+  // A middleware can answer first, such as registration's 429: then a path
+  // that is exactly one of the routes, which hold no ID, names it.
+  provider.use((ctx, next) => {
+    setRoute(() => {
+      const route: unknown = (ctx as { _matchedRoute?: unknown })._matchedRoute;
+      if (typeof route === "string") return route;
+      return STATIC_PATHS.has(ctx.path) ? ctx.path : undefined;
+    });
+    return next();
+  });
   provider.use(cimd.middleware);
   provider.use(registrationMiddleware({ pool, path: ROUTES.registration, settings: registration, log }));
   provider.use(device.middleware);
-  // A code only: a Postgres message can repeat a row (`failureCode`).
-  provider.on("server_error", (ctx: { method: string; path: string }, err: unknown) => {
-    log(`oauth server error: ${ctx.method} ${ctx.path} code=${failureCode(err)}`);
+  // A code only: a Postgres message can repeat a row (`failureCode`). The
+  // route comes from the request's context: the path can hold an interaction's ID.
+  provider.on("server_error", (_ctx: unknown, err: unknown) => {
+    log(`oauth server error: code=${failureCode(err)}`);
   });
   // Errors Koa sees itself, such as a connection that failed. Without a
   // listener, Koa prints the stack. oidc-provider's types leave the event out.
@@ -228,6 +245,7 @@ export function mountOidc(app: Express, provider: Provider, pool: Pool): void {
     const device = deviceRoute(req, res);
     if (device === "web") return next();
     if (device === "signed-out") {
+      setRoute(ROUTES.code_verification);
       // A form post goes back to the page, which sends the browser to sign in.
       if (req.accepts(["json", "html"]) === "html") return res.redirect(303, ROUTES.code_verification);
       res.set("Cache-Control", "no-store").status(401).json({ error: "signed_out" });

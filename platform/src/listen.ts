@@ -1,5 +1,7 @@
 import type { Server } from "node:http";
 
+import { logger } from "./log.js";
+
 export interface ServerLimits {
   /** Most time to receive the headers of a request. */
   headersTimeoutMs: number;
@@ -37,7 +39,7 @@ export function applyServerLimits(server: Server, limits: ServerLimits = SERVER_
   return server;
 }
 
-/** Where the two outcomes are reported. The defaults are the process's own. */
+/** Where the two outcomes are reported. The defaults are the platform's log and `process.exit`. */
 export interface ListenIo {
   log?: (line: string) => void;
   error?: (line: string) => void;
@@ -57,8 +59,8 @@ export interface ListenIo {
  * never bound would print a start line.
  */
 export function startServer(server: Server, port: number, io: ListenIo = {}): Server {
-  const log = io.log ?? console.log;
-  const error = io.error ?? console.error;
+  const log = io.log ?? logger.info;
+  const error = io.error ?? logger.error;
   const exit = io.exit ?? process.exit;
   server.once("listening", () => {
     const address = server.address();

@@ -1,6 +1,7 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { DEFAULT_MISSES, type MissSettings } from "./devices.js";
 import { DEFAULT_INGEST, type IngestSettings } from "./ingest.js";
+import { DEFAULT_LOG_LEVEL, isLogLevel, type LogLevel } from "./log.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
@@ -84,6 +85,8 @@ export interface Config {
    * says the download is not available yet.
    */
   bridgeDownloadUrl: string | null;
+  /** `LOG_LEVEL`: the least severe level the log writes (§16). Unset, `info`. */
+  logLevel: LogLevel;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -292,6 +295,14 @@ function bridgeDownloadUrl(value: string | undefined): string | null {
   return url.href;
 }
 
+/** `LOG_LEVEL`, in any case. */
+function logLevel(value: string | undefined): LogLevel {
+  const raw = (value ?? "").trim().toLowerCase();
+  if (raw === "") return DEFAULT_LOG_LEVEL;
+  if (!isLogLevel(raw)) throw new Error("LOG_LEVEL must be debug, info, warn, or error");
+  return raw;
+}
+
 /**
  * Throws on a value that is missing or wrong, so a bad deploy fails at start
  * and not on the first request. `DATABASE_URL` is required: Postgres is the
@@ -369,6 +380,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       maxResultBytes: positiveInt("TOOL_RESULT_MAX_BYTES", env["TOOL_RESULT_MAX_BYTES"], DEFAULT_TOOL_CONTEXT.maxResultBytes),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
+    logLevel: logLevel(env["LOG_LEVEL"]),
     production: env["NODE_ENV"] === "production",
   };
 }

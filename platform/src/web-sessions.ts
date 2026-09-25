@@ -4,6 +4,7 @@ import type { RequestHandler, Response } from "express";
 import type { Pool } from "pg";
 
 import { readCookie } from "./cookies.js";
+import { setUserUuid } from "./log.js";
 
 /**
  * Web sessions (§3, §13.1): signed-in browsers on the web UI, kept in
@@ -144,8 +145,9 @@ export class WebSessions {
 
   /**
    * Resolves the current user from the cookie for every later handler, which
-   * reads it with `currentUser(res)`. A request without the cookie costs no
-   * query. A cookie that no longer opens a web session is cleared.
+   * reads it with `currentUser(res)`, and for the request's log lines. A
+   * request without the cookie costs no query. A cookie that no longer opens a
+   * web session is cleared.
    */
   middleware(): RequestHandler {
     return async (req, res, next) => {
@@ -157,6 +159,7 @@ export class WebSessions {
           this.clearCookie(res);
         } else {
           user = found.user;
+          setUserUuid(user.uuid);
           if (found.renewed) this.setCookie(res, token, found.expiresAt);
         }
       }

@@ -42,6 +42,7 @@ describe("loadConfig", () => {
       ingest: DEFAULT_INGEST,
       toolContext: DEFAULT_TOOL_CONTEXT,
       bridgeDownloadUrl: null,
+      logLevel: "info",
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });

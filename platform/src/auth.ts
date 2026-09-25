@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 
 import { readCookie } from "./cookies.js";
 import { linkIdentity, type ProviderName, signInWithIdentity } from "./identities.js";
+import { logger } from "./log.js";
 import { safeReturnPath } from "./return-path.js";
 import { requireSameOrigin } from "./same-origin.js";
 import { SignInFailure, type SignInProviders } from "./sign-in-providers.js";
@@ -36,7 +37,7 @@ export interface AuthOptions {
   providers: SignInProviders;
   /** `PUBLIC_BASE_URL`. */
   publicBaseUrl: string;
-  /** Receives one line per failed exchange with a provider. Default: `console.error`. */
+  /** Receives one line per failed exchange with a provider. Default: `logger.error`. */
   log?: (line: string) => void;
 }
 
@@ -71,7 +72,7 @@ function sameText(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-export function authRouter({ pool, sessions, providers, publicBaseUrl, log = console.error }: AuthOptions): Router {
+export function authRouter({ pool, sessions, providers, publicBaseUrl, log = logger.error }: AuthOptions): Router {
   const router = express.Router();
 
   const signInCookie: CookieOptions = { httpOnly: true, secure: sessions.secure, sameSite: "lax", path: "/" };
