@@ -81,6 +81,14 @@ it.each([0, -1, 9_000_000_000_000, 253_402_300_000])("reads captured_at %d as un
   expect(parse(text).capturedAt).toBeNull();
 });
 
+it("judges captured_at against the now option (§11 re-parse)", () => {
+  const stamp = Number(/\["captured_at"\] = (\d+)/.exec(files.era)?.[1]);
+  const bytes = new TextEncoder().encode(files.era);
+  const at = (seconds: number) => interpreter.parse("savedvariables", bytes, { now: new Date(seconds * 1000) }).capturedAt;
+  expect(at(stamp - 2 * 24 * 60 * 60)).toBeNull();
+  expect(at(stamp - 60)).toEqual(new Date(stamp * 1000));
+});
+
 it("returns an unknown flavor's raw facts for the platform to log (§6.3.1)", () => {
   const parsed = parse(files.era.replace('["interface"] = 11509', '["interface"] = 20506'));
   expect(parsed).toMatchObject({

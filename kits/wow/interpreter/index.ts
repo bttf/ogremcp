@@ -31,7 +31,7 @@ export type ParseLimits = ReadLimits;
 
 /** The earliest `captured_at` accepted: 2004-01-01, before WoW's release. */
 const CAPTURED_AT_MIN = Date.UTC(2004, 0, 1) / 1000;
-/** How far past the parse time a `captured_at` may be, in seconds. */
+/** How far past `ParseOptions.now` a `captured_at` may be, in seconds. */
 const CAPTURED_AT_AHEAD_MAX = 24 * 60 * 60;
 
 /**
@@ -53,7 +53,7 @@ export function createInterpreter(limits: Partial<ParseLimits> = {}): Interprete
     maxValues: limits.maxValues ?? DEFAULT_LIMITS.maxValues,
   };
   return {
-    parse: (sourceId, bytes) => parse(sourceId, bytes, resolved),
+    parse: (sourceId, bytes, options) => parse(sourceId, bytes, resolved, options?.now ?? new Date()),
     // The kit's MCP tools come in P6 (§10.4).
     tools: [],
   };
@@ -62,7 +62,7 @@ export function createInterpreter(limits: Partial<ParseLimits> = {}): Interprete
 /** The WoW kit's interpreter with the default limits. */
 export const interpreter: Interpreter<WowState> = createInterpreter();
 
-function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed<WowState> {
+function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits, now: Date): Parsed<WowState> {
   if (sourceId !== SOURCE_ID) {
     throw parseError(`The WoW kit has no source "${clip(sourceId, QUOTE_MAX)}".`);
   }
@@ -86,7 +86,7 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed
     ...(unknownFlavor && { unknownFlavor }),
     // The GUID is the character key (§6.3), so a character without one has no key.
     character: character?.guid ? { key: character.guid, name: character.name, realm: character.realm } : null,
-    capturedAt: capturedAt(captured_at),
+    capturedAt: capturedAt(captured_at, now),
     adapterSchema: schema,
     state,
   };
@@ -94,11 +94,11 @@ function parse(sourceId: string, bytes: Uint8Array, limits: ParseLimits): Parsed
 
 /**
  * The adapter's stamp as a Date. A stamp before CAPTURED_AT_MIN (the adapter
- * writes 0 without a server time) or more than a day in the future is
+ * writes 0 without a server time) or more than a day after `now` is
  * unknown: null, so the platform falls back to the bridge's mtime (§6.2).
  */
-function capturedAt(stamp: number | null): Date | null {
-  if (stamp === null || stamp < CAPTURED_AT_MIN || stamp > Date.now() / 1000 + CAPTURED_AT_AHEAD_MAX) {
+function capturedAt(stamp: number | null, now: Date): Date | null {
+  if (stamp === null || stamp < CAPTURED_AT_MIN || stamp > now.getTime() / 1000 + CAPTURED_AT_AHEAD_MAX) {
     return null;
   }
   return new Date(stamp * 1000);
