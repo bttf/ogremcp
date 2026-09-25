@@ -55,6 +55,11 @@ const scope = "ingest"
 // identifier (RFC 8707).
 const apiPath = "/api/v1"
 
+// callTimeout bounds each call to the server but an upload's: the whole
+// exchange, and for an upload the dial, the TLS handshake, and the wait for
+// the answer's headers once the body is sent.
+const callTimeout = 30 * time.Second
+
 // expiryMargin is how long before its expiry an access token is refreshed, at
 // most half its lifetime.
 const expiryMargin = time.Minute
@@ -105,7 +110,9 @@ type Client struct {
 	version string
 	store   Store
 	http    *http.Client
-	log     *slog.Logger
+	// upload has no bound on the whole exchange (DoUpload).
+	upload *http.Client
+	log    *slog.Logger
 	// sleep waits between polls; ctx cancels it.
 	sleep func(ctx context.Context, d time.Duration) error
 	now   func() time.Time
@@ -129,19 +136,21 @@ func New(base, version string, store Store) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	noRedirect := func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSHandshakeTimeout = callTimeout
+	transport.ResponseHeaderTimeout = callTimeout
 	return &Client{
 		base:    base,
 		version: version,
 		store:   store,
-		http: &http.Client{
-			Timeout: 30 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		log:   slog.Default(),
-		sleep: sleep,
-		now:   time.Now,
+		http:    &http.Client{Timeout: callTimeout, CheckRedirect: noRedirect},
+		upload:  &http.Client{Transport: transport, CheckRedirect: noRedirect},
+		log:     slog.Default(),
+		sleep:   sleep,
+		now:     time.Now,
 	}, nil
 }
 
@@ -217,6 +226,19 @@ func (c *Client) token(ctx context.Context, refused string) (string, error) {
 // second 401 means the token is invalid or revoked (§8.3): Do ends the login,
 // as a refused refresh does, and returns ErrLoginRequired.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	return c.do(c.http, req)
+}
+
+// DoUpload sends req as Do does, but with no bound on the whole exchange, so
+// a large body can take as long as the uplink needs (§8.3). The dial, the TLS
+// handshake, and the wait for the answer's headers once the body is sent are
+// bounded; req's context must bound the rest.
+func (c *Client) DoUpload(req *http.Request) (*http.Response, error) {
+	return c.do(c.upload, req)
+}
+
+// do sends req with hc, as Do describes.
+func (c *Client) do(hc *http.Client, req *http.Request) (*http.Response, error) {
 	if !c.onOrigin(req.URL) {
 		return nil, errors.New("an access token goes only to the server it came from")
 	}
@@ -224,7 +246,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.sendWith(req, token)
+	res, err := c.sendWith(hc, req, token)
 	if err != nil || res.StatusCode != http.StatusUnauthorized {
 		return res, err
 	}
@@ -244,7 +266,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	} else if req.Body != nil && req.Body != http.NoBody {
 		return nil, errReplaced
 	}
-	res, err = c.sendWith(retry, token)
+	res, err = c.sendWith(hc, retry, token)
 	if err != nil || res.StatusCode != http.StatusUnauthorized {
 		return res, err
 	}
@@ -262,12 +284,12 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-// sendWith sends a copy of req with token.
-func (c *Client) sendWith(req *http.Request, token string) (*http.Response, error) {
+// sendWith sends a copy of req with token, with hc.
+func (c *Client) sendWith(hc *http.Client, req *http.Request, token string) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.userAgent())
-	return c.http.Do(req)
+	return hc.Do(req)
 }
 
 // adopt makes t the current tokens and saves its refresh token. Called with
