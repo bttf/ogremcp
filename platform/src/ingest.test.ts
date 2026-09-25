@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 
 import type Provider from "oidc-provider";
@@ -56,6 +56,14 @@ function savedVariables(capturedAt: number, zone = "Elwynn Forest", client = CLA
 }
 
 const CAPTURED_AT = 1_790_000_000;
+
+/** The WoW kit's golden SavedVariables file from a Classic Era client (§6.4), next to its adapter folder. */
+function eraFixture(): Buffer {
+  const wow = KIT_SOURCES.find((source) => source.package === "@ogmcp/kit-wow");
+  if (wow === undefined) throw new Error("no wow kit");
+  return readFileSync(join(dirname(wow.adapterDir), "fixtures/classic_era/OpenGamerMCP.lua"));
+}
+
 const INSTANCE = sha256("_classic_era_/WTF/Account/TEST/SavedVariables/OpenGamerMCP.lua");
 
 /** An upload of `text`: its gzip and its §8.3 meta, with `meta` over the defaults. */
@@ -281,6 +289,23 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const wrongSha = await post(accessToken, { ...noStamp, meta: { ...noStamp.meta, sha256: sha256("other") } });
     expect(wrongSha.res.status).toBe(400);
     expect(wrongSha.body?.status).toBe("bad_request");
+  });
+
+  it("stores the Classic Era golden fixture and its snapshot (§6.4)", async () => {
+    const { accessToken } = await token(await newUser());
+    const stored = await post(accessToken, upload(eraFixture()));
+    expect(stored.body?.status).toBe("stored");
+    const { rows } = await pool.query("select * from snapshots where uuid = $1", [stored.body?.snapshot_uuid]);
+    expect(rows[0]).toMatchObject({
+      kit: "wow",
+      flavor: "classic_era",
+      rules: [],
+      character_key: "Player-9999-0A1B2C3D",
+      character_name: "Testchar",
+      character_realm: "Test Realm",
+      snapshot_at: new Date(1_790_341_553 * 1000),
+      state: { location: { zone: "Redridge Mountains" } },
+    });
   });
 
   it("records one event per answer, with what it knew of the upload by then, and none for bad_request (§16.1)", async () => {
