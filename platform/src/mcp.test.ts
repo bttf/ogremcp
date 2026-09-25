@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
@@ -10,6 +12,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { parseUpload, writeSnapshot } from "./ingest.js";
+import { writeAdapterZips } from "./kits/adapter.js";
+import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
+import { checkKits } from "./kits/validate.js";
 import { MAX_MCP_BODY_BYTES } from "./mcp.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
@@ -38,12 +44,14 @@ afterEach(() => {
 async function serve(
   pool = {} as Pool,
   oidc = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 1, log: () => {} }),
+  kits?: KitRegistry,
 ): Promise<number> {
   const sessions = new WebSessions({ pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
   const app = createApp({
     health: { checkDatabase: () => Promise.resolve() },
     auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER },
     oidc,
+    kits,
     trustProxyHops: 1,
   });
   server = createServer(app).listen(0, "127.0.0.1");
@@ -179,8 +187,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
   let admin: Pool;
   let pool: Pool;
   let provider: Provider;
+  let adaptersDir: string;
+  let kits: KitRegistry;
 
   beforeAll(async () => {
+    adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
+    writeAdapterZips(checkKits(KIT_SOURCES), adaptersDir);
+    kits = loadKitRegistry({ adaptersDir });
+
     admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
     await admin.query(`create database "${name}"`);
     const url = new URL(TEST_DATABASE_URL ?? "");
@@ -198,6 +212,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
   });
 
   afterAll(async () => {
+    rmSync(adaptersDir, { recursive: true, force: true });
     await pool?.end();
     try {
       await admin.query(`drop database if exists "${name}" with (force)`);
@@ -206,10 +221,16 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     }
   });
 
-  /** The headers of a POST by an agent with a new user's `read` token, as the consent page leaves one (RED-303). */
-  async function asAgent(): Promise<Record<string, string>> {
-    const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
-    const accountId = rows[0]?.uuid ?? "";
+  /**
+   * The headers of a POST by an agent with a `read` token of the user
+   * `accountId`, by default a new one, as the consent page leaves one
+   * (RED-303).
+   */
+  async function asAgent(accountId?: string): Promise<Record<string, string>> {
+    if (accountId === undefined) {
+      const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
+      accountId = rows[0]?.uuid ?? "";
+    }
     const client = await provider.Client.find(CLIENT_ID);
     if (client === undefined) throw new Error("the test client is missing");
     const grant = new provider.Grant({ accountId, clientId: CLIENT_ID });
@@ -256,6 +277,110 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
     expect(list.status).toBe(200);
     expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [] } });
+  });
+
+  /** When the snapshot of `SAVED_VARIABLES` was captured. */
+  const CAPTURED_AT = new Date("2026-09-21T12:00:00Z");
+
+  /** A SavedVariables file of a Classic Era character, with synthetic data (§6.3). */
+  const SAVED_VARIABLES = `OpenGamerMCPDB = {
+  ["schema"] = 1,
+  ["client"] = { ["project_id"] = 2, ["interface"] = 11509 },
+  ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
+  ["captured_at"] = ${CAPTURED_AT.getTime() / 1000},
+  ["state"] = { ["location"] = { ["zone"] = "Elwynn Forest" } },
+}
+`;
+
+  /**
+   * A new user, with WoW enabled or not and with a WoW snapshot of
+   * `SAVED_VARIABLES` or not, stored as ingest stores one. Answers the
+   * headers of the user's agent.
+   */
+  async function player({ wow, snapshot }: { wow: boolean; snapshot: boolean }): Promise<Record<string, string>> {
+    const { rows: users } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
+    const user = users[0];
+    if (user === undefined) throw new Error("no user row");
+    if (wow) await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [user.id]);
+    if (snapshot) {
+      const kit = kits.get("wow");
+      const parse = kit && parseUpload(kit, "savedvariables", Buffer.from(SAVED_VARIABLES), CAPTURED_AT);
+      if (parse?.status !== "parsed") throw new Error("the SavedVariables did not parse");
+      const { rows: devices } = await pool.query<{ id: string }>("insert into devices (user_id) values ($1) returning id", [user.id]);
+      const hex = () => randomBytes(32).toString("hex");
+      const { rows: uploads } = await pool.query<{ id: string }>(
+        `insert into uploads (user_id, device_id, kit, source_id, instance, sha256, content_gzip, kit_version, adapter_schema, parse_status)
+         values ($1, $2, 'wow', 'savedvariables', $3, $4, '\\x00', '0.1.0', 1, 'parsed') returning id`,
+        [user.id, devices[0]?.id, hex(), hex()],
+      );
+      const client = await pool.connect();
+      try {
+        await writeSnapshot(client, uploads[0]?.id ?? "", parse.parsed);
+      } finally {
+        client.release();
+      }
+    }
+    return asAgent(user.uuid);
+  }
+
+  /** The JSON-RPC answer to one request of `agent`. */
+  async function rpc(port: number, agent: Record<string, string>, method: string, params?: unknown): Promise<unknown> {
+    const res = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }));
+    expect(res.status).toBe(200);
+    return JSON.parse(res.body);
+  }
+
+  it("lists wow_get_state for a user with WoW enabled, and calls it on that user's snapshot only (§10.2)", async () => {
+    const port = await serve(pool, provider, kits);
+    const zoela = await player({ wow: true, snapshot: true });
+    const [wowGetState] = kits.get("wow")?.interpreter.tools ?? [];
+
+    expect(await rpc(port, zoela, "tools/list")).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: [
+          {
+            name: "wow_get_state",
+            description: wowGetState?.description,
+            inputSchema: wowGetState?.inputSchema,
+            annotations: { readOnlyHint: true },
+          },
+        ],
+      },
+    });
+    const call = (await rpc(port, zoela, "tools/call", { name: "wow_get_state", arguments: { sections: ["location"] } })) as {
+      result: { structuredContent: unknown; isError?: boolean };
+    };
+    expect(call.result.isError).toBeUndefined();
+    expect(call.result.structuredContent).toMatchObject({
+      snapshot_at: CAPTURED_AT.toISOString(),
+      flavor: "classic_era",
+      rules: [],
+      character: { name: "Zoela", realm: "Testrealm" },
+      state: { location: { zone: "Elwynn Forest" } },
+    });
+
+    // Another user with WoW enabled and no snapshot sees none of Zoela's. The
+    // ToolContext's UserFacingError reaches the agent as an isError result.
+    const other = await player({ wow: true, snapshot: false });
+    const none = (await rpc(port, other, "tools/call", { name: "wow_get_state" })) as { result: { isError?: boolean; content: { text: string }[] } };
+    expect(none.result.isError).toBe(true);
+    expect(none.result.content[0]?.text).toMatch(/^No World of Warcraft snapshot yet\./);
+    const byName = (await rpc(port, other, "tools/call", { name: "wow_get_state", arguments: { character: "Zoela" } })) as {
+      result: { isError?: boolean; content: { text: string }[] };
+    };
+    expect(byName.result).toEqual({ isError: true, content: [{ type: "text", text: "None of your characters with a snapshot has that name." }] });
+  });
+
+  it("lists no kit tool for a user without WoW enabled, and refuses to call one (§10.2)", async () => {
+    const port = await serve(pool, provider, kits);
+    // A snapshot from before the user disabled the game.
+    const agent = await player({ wow: false, snapshot: true });
+    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+    for (const name of ["wow_get_state", "no_such_tool"]) {
+      expect(await rpc(port, agent, "tools/call", { name })).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "MCP error -32602: Unknown tool" } });
+    }
   });
 
   it("answers GET and DELETE with 405, and a body too large or not JSON with a JSON-RPC error", async () => {

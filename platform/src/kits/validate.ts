@@ -1,9 +1,11 @@
 // The checks a kit passes before the platform uses it (docs/architecture.md
-// §5, §6.1, §10.1). The platform runs them at startup and at build time, so a
-// bad kit fails the build and the deploy, not a request.
-import { checkToolName, type Interpreter, type Manifest } from "@ogmcp/sdk";
+// §5, §6.1, §10.1, §10.2). The platform runs them at startup and at build
+// time, so a bad kit fails the build and the deploy, not a request.
+import type { Interpreter, Manifest } from "@ogmcp/sdk";
 import schema from "@ogmcp/sdk/manifest.schema.json" with { type: "json" };
 import { Ajv2020 } from "ajv/dist/2020.js";
+
+import { checkKitToolName, MAX_KIT_TOOLS } from "../tool-names.js";
 
 /** A first-class kit as the registry lists it, before it is checked. */
 export interface KitSource {
@@ -35,13 +37,16 @@ const GLOB = /[*?[\]]/;
 
 /**
  * Checks every kit: its manifest against the SDK schema, its kit key and
- * `tool_prefix` against every other kit's (§6.1), and its tool names with
- * `checkToolName` (§10.1). Throws on the first problem, naming the kit.
+ * `tool_prefix` against every other kit's (§6.1), its tool count against
+ * `MAX_KIT_TOOLS` (§10.2), and each tool's full name with `checkKitToolName`
+ * and against every other kit tool's (§10.1). Throws on the first problem,
+ * naming the kit.
  */
 export function checkKits(sources: readonly KitSource[]): CheckedKit[] {
   const kits: CheckedKit[] = [];
   const byKey = new Map<string, string>();
   const byPrefix = new Map<string, string>();
+  const byTool = new Map<string, string>();
   for (const source of sources) {
     if (!validateManifest(source.manifest)) {
       throw new Error(
@@ -63,9 +68,19 @@ export function checkKits(sources: readonly KitSource[]): CheckedKit[] {
     }
     byPrefix.set(manifest.tool_prefix, source.package);
 
-    for (const tool of source.interpreter.tools) {
-      const problem = checkToolName(tool.name, manifest.tool_prefix);
+    const tools = source.interpreter.tools;
+    if (tools.length > MAX_KIT_TOOLS) {
+      throw new Error(`${source.package}: the kit has ${tools.length} tools, and a kit may have at most ${MAX_KIT_TOOLS} (§10.2).`);
+    }
+    for (const tool of tools) {
+      const problem = checkKitToolName(tool.name, manifest.tool_prefix);
       if (problem !== null) throw new Error(`${source.package}: ${problem}`);
+      // Two prefixes can overlap: `wow` and `wow_get` can both name `wow_get_get_state`.
+      const sameTool = byTool.get(tool.name);
+      if (sameTool !== undefined) {
+        throw new Error(`${sameTool} and ${source.package} both have a tool named "${tool.name}". Tool names must be unique.`);
+      }
+      byTool.set(tool.name, source.package);
     }
 
     kits.push({ source, manifest, adapterFolder: adapterFolder(source.package, manifest) });
