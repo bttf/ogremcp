@@ -21,6 +21,7 @@ import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { startClientCleanup } from "./oidc-registration.js";
 import { firecrawlPageFetch } from "./pages.js";
+import { startRetention } from "./retention.js";
 import { firecrawlScopedSearch } from "./search.js";
 import { cachedPageFetch, cachedSearch } from "./search-cache.js";
 import { createSignInProviders } from "./sign-in-providers.js";
@@ -152,6 +153,12 @@ logger.info(`tool calls per day: free ${caps.free ?? "no cap"}, paid ${caps.paid
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
+
+// Deletes free users' expired uploads and snapshots (§11, §14), now and once
+// a day. Paid users keep theirs.
+const { freeRetentionDays, downgradeGraceDays } = config.retention;
+logger.info(`history retention: free ${freeRetentionDays} days, or all of it for ${downgradeGraceDays} days after a downgrade; paid forever`);
+startRetention({ pool, settings: config.retention });
 
 const app = createApp({
   health: { checkDatabase: () => pool.query("select 1") },

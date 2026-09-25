@@ -7,6 +7,7 @@ import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
+import { DEFAULT_RETENTION, type RetentionSettings } from "./retention.js";
 import { DEFAULT_SEARCH_CACHE, type SearchCacheSettings } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
 import type { ToolCallCaps } from "./usage.js";
@@ -111,6 +112,13 @@ export interface Config {
    * one unset is null: no cap. The calls are counted either way.
    */
   toolCallCaps: ToolCallCaps;
+  /**
+   * `FREE_RETENTION_DAYS`: how many days of uploads and snapshots a free user
+   * keeps. `DOWNGRADE_GRACE_DAYS`: how many days after a downgrade to free a
+   * user keeps all their history (§11, §19.1 D9, `retention.ts`). Each one
+   * unset is `DEFAULT_RETENTION`'s.
+   */
+  retention: RetentionSettings;
   /**
    * `BRIDGE_DOWNLOAD_URL`: where the Get started page sends people to
    * download the bridge (§7, §13.2), or null when it is unset. The page then
@@ -442,6 +450,10 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     toolCallCaps: {
       free: optionalPositiveInt("TOOL_CALLS_PER_DAY_FREE", env["TOOL_CALLS_PER_DAY_FREE"]),
       paid: optionalPositiveInt("TOOL_CALLS_PER_DAY_PAID", env["TOOL_CALLS_PER_DAY_PAID"]),
+    },
+    retention: {
+      freeRetentionDays: positiveInt("FREE_RETENTION_DAYS", env["FREE_RETENTION_DAYS"], DEFAULT_RETENTION.freeRetentionDays),
+      downgradeGraceDays: positiveInt("DOWNGRADE_GRACE_DAYS", env["DOWNGRADE_GRACE_DAYS"], DEFAULT_RETENTION.downgradeGraceDays),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     logLevel: logLevel(env["LOG_LEVEL"]),

@@ -16,6 +16,7 @@ import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
+import { DEFAULT_RETENTION } from "./retention.js";
 import { DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 import { NO_TOOL_CALL_CAPS } from "./usage.js";
@@ -47,6 +48,7 @@ describe("loadConfig", () => {
       firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
       searchCache: DEFAULT_SEARCH_CACHE,
       toolCallCaps: NO_TOOL_CALL_CAPS,
+      retention: DEFAULT_RETENTION,
       bridgeDownloadUrl: null,
       logLevel: "info",
       production: false,
