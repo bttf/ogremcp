@@ -37,7 +37,7 @@ export interface AppOptions {
    * served, and `/mcp` lists no kit tool.
    */
   kits?: KitRegistry;
-  /** The `ToolContext` settings of kit tool calls (`HISTORY_MAX_SNAPSHOTS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /** The `ToolContext` settings of kit tool calls (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`). Default: `DEFAULT_TOOL_CONTEXT`. */
   toolContext?: ToolContextSettings;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;

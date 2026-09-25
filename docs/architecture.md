@@ -221,6 +221,7 @@ interface ToolDef<State> {
 
 interface ToolContext<State> {
   user: { uuid: string; tier: "free" | "paid" };
+  maxResultBytes: number;         // the result size cap (§10.5)
   latest(q: { flavor?: string; character?: string }): Promise<Snapshot<State> | null>;
   history(q: { since: Date; flavor?: string; character?: string; limit: number }): Promise<Snapshot<State>[]>;
 }
@@ -471,8 +472,9 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - **Every kit-tool response includes `snapshot_at`, `flavor`, `rules`, and `character`**, so the agent can flag stale data, suggest `/transmit`, and adapt to the realm's rules.
 - **Format:** return `structuredContent` plus the same JSON as a text block, because client support varies.
+- **Size:** one copy of a kit tool's result JSON is at most a configured cap (*proposed* 40 KB). The client gets the JSON twice and can have a tool-output limit. Over the cap, the kit trims its own result, because only the kit knows which of its fields matter least. The platform passes the cap in `ToolContext` and answers a result still over it with a user-facing error that asks for fewer `sections`. `wow_get_state` leaves out quest description text first, then shortens the bag list, and adds a note that says what it left out and suggests fewer `sections`. The player's current state stays accurate. Owner decision, 2026-09-25.
 - **Annotations:** `readOnlyHint: true` on every tool except `report_issue`; `openWorldHint: true` on `search_game_info` and `fetch_game_page`. Clients use these to decide when to ask the user for confirmation.
-- **User-facing conditions** (cap reached, paid-only, no snapshot yet, no sources, search unavailable) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them.
+- **User-facing conditions** (cap reached, paid-only, no snapshot yet, no sources, search unavailable) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which a client can keep listing until a new chat (§10.2): the message says the game is turned off on the Games page. An unknown tool name is a protocol error.
 - **Tool descriptions name the game explicitly.** Together with the prefix and `list_games`, that's how the agent picks the right tool.
 - **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules:
   - Friend-style, spoiler-free guidance ("head north, you'll know you're close when you see water"), not coordinates and kill counts.

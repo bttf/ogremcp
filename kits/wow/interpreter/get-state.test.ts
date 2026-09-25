@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Snapshot, ToolContext, ToolResult } from "@ogmcp/sdk";
+import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogmcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
@@ -36,10 +36,14 @@ beforeAll(() => {
 
 const tool = interpreter.tools.find((t) => t.name === "wow_get_state");
 
-async function call(args: unknown, latest: Snapshot<WowState> | null) {
+/** The platform's default cap (§10.5). */
+const MAX_RESULT_BYTES = 40 * 1024;
+
+async function call(args: unknown, latest: Snapshot<WowState> | null, maxResultBytes = MAX_RESULT_BYTES) {
   if (tool === undefined) throw new Error("The WoW kit has no wow_get_state.");
   const ctx = {
     user: { uuid: "00000000-0000-4000-8000-000000000000", tier: "free" },
+    maxResultBytes,
     latest: vi.fn(async () => latest),
     history: vi.fn(async () => []),
   } satisfies ToolContext<WowState>;
@@ -168,4 +172,76 @@ it("gives a path time out of a Date's range as null", async () => {
 
   const data = content((await call({ sections: ["recent_path"] }, snapshot)).result);
   expect(data.state.recent_path).toMatchObject([{ captured_at: null, zone: "Test Forest" }]);
+});
+
+describe("over the size cap (§10.5)", () => {
+  /** The era snapshot with 20 quests of long descriptions, and `bagItems` bag items. */
+  function heavy(bagItems: number): Snapshot<WowState> {
+    const snapshot = structuredClone(snapshots.era);
+    const { quests, inventory } = snapshot.state;
+    if (quests === null || inventory === null) throw new Error("The era stub has no quests or inventory.");
+    quests.entries = Array.from({ length: 20 }, (_, i) => ({
+      id: 100 + i,
+      title: `Test Quest ${i}`,
+      level: 10,
+      description: "A long quest text. ".repeat(130),
+      objectives_text: "Collect 8 Test Pelts.",
+      objectives: [{ text: "Test Pelt: 3/8", type: "item", finished: false, num_fulfilled: 3, num_required: 8 }],
+      complete: false,
+    }));
+    for (let i = 0; i < bagItems; i++) {
+      inventory.items.push({
+        item_id: 5000 + i,
+        name: `Test Item Number ${i}`,
+        count: 1,
+        quality: 1,
+        item_level: 10,
+        min_level: 5,
+        equip_loc: null,
+        type: "Trade Goods",
+        sub_type: "Cloth",
+        sell_price: 25,
+        stats: null,
+      });
+    }
+    return snapshot;
+  }
+
+  type Trimmed = { notes?: string[]; state: { quests: { entries: object[] }; inventory: { items: { item_id: number }[]; gear: unknown } } };
+
+  it("leaves out the quest descriptions first, and keeps the bag list when that is enough", async () => {
+    const { result } = await call({ sections: ["quests", "inventory"] }, heavy(0));
+
+    const text = result.content[0]?.text ?? "";
+    expect(utf8Length(text)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
+    const data = content(result) as Trimmed;
+    expect(data.state.quests.entries).toHaveLength(20);
+    expect(data.state.quests.entries[0]).not.toHaveProperty("description");
+    expect(data.state.quests.entries[0]).toMatchObject({ objectives_text: "Collect 8 Test Pelts." });
+    expect(data.state.inventory.items).toHaveLength(snapshots.era.state.inventory?.items.length ?? -1);
+    expect(data.notes).toEqual([
+      "To stay under the server's size limit, this result leaves out the quest descriptions. Call wow_get_state with fewer sections to get the rest.",
+    ]);
+  });
+
+  it("then cuts the bag list to the items that fit, in bag order, and says so", async () => {
+    const snapshot = heavy(96);
+    const full = content((await call({ sections: ["quests", "inventory"] }, snapshot, 1_000_000)).result) as Trimmed;
+    const cap = 16 * 1024;
+    const { result } = await call({ sections: ["quests", "inventory"] }, snapshot, cap);
+
+    expect(utf8Length(result.content[0]?.text ?? "")).toBeLessThanOrEqual(cap);
+    const data = content(result) as Trimmed;
+    const shown = data.state.inventory.items.length;
+    const total = full.state.inventory.items.length;
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(total);
+    expect(data.state.inventory.items).toEqual(full.state.inventory.items.slice(0, shown));
+    // The gear comparison was made from the whole bag list.
+    expect(data.state.inventory.gear).toEqual(full.state.inventory.gear);
+    expect(data.state.quests.entries[0]).not.toHaveProperty("description");
+    expect(data.notes).toEqual([
+      `To stay under the server's size limit, this result leaves out the quest descriptions and lists only the first ${shown} of the ${total} bag items. Call wow_get_state with fewer sections to get the rest.`,
+    ]);
+  });
 });

@@ -5,8 +5,9 @@ import type { Pool } from "pg";
  * The `ToolContext` of a kit tool call (§6.2): a tool handler's only way to
  * read snapshots. It reads the snapshots of one user and one kit, newest
  * first by `snapshot_at`, not by insert time, because offline uploads arrive
- * late (§11). The object holds `user`, `latest`, and `history`, and nothing
- * else: the pool and the user's `users.id` stay in its closures.
+ * late (§11). The object holds `user`, `maxResultBytes`, `latest`, and
+ * `history`, and nothing else: the pool and the user's `users.id` stay in its
+ * closures.
  *
  * `latest` returns the newest snapshot. `history` returns the snapshots from
  * `since` on, newest first, at most `limit` of them, and at most
@@ -39,13 +40,19 @@ import type { Pool } from "pg";
  * bttf/wow-guide@df80260.
  */
 
-/** The history limit (*proposed*, §0). `config.ts` reads it from the environment. */
+/** The history limit and the result size cap (*proposed*, §0). `config.ts` reads them from the environment. */
 export interface ToolContextSettings {
   /** `HISTORY_MAX_SNAPSHOTS`: the most snapshots one `history` call returns. A larger `limit` is cut to it. */
   maxHistoryLimit: number;
+  /**
+   * `TOOL_RESULT_MAX_BYTES`: the most UTF-8 bytes one copy of a kit tool
+   * result's JSON may take (§10.5). The handler gets it as `maxResultBytes`
+   * and trims to it; the envelope (`tool-envelope.ts`) checks it.
+   */
+  maxResultBytes: number;
 }
 
-export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100 };
+export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024 };
 
 /**
  * A user-facing condition of a tool call (§10.5). Its message is plain
@@ -169,6 +176,7 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
 
   return {
     user: { uuid: user.uuid, tier: user.tier },
+    maxResultBytes: settings.maxResultBytes,
     async latest(q) {
       const [snapshot] = await read(q, null, 1);
       return snapshot ?? null;

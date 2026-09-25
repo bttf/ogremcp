@@ -82,7 +82,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     await user.add(at(11), "classic_era", ZOELA);
     const ctx = await contextOf(user.uuid);
 
-    expect(Object.keys(ctx).sort()).toEqual(["history", "latest", "user"]);
+    expect(Object.keys(ctx).sort()).toEqual(["history", "latest", "maxResultBytes", "user"]);
     expect(ctx.user).toEqual({ uuid: user.uuid, tier: "free" });
     expect(await ctx.latest({})).toEqual({
       snapshotAt: at(12),
@@ -95,7 +95,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     expect(times(await ctx.history({ since: at(9), limit: 10 }))).toEqual([12, 11, 10]);
     expect(times(await ctx.history({ since: at(11), limit: 10 }))).toEqual([12, 11]);
 
-    const capped = await contextOf(user.uuid, { maxHistoryLimit: 2 });
+    const capped = await contextOf(user.uuid, { ...DEFAULT_TOOL_CONTEXT, maxHistoryLimit: 2 });
     expect(times(await capped.history({ since: at(9), limit: 10 }))).toEqual([12, 11]);
     await expect(ctx.history({ since: at(9), limit: 0 })).rejects.toThrow(UserFacingError);
   });
