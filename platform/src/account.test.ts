@@ -10,6 +10,7 @@ import type Provider from "oidc-provider";
 import type { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { deleteUserData } from "./account.js";
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { BRIDGE_CLIENT_ID, createDevice } from "./devices.js";
@@ -50,6 +51,28 @@ const DATA_TABLES = ["uploads", "snapshots", "events", "issues"];
  * delete it too.
  */
 const USER_TABLES = [...DATA_TABLES, "oauth_identities", "web_sessions", "devices", "user_games"];
+
+it("runs a delete once more when Postgres aborts it for a deadlock", async () => {
+  const statements: string[] = [];
+  let deadlocked = false;
+  const client = {
+    query: async (sql: string) => {
+      statements.push(sql.split(" ").slice(0, 3).join(" "));
+      if (!deadlocked && sql.startsWith("delete from snapshots")) {
+        deadlocked = true;
+        throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release: () => {},
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const user = { id: "1", uuid: "00000000-0000-4000-8000-000000000000" };
+  expect(await deleteUserData(pool, user)).toEqual({ issues: 1, events: 1, snapshots: 1, uploads: 1 });
+  expect(statements.filter((sql) => sql === "rollback")).toHaveLength(1);
+  expect(statements.filter((sql) => sql === "commit")).toHaveLength(1);
+  expect(statements.filter((sql) => sql === "delete from uploads")).toHaveLength(1);
+});
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete account against Postgres (§11)", () => {
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;

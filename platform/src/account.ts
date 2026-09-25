@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 
+import { failureCode } from "./db.js";
 import { logger } from "./log.js";
 
 /**
@@ -34,7 +35,11 @@ import { logger } from "./log.js";
  * account" locks the user's devices before the user, the order ingest takes
  * them in (`ingest.ts` locks the device, then its insert reads the user), so
  * an upload in flight waits instead of deadlocking. `no key update` on the
- * devices leaves an events insert that reads a device unblocked.
+ * devices leaves an events insert that reads a device unblocked. The
+ * re-parse command (`reparse-uploads.ts`) locks an upload, then its snapshot
+ * insert reads the user, so it can still deadlock with a delete. A delete
+ * that Postgres aborts for a deadlock or a serialization failure is run once
+ * more in a new transaction.
  */
 
 /** The rows "Delete my data" deleted, by table. */
@@ -91,7 +96,20 @@ async function deleteData(client: PoolClient, userId: string): Promise<DeletedDa
   return { issues, events, snapshots, uploads };
 }
 
+/** Postgres's `deadlock_detected` and `serialization_failure`: the transaction was aborted, and a new one may pass. */
+const RETRYABLE = new Set(["40P01", "40001"]);
+
+/** Runs `work` in a transaction, and once more in a new one when Postgres aborts the first with a `RETRYABLE` error. */
 async function inTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  try {
+    return await transaction(pool, work);
+  } catch (err) {
+    if (!RETRYABLE.has(failureCode(err))) throw err;
+    return transaction(pool, work);
+  }
+}
+
+async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("begin");
