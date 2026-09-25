@@ -21,8 +21,8 @@ const (
 // not a plain file or folder.
 var ErrUnsafeZip = errors.New("the adapter zip has an unsafe entry")
 
-// extract unpacks the zip data into dest, a folder under r, which must exist.
-// Every entry must be a file or folder under folder/, the adapter's folder
+// extract unpacks the zip data into r, a new, empty folder. Every entry must
+// be a file or folder under folder/, the adapter's folder
 // (§6.1 adapter.install; the platform zips the adapter under it). An absolute
 // path, a drive letter or other ":", a backslash, an empty, "." or ".." part,
 // a part Windows would read as one, a symbolic link, or any other special file
@@ -30,7 +30,7 @@ var ErrUnsafeZip = errors.New("the adapter zip has an unsafe entry")
 // write goes through r, so no entry can leave it.
 //
 // Adapted from bttf/wow-guide@df80260, bridge/internal/addon/unzip.go.
-func extract(r *os.Root, data []byte, dest, folder string) error {
+func extract(r *os.Root, data []byte, folder string) error {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return fmt.Errorf("could not read the adapter zip: %w", err)
@@ -51,7 +51,7 @@ func extract(r *os.Root, data []byte, dest, folder string) error {
 
 	budget := int64(maxUnpacked)
 	for _, f := range zr.File {
-		target := filepath.Join(dest, filepath.FromSlash(strings.TrimSuffix(f.Name, "/")))
+		target := filepath.FromSlash(strings.TrimSuffix(f.Name, "/"))
 		if f.FileInfo().IsDir() {
 			if err := r.MkdirAll(target, 0o755); err != nil {
 				return err

@@ -218,11 +218,11 @@ func (u *Updater) sync(ctx context.Context, t Target) []Status {
 	if err != nil {
 		return failed(errors.New("the server listed an adapter version that is not semver"))
 	}
-	dirs, name, err := parents(t.Root, a.Install)
+	places, name, err := parents(t.Root, a.Install)
 	if err != nil {
 		return failed(err)
 	}
-	if len(dirs) == 0 {
+	if len(places) == 0 {
 		return failed(ErrNoFolder)
 	}
 	running, err := process.Running(u.procs, a.Process)
@@ -249,10 +249,10 @@ func (u *Updater) sync(ctx context.Context, t Target) []Status {
 
 	var out []Status
 	waiting := false
-	for _, dir := range dirs {
+	for _, p := range places {
 		st := base
-		st.Path = filepath.Join(dir, name)
-		u.syncFolder(&st, dir, name, latest, running, getZip)
+		st.Path = filepath.Join(p.dir(), name)
+		u.syncFolder(&st, p, name, latest, running, getZip)
 		waiting = waiting || st.State == StateWaiting
 		out = append(out, st)
 	}
@@ -264,23 +264,26 @@ func (u *Updater) sync(ctx context.Context, t Target) []Status {
 	return out
 }
 
-// syncFolder syncs the adapter folder name in dir, and records the outcome
-// in st.
-func (u *Updater) syncFolder(st *Status, dir, name string, latest Version, running bool, getZip func() ([]byte, error)) {
+// syncFolder syncs the adapter folder name at p, and records the outcome in
+// st. The folders above the adapter folder are created only once the zip is
+// downloaded and an install will happen.
+func (u *Updater) syncFolder(st *Status, p place, name string, latest Version, running bool, getZip func() ([]byte, error)) {
 	fail := func(err error) {
 		st.State, st.Err = StateFailed, err
 	}
-	r, err := openParent(dir)
+	r, err := openParent(p.dir())
 	if err != nil {
 		fail(err)
 		return
 	}
-	defer r.Close()
-	tidy(r, name)
-	k, err := inspect(r, name)
-	if err != nil {
-		fail(err)
-		return
+	k := missing
+	if r != nil {
+		defer r.Close()
+		tidy(r, name)
+		if k, err = inspect(r, name); err != nil {
+			fail(err)
+			return
+		}
 	}
 	switch k {
 	case linked:
@@ -313,6 +316,13 @@ func (u *Updater) syncFolder(st *Status, dir, name string, latest Version, runni
 	if k == folder && running {
 		st.State = StateWaiting
 		return
+	}
+	if r == nil {
+		if r, err = makeParent(p); err != nil {
+			fail(err)
+			return
+		}
+		defer r.Close()
 	}
 	if err := install(r, name, zip, latest); err != nil {
 		fail(err)

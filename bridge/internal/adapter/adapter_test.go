@@ -303,7 +303,10 @@ func TestChecksumMismatch(t *testing.T) {
 	if st := one(t, u.Sync(ctx, []Target{{Kit: k, Root: root}})); st.State != StateFailed || !errors.Is(st.Err, ErrChecksum) {
 		t.Errorf("bytes: %+v", st)
 	}
-	only(t, addOns(root, "_classic_era_"))
+	// Nothing is created before a verified zip is in hand.
+	if _, err := os.Stat(filepath.Join(root, "_classic_era_", "Interface")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Interface was created: %v", err)
+	}
 }
 
 func TestUnsafeZip(t *testing.T) {
@@ -329,7 +332,7 @@ func TestUnsafeZip(t *testing.T) {
 			}
 			defer r.Close()
 			data := makeZip(t, entry{name: folderName + "/" + folderName + ".toc", body: "## Version: 0.1.0\n"}, e)
-			if err := extract(r, data, ".", folderName); !errors.Is(err, ErrUnsafeZip) {
+			if err := extract(r, data, folderName); !errors.Is(err, ErrUnsafeZip) {
 				t.Errorf("extract = %v", err)
 			}
 			only(t, dir)

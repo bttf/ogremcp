@@ -41,14 +41,26 @@ const (
 	other
 )
 
-// parents returns the folders adapter.install puts the adapter folder in,
-// under root, and the adapter folder's name: install's last segment, which
-// has no "*". The segments up to the last one with a "*" are a glob, and
-// expand to each existing folder they match (§6.1: each flavor folder).
-// The rest of install's parent is literal, and need not exist yet: on a
-// first install, the adapter folder is missing, and so may be the folders
-// above it, such as Interface/AddOns in a new game folder.
-func parents(root, install string) ([]string, string, error) {
+// place is where adapter.install puts one adapter folder: in the folder
+// base/rel..., its parent. base exists: it is root, or a folder the glob part
+// of adapter.install matched. The folders of rel are literal, and need not
+// exist yet: on a first install, the adapter folder is missing, and so may be
+// the folders above it, such as Interface/AddOns in a new game folder.
+type place struct {
+	base string
+	rel  []string
+}
+
+// dir is the adapter folder's parent.
+func (p place) dir() string {
+	return filepath.Join(append([]string{p.base}, p.rel...)...)
+}
+
+// parents returns the places adapter.install puts the adapter folder under
+// root, and the adapter folder's name: install's last segment, which has no
+// "*". The segments up to the last one with a "*" are a glob, and expand to
+// each existing folder they match (§6.1: each flavor folder).
+func parents(root, install string) ([]place, string, error) {
 	if err := manifest.CheckRelative(install); err != nil {
 		return nil, "", fmt.Errorf("adapter.install %q %w", install, err)
 	}
@@ -77,26 +89,59 @@ func parents(root, install string) ([]string, string, error) {
 			}
 		}
 	}
-	var out []string
+	var out []place
 	for _, b := range bases {
-		out = append(out, filepath.Join(append([]string{b}, dirs[glob:]...)...))
+		out = append(out, place{base: b, rel: dirs[glob:]})
 	}
 	return out, name, nil
 }
 
-// openParent makes dir when it is missing and opens it as a Root. Links on
-// the way are followed: a player may keep Interface/AddOns elsewhere and link
-// it (owner decision on RED-319). The Root is the resolved folder, so every
-// later write stays in it.
+// openParent opens dir as a Root, or returns nil when dir does not exist.
+// Links on the way are followed: a player may keep Interface/AddOns elsewhere
+// and link it (owner decision on RED-319). The Root is the resolved folder, so
+// every later write stays in it.
 func openParent(dir string) (*os.Root, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
 	resolved, err := filepath.EvalSymlinks(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	return os.OpenRoot(resolved)
+}
+
+// makeParent creates the missing folders of p's parent and opens the parent
+// as a Root (openParent). It creates them through a Root on the deepest
+// folder of the parent's path that exists, at or below p.base. It is called
+// only when an install will happen.
+func makeParent(p place) (*os.Root, error) {
+	i := len(p.rel)
+	for ; i > 0; i-- {
+		_, err := os.Stat(place{base: p.base, rel: p.rel[:i]}.dir())
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	r, err := openParent(place{base: p.base, rel: p.rel[:i]}.dir())
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, fmt.Errorf("%s no longer exists", p.base)
+	}
+	if i == len(p.rel) {
+		return r, nil
+	}
+	defer r.Close()
+	rest := filepath.Join(p.rel[i:]...)
+	if err := r.MkdirAll(rest, 0o755); err != nil {
+		return nil, err
+	}
+	return r.OpenRoot(rest)
 }
 
 // inspect reports what sits at name under r, without following a link.
@@ -188,17 +233,14 @@ func install(r *os.Root, name string, data []byte, want Version) error {
 		return err
 	}
 	defer r.RemoveAll(stage)
-	if err := extract(r, data, stage, name); err != nil {
+	if err := unpack(r, stage, name, data, want); err != nil {
 		return err
 	}
-	got, err := tocVersion(r.FS(), stage+"/"+name)
-	if err != nil {
-		return fmt.Errorf("the adapter zip: %w", err)
-	}
-	if got.Compare(want) != 0 {
-		return fmt.Errorf("the adapter zip holds version %s, not the listed %s", got, want)
-	}
+	// The new folder must be a folder, not a link put in its place.
 	fresh := filepath.Join(stage, name)
+	if k, err := inspect(r, fresh); err != nil || k != folder {
+		return errors.Join(errors.New("the unpacked adapter is not a folder"), err)
+	}
 
 	k, err := inspect(r, name)
 	switch {
@@ -221,6 +263,28 @@ func install(r *os.Root, name string, data []byte, want Version) error {
 	}
 	// A folder left behind is removed at the next sync (tidy).
 	r.RemoveAll(old)
+	return nil
+}
+
+// unpack extracts the zip data into stage, a new folder under r, through a
+// Root on stage, and checks that its TOC names want. The Root is closed
+// before install renames anything.
+func unpack(r *os.Root, stage, name string, data []byte, want Version) error {
+	sr, err := r.OpenRoot(stage)
+	if err != nil {
+		return err
+	}
+	defer sr.Close()
+	if err := extract(sr, data, name); err != nil {
+		return err
+	}
+	got, err := tocVersion(sr.FS(), name)
+	if err != nil {
+		return fmt.Errorf("the adapter zip: %w", err)
+	}
+	if got.Compare(want) != 0 {
+		return fmt.Errorf("the adapter zip holds version %s, not the listed %s", got, want)
+	}
 	return nil
 }
 

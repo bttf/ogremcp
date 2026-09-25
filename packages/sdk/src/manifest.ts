@@ -74,7 +74,7 @@ export interface Adapter {
    */
   install: string;
   /**
-   * Globs for the game's process names. The bridge applies adapter updates only while none is running (§7).
+   * Globs for the game's process names. The bridge applies adapter updates only while none is running (§7). A glob matches a process's executable name, ignoring case. `*` is the only wildcard; `?`, `[`, `/`, and `\` are not allowed, since a glob with them would match no process.
    *
    * @minItems 1
    */
