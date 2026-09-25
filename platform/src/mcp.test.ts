@@ -355,9 +355,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       },
     });
     const call = (await rpc(port, zoela, "tools/call", { name: "wow_get_state", arguments: { sections: ["location"] } })) as {
-      result: { structuredContent: unknown; isError?: boolean };
+      result: { structuredContent: unknown; content: { text: string }[]; isError?: boolean };
     };
     expect(call.result.isError).toBeUndefined();
+    expect(JSON.parse(call.result.content[0]?.text ?? "")).toEqual(call.result.structuredContent);
     expect(call.result.structuredContent).toMatchObject({
       snapshot_at: CAPTURED_AT.toISOString(),
       flavor: "classic_era",
@@ -380,14 +381,27 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     expect(byName.result).toEqual({ isError: true, content: [{ type: "text", text: "None of your characters with a snapshot has that name." }] });
   });
 
-  it("lists no kit tool for a user without WoW enabled, and refuses to call one (§10.2)", async () => {
+  it("lists no kit tool for a user without WoW enabled, and says the game is turned off when one is called (§10.2, §10.5)", async () => {
     const port = await serve(pool, provider, kits);
     // A snapshot from before the user disabled the game.
     const agent = await player({ wow: false, snapshot: true });
     expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [LIST_GAMES] } });
-    for (const name of ["wow_get_state", "no_such_tool"]) {
-      expect(await rpc(port, agent, "tools/call", { name })).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "MCP error -32602: Unknown tool" } });
-    }
+    // A client can keep the tool list of a chat from before the game was turned off.
+    expect(await rpc(port, agent, "tools/call", { name: "wow_get_state" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        isError: true,
+        content: [
+          { type: "text", text: "World of Warcraft is turned off on the Games page of the Open Gamer MCP website. The player can turn it on there." },
+        ],
+      },
+    });
+    expect(await rpc(port, agent, "tools/call", { name: "no_such_tool" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32602, message: "MCP error -32602: Unknown tool" },
+    });
   });
 
   it("answers GET and DELETE with 405, and a body too large or not JSON with a JSON-RPC error", async () => {

@@ -2,11 +2,11 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 
-import { failureCode } from "./db.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
-import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser, UserFacingError } from "./tool-context.js";
+import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
+import { errorResult, gameOffResult, kitToolResult } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 
 /**
@@ -17,7 +17,8 @@ import { checkPlatformToolName } from "./tool-names.js";
  * request, from the database (§10.2): a game the user enables or disables
  * shows up the next time the client lists tools. A kit tool call gets a
  * `ToolContext` for the user and the kit (`tool-context.ts`), a platform tool
- * call a `PlatformToolContext`.
+ * call a `PlatformToolContext`. What a call answers is the response envelope
+ * of `tool-envelope.ts` (§10.5).
  *
  * Names are checked at startup: kit tools in `checkKits`, and platform tools,
  * and platform tools against kit tools, in `createToolRegistry` (§10.1).
@@ -51,9 +52,12 @@ export interface ToolRegistryOptions {
   kits?: KitRegistry;
   /** Default: `PLATFORM_TOOLS`. */
   platformTools?: readonly PlatformTool[];
-  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
-  /** Receives one line per tool call that failed with an error that is not user-facing. Default: `logger.error`. */
+  /**
+   * Receives one line per tool call that failed with an error that is not
+   * user-facing, or whose result was over the size cap. Default: `logger.error`.
+   */
   log?: (line: string) => void;
 }
 
@@ -61,10 +65,12 @@ export interface ToolRegistry {
   /** The tools of the user with this `users.uuid`, as `tools/list` lists them. */
   list(userUuid: string): Promise<Tool[]>;
   /**
-   * Calls the tool `name` for the user with this `users.uuid`. Null when the
-   * user has no tool of that name: an unknown name, or a tool of a game the
-   * user has not enabled. The handler's errors become `isError` results
-   * (`toolErrorResult`); an error while looking up the user propagates.
+   * Calls the tool `name` for the user with this `users.uuid`, and answers
+   * with the response envelope (`tool-envelope.ts`): a kit tool's result is
+   * checked, the handler's errors become `isError` results, and a tool of a
+   * game the user has not enabled gets an `isError` result that says the game
+   * is turned off. Null when there is no user with this uuid or no tool of
+   * that name. An error while looking up the user propagates.
    */
   call(userUuid: string, name: string, args: unknown): Promise<ToolResult | null>;
 }
@@ -114,14 +120,20 @@ export function createToolRegistry({
 
     async call(userUuid, name, args) {
       const found = await userTools(userUuid);
-      const tool = found?.tools.find(({ def }) => def.name === name);
-      if (found === null || tool === undefined) return null;
+      if (found === null) return null;
+      const tool = found.tools.find(({ def }) => def.name === name);
+      if (tool === undefined) {
+        // A client can keep a turned-off game's tools until a new chat (§10.2).
+        const off = allKits.find((kit) => kit.interpreter.tools.some((def) => def.name === name));
+        return off === undefined ? null : gameOffResult(off.name);
+      }
       const { user, games } = found;
       try {
         if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, settings });
-        return await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
+        const result = await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
+        return kitToolResult(result, name, settings.maxResultBytes, log);
       } catch (err) {
-        return toolErrorResult(err, name, log);
+        return errorResult(err, name, log);
       }
     },
   };
@@ -140,21 +152,4 @@ function checkPlatformTools(platformTools: readonly PlatformTool[], kits: readon
     if (owner !== undefined) throw new Error(`${owner} and the platform tools both have a tool named "${tool.name}". Tool names must be unique.`);
     owners.set(tool.name, "the platform tools");
   }
-}
-
-/** What the agent gets when a tool call fails for a reason it cannot act on. */
-export const TOOL_FAILED_MESSAGE = "The tool failed on the server. Try again in a moment.";
-
-/**
- * The result of a tool call whose handler threw. A `UserFacingError` becomes
- * an `isError` result with its message (§10.5). Anything else becomes an
- * `isError` result with `TOOL_FAILED_MESSAGE`, and a log line with the tool's
- * name and the error's code alone: its message can hold user data.
- *
- * Minimal until the response envelope (RED-330) replaces it.
- */
-export function toolErrorResult(err: unknown, tool: string, log: (line: string) => void): ToolResult {
-  if (err instanceof UserFacingError) return { isError: true, content: [{ type: "text", text: err.message }] };
-  log(`tool call failed: tool=${tool} code=${failureCode(err)}`);
-  return { isError: true, content: [{ type: "text", text: TOOL_FAILED_MESSAGE }] };
 }

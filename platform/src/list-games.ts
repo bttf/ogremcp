@@ -1,4 +1,4 @@
-import type { ToolResult } from "@ogmcp/sdk";
+import { jsonResult } from "@ogmcp/sdk";
 
 import type { Kit } from "./kits/registry.js";
 import type { PlatformTool, PlatformToolContext } from "./tools.js";
@@ -148,8 +148,3 @@ export const listGames: PlatformTool = {
     return jsonResult(result);
   },
 };
-
-/** `structuredContent` plus the same JSON as a text block (§10.5). The envelope (RED-330) replaces it. */
-function jsonResult(data: { [key: string]: unknown }): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
-}

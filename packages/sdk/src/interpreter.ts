@@ -108,6 +108,13 @@ export interface ToolDef<State> {
  */
 export interface ToolContext<State> {
   user: { uuid: string; tier: "free" | "paid" };
+  /**
+   * The most UTF-8 bytes (`utf8Length`) one copy of the result's JSON may
+   * take (§10.5, *proposed* config). Over it, the handler trims its result,
+   * leaving out what matters least first, and says in the result what it left
+   * out. The platform answers a result still over it with a user-facing error.
+   */
+  maxResultBytes: number;
   latest(q: { flavor?: string; character?: string }): Promise<Snapshot<State> | null>;
   history(q: {
     since: Date;
