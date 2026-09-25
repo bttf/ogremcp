@@ -42,7 +42,7 @@ export const routes: RouteObject[] = [
         ],
       },
       // Not under RequireSession: anyone but an admin, signed in or not, gets
-      // the Page not found page, as at a path that does not exist.
+      // no data and the Page not found page, as at a path that does not exist.
       { path: "/admin", element: <Admin /> },
       { path: "*", element: <NotFound /> },
     ],

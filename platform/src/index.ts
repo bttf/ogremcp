@@ -11,6 +11,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createAdminPool } from "./admin.js";
 import { createApp } from "./app.js";
 import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
@@ -150,8 +151,11 @@ const events = createEventRecorder({ pool: createEventsPool({ url: config.databa
 const caps = config.toolCallCaps;
 logger.info(`tool calls per day: free ${caps.free ?? "no cap"}, paid ${caps.paid ?? "no cap"}`);
 
-// Who may open /admin (§13.2). The line counts them and names none.
+// Who may open /admin (§13.2). The line counts them and names none. Its
+// queries run on a pool of their own, of one connection, which no request
+// needs.
 logger.info(`admin users: ${config.adminUserUuids.length}`);
+const admin = { pool: createAdminPool({ url: config.databaseUrl }), adminUserUuids: config.adminUserUuids };
 
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
@@ -171,7 +175,7 @@ const app = createApp({
   ingest: config.ingest,
   events,
   toolCallCaps: caps,
-  adminUserUuids: config.adminUserUuids,
+  admin,
   https,
   trustProxyHops: config.trustProxyHops,
 });

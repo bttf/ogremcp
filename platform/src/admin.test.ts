@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { AdminMetrics } from "./admin.js";
+import { type AdminMetrics, createAdminPool } from "./admin.js";
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { migrate } from "./migrations.js";
@@ -29,6 +29,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
   const at = (minutes: number) => new Date(now + minutes * 60_000);
   let admin: Pool;
   let pool: Pool;
+  let adminPool: Pool;
   let server: Server | undefined;
   let base: string;
   /** Every uuid of a row the seed made: none may appear in an answer. */
@@ -52,6 +53,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     url.pathname = `/${name}`;
     pool = createPool({ url: url.toString(), queryTimeoutMs: 10_000, max: 4 });
     await migrate(pool);
+    adminPool = createAdminPool({ url: url.toString() });
 
     const sessions = new WebSessions({ pool, lifetimeMs: 30 * DAY_MS, renewWithinMs: 15 * DAY_MS, secure: false });
     const { rows: users } = await pool.query<{ id: string; uuid: string }>("insert into users (tier) values ('free'), ('free') returning id, uuid");
@@ -93,10 +95,13 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     await event({ ...cimd, occurred_at: at(-178), tool: "search_game_info", query: "mage trainer", cache_hit: true });
     await event({ ...cimd, occurred_at: at(-177), tool: "search_game_info", query: LONG_QUERY, cache_hit: false, search_credits: 2 });
     await event({ ...cimd, occurred_at: at(-176), tool: "fetch_game_page", error: "out_of_scope" });
-    // A visit of the DCR agent that read state, never searched, and reached the cap.
+    // A visit of the DCR agent that read state, whose one search failed, and that reached the cap.
     const dcr = { ...call, agent_client: DCR_CLIENT };
     await event({ ...dcr, occurred_at: at(-60), tool: "wow_get_state", snapshot_age_seconds: 200 });
     await event({ ...dcr, occurred_at: at(-59), tool: "list_games", error: "cap_reached" });
+    await event({ ...dcr, occurred_at: at(-58), tool: "search_game_info", query: "mage trainer", error: "search_unavailable" });
+    // Another user's visit of the CIMD agent, whose one kit tool call failed: it read no state.
+    await event({ ...cimd, user_id: owner.id, occurred_at: at(-30), tool: "wow_get_state", error: "game_off" });
 
     await pool.query(
       "insert into issues (user_id, created_at, kit, note, agent_client, calls, snapshot_uuid, snapshot_at) values ($1, $2, 'wow', $3, $4, '[]', $5, $2)",
@@ -106,7 +111,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     const app = createApp({
       health: { checkDatabase: () => Promise.resolve() },
       auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
-      adminUserUuids: [owner.uuid],
+      admin: { pool: adminPool, adminUserUuids: [owner.uuid] },
     });
     server = createServer(app).listen(0, "127.0.0.1");
     await once(server, "listening");
@@ -115,6 +120,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
 
   afterAll(async () => {
     server?.close();
+    await adminPool?.end();
     await pool?.end();
     try {
       await admin.query(`drop database if exists "${name}" with (force)`);
@@ -151,13 +157,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     expect(metrics.bridges).toEqual([
       { bridge_version: "0.1.0", os: "windows", devices: 1, requests: 4, errors: { upload_failed: 2, locate_failed: 1 } },
     ]);
-    const parse = { kit: "wow", kit_version: "0.1.0" };
-    expect(metrics.parses).toEqual([
-      { ...parse, version_total: true, adapter_schema: null, flavor: null, uploads: 3, failed: 1 },
-      { ...parse, version_total: false, adapter_schema: null, flavor: null, uploads: 1, failed: 1 },
-      { ...parse, version_total: false, adapter_schema: 1, flavor: "classic_era", uploads: 1, failed: 0 },
-      { ...parse, version_total: false, adapter_schema: 1, flavor: "tbc_classic", uploads: 1, failed: 0 },
-    ]);
+    expect(metrics.parses).toEqual([{ kit: "wow", kit_version: "0.1.0", uploads: 3, failed: 1 }]);
     expect(metrics.unsupported_flavors).toEqual([{ kit: "wow", flavor: "tbc_classic", rejections: 1, users: 1 }]);
     expect(metrics.snapshot_age).toEqual([
       { tool: "wow_get_state", reads: 2, p50: expect.closeTo(150), p90: expect.closeTo(190), p99: expect.closeTo(199) },
@@ -165,8 +165,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     expect(metrics.tools).toEqual([
       { tool: "fetch_game_page", calls: 1, errors: 1, with_sections: 0 },
       { tool: "list_games", calls: 1, errors: 1, with_sections: 0 },
-      { tool: "search_game_info", calls: 3, errors: 0, with_sections: 0 },
-      { tool: "wow_get_state", calls: 2, errors: 0, with_sections: 1 },
+      { tool: "search_game_info", calls: 4, errors: 1, with_sections: 0 },
+      { tool: "wow_get_state", calls: 3, errors: 1, with_sections: 1 },
     ]);
     expect(metrics.sections).toEqual([
       { tool: "wow_get_state", section: "location", calls: 1 },
@@ -174,10 +174,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     ]);
     expect([...metrics.grounding].sort((a, b) => a.agent_client.localeCompare(b.agent_client))).toEqual([
       { agent_client: "DCR: Test agent", visits: 1, read_state: 1, read_state_no_search: 1 },
-      { agent_client: CIMD_CLIENT, visits: 1, read_state: 1, read_state_no_search: 0 },
+      { agent_client: CIMD_CLIENT, visits: 2, read_state: 1, read_state_no_search: 0 },
     ]);
     expect(metrics.search).toEqual({
-      active_users: 1,
+      active_users: 2,
       lookups: 3,
       hits: 1,
       credits: 4,

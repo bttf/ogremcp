@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler, type Express } from "express";
 import type Provider from "oidc-provider";
 
-import { adminRouter } from "./admin.js";
+import { type AdminOptions, adminRouter } from "./admin.js";
 import { apiRouter } from "./api.js";
 import { type AuthOptions, authRouter } from "./auth.js";
 import { bridgeApiRouter } from "./bridge-api.js";
@@ -74,10 +74,11 @@ export interface AppOptions {
    */
   toolCallCaps?: ToolCallCaps;
   /**
-   * `ADMIN_USER_UUIDS`: the users who may read `auth`'s Admin API (§13.2,
-   * `admin.ts`). Default: none.
+   * The Admin API of `auth`'s web UI (§13.2, `admin.ts`): its own pool, from
+   * `createAdminPool`, and `ADMIN_USER_UUIDS`. Default: none, and its path
+   * answers 404 as any other path that does not exist.
    */
-  adminUserUuids?: readonly string[];
+  admin?: AdminOptions;
   /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
   https?: boolean;
   /**
@@ -106,7 +107,7 @@ export function createApp({
   ingestLog,
   events,
   toolCallCaps,
-  adminUserUuids = [],
+  admin,
   https = false,
   trustProxyHops = 0,
   log = logger.error,
@@ -137,7 +138,7 @@ export function createApp({
     if (oidc !== undefined) mountOidc(app, oidc, auth.pool);
     app.use(authRouter(auth));
     // Before `apiRouter`, whose last route answers every other `/api` path.
-    app.use(adminRouter({ pool: auth.pool, adminUserUuids }));
+    if (admin !== undefined) app.use(adminRouter(admin));
     app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl }));
   }
   // Last: it answers page loads that no route above took.

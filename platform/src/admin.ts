@@ -1,6 +1,7 @@
 import express, { type Router } from "express";
 import type { Pool, PoolClient } from "pg";
 
+import { createPool } from "./db.js";
 import { DEFAULT_VISIT_GAP_MINUTES, VISITS_SQL } from "./events.js";
 import { fetchGamePage } from "./fetch-game-page.js";
 import { searchGameInfo } from "./search-game-info.js";
@@ -12,12 +13,13 @@ import { currentUser } from "./web-sessions.js";
  * window of the last `days` days. The web UI's Admin page shows them.
  *
  * - Only the users in `ADMIN_USER_UUIDS` may read them. The API checks the
- *   list on every request, and answers anyone else, signed in or not, the
- *   same 404 as a path that does not exist.
+ *   list on every request. Anyone else, signed in or not, gets no data and
+ *   the same 404 as a path that does not exist.
  * - One SQL query per §16.1 row, and one for storage. Each is parameterized
- *   and bounded by a LIMIT. They run one after another on one connection, in
- *   a read-only transaction, so every metric reads the same snapshot, under
- *   a `statement_timeout`.
+ *   and bounded by a LIMIT. They run one after another in a read-only
+ *   transaction, so every metric reads the same snapshot, on a pool of their
+ *   own (`createAdminPool`): one connection, which no request needs, and a
+ *   `statement_timeout`.
  * - Aggregates only. No answer holds a user's uuid, a device's, or any other
  *   row's id. Search queries and issue notes are user data (§16.2), shown to
  *   admins only: queries cut to `QUERY_CHARS`, notes as the agent wrote them,
@@ -52,12 +54,16 @@ const NOTES = 50;
 /** The characters shown of a DCR client's registered name. */
 const CLIENT_NAME_CHARS = 60;
 
-/** The server cancels one query that runs longer, in milliseconds. */
-const STATEMENT_TIMEOUT_MS = 5_000;
+/**
+ * The admin pool's connections, how long a request waits for its connection
+ * while another request's queries run, and the server's timeout of one
+ * query, in milliseconds.
+ */
+export const ADMIN_POOL = { max: 1, connectionTimeoutMs: 10_000, statementTimeoutMs: 5_000 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The platform tools. A visit that called any other tool, a kit tool, read state. */
+/** The platform tools. A visit whose call of any other tool, a kit tool, succeeded read state. */
 const PLATFORM_TOOL_NAMES = PLATFORM_TOOLS.map((tool) => tool.name);
 
 /** The tools that ground an answer in search results (§12). */
@@ -115,29 +121,23 @@ select v.bridge_version, v.os, v.devices, v.requests, coalesce(c.errors, '{}'::j
  order by v.requests desc, v.bridge_version, v.os`;
 
 /**
- * Ingest (§16.1): parsed uploads by kit version, and within it by adapter
- * schema and flavor. `version_total` marks a kit version's own row. A failed parse has no
- * adapter schema or flavor, so its uploads count under null for both.
- * `uploads` counts every parse: parsed, failed, and rejected.
+ * Ingest (§16.1): parsed uploads by kit version. `uploads` counts every
+ * parse: parsed, failed, and rejected. A failed parse does not record its
+ * adapter schema or flavor yet, so the rate is by kit version only.
  */
 export interface ParseRow {
   kit: string | null;
   kit_version: string | null;
-  version_total: boolean;
-  adapter_schema: number | null;
-  flavor: string | null;
   uploads: number;
   failed: number;
 }
 
 const PARSES_SQL = `
-select kit, kit_version, grouping(adapter_schema, flavor) <> 0 as version_total, adapter_schema, flavor,
-       count(*)::int as uploads,
-       (count(*) filter (where parse_status = 'failed'))::int as failed
+select kit, kit_version, count(*)::int as uploads, (count(*) filter (where parse_status = 'failed'))::int as failed
   from events
  where kind = 'ingest' and tool is null and occurred_at >= $1 and occurred_at < $2 and parse_status is not null
- group by grouping sets ((kit, kit_version), (kit, kit_version, adapter_schema, flavor))
- order by kit, kit_version, grouping(adapter_schema, flavor) desc, adapter_schema nulls first, flavor nulls first
+ group by kit, kit_version
+ order by kit, kit_version
  limit $3`;
 
 /** Ingest (§16.1): `unsupported_flavor` answers by kit and flavor. */
@@ -207,9 +207,10 @@ select e.tool, s.section, count(*)::int, (count(*) filter (where e.error is not 
 
 /**
  * Grounding (§16.1): visits (§3) by agent client. `read_state` counts the
- * visits that called a kit tool, and `read_state_no_search` those of them
- * that called neither `search_game_info` nor `fetch_game_page`. A visit of
- * two agent clients counts for each.
+ * visits with a kit tool call that succeeded, and `read_state_no_search`
+ * those of them with no `search_game_info` or `fetch_game_page` call that
+ * succeeded. A call that answered an error, such as `cap_reached` or
+ * `game_off`, is neither. A visit of two agent clients counts for each.
  */
 export interface GroundingRow {
   agent_client: string;
@@ -225,8 +226,8 @@ select label as agent_client, sum(visits)::int as visits, sum(read_state)::int a
     select ${agentLabel("c.agent_client")} as label, c.visits, c.read_state, c.read_state_no_search
       from (
         select a.agent_client, count(*) as visits,
-               count(*) filter (where not (v.tools <@ $4::text[])) as read_state,
-               count(*) filter (where not (v.tools <@ $4::text[]) and not (v.tools && $5::text[])) as read_state_no_search
+               count(*) filter (where not (v.succeeded_tools <@ $4::text[])) as read_state,
+               count(*) filter (where not (v.succeeded_tools <@ $4::text[]) and not (v.succeeded_tools && $5::text[])) as read_state_no_search
           from (${VISITS_SQL}) v
          cross join lateral unnest(v.agent_clients) as a(agent_client)
          group by a.agent_client
@@ -381,7 +382,6 @@ export async function adminMetrics(pool: Pool, { days, now = new Date() }: { day
   let failed: Error | undefined;
   try {
     await client.query("begin isolation level repeatable read read only");
-    await client.query("select set_config('statement_timeout', $1, true)", [String(STATEMENT_TIMEOUT_MS)]);
 
     const bridges = await rows<BridgeRow>(client, BRIDGES_SQL, [...window, ROWS, COUNTERS]);
     const parses = await rows<ParseRow>(client, PARSES_SQL, [...window, ROWS]);
@@ -439,6 +439,23 @@ export async function adminMetrics(pool: Pool, { days, now = new Date() }: { day
   }
 }
 
+/**
+ * The Admin API's own pool: `ADMIN_POOL.max` connections, so that its long
+ * queries never hold a connection a request needs, and a
+ * `statement_timeout`. `index.ts` makes it from `DATABASE_URL`.
+ */
+export function createAdminPool({ url, log }: { url: string; log?: (line: string) => void }): Pool {
+  return createPool({
+    url,
+    max: ADMIN_POOL.max,
+    connectionTimeoutMs: ADMIN_POOL.connectionTimeoutMs,
+    statementTimeoutMs: ADMIN_POOL.statementTimeoutMs,
+    // The client stops waiting shortly after the server cancels.
+    queryTimeoutMs: ADMIN_POOL.statementTimeoutMs + 1_000,
+    ...(log !== undefined && { log }),
+  });
+}
+
 /** `days` of the query string: a whole number from 1 to `MAX_ADMIN_WINDOW_DAYS`, or null. Absent, the default. */
 function windowDays(value: unknown): number | null {
   if (value === undefined) return DEFAULT_ADMIN_WINDOW_DAYS;
@@ -448,6 +465,7 @@ function windowDays(value: unknown): number | null {
 }
 
 export interface AdminOptions {
+  /** `createAdminPool`'s, not the one requests use. */
   pool: Pool;
   /** `ADMIN_USER_UUIDS`: the `users.uuid` of the users who may read the metrics. Empty: nobody. */
   adminUserUuids: readonly string[];
@@ -463,9 +481,9 @@ export interface AdminOptions {
  *   (default `DEFAULT_ADMIN_WINDOW_DAYS`). Another value answers 400
  *   `invalid_days`.
  *
- * A request from anyone but an admin, signed in or not, answers 404
- * `not_found`, as `apiRouter` answers a path that does not exist, so the
- * page's existence is not revealed. Every answer is `no-store`.
+ * A request from anyone but an admin, signed in or not, gets no data: it
+ * answers 404 `not_found`, as `apiRouter` answers a path that does not
+ * exist. Every answer is `no-store`.
  */
 export function adminRouter({ pool, adminUserUuids }: AdminOptions): Router {
   const admins = new Set(adminUserUuids);

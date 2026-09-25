@@ -7,15 +7,7 @@ import { NotFound } from "./NotFound.js";
 export interface AdminMetrics {
   window: { days: number; since: string; until: string };
   bridges: { bridge_version: string | null; os: string | null; devices: number; requests: number; errors: Record<string, number> }[];
-  parses: {
-    kit: string | null;
-    kit_version: string | null;
-    version_total: boolean;
-    adapter_schema: number | null;
-    flavor: string | null;
-    uploads: number;
-    failed: number;
-  }[];
+  parses: { kit: string | null; kit_version: string | null; uploads: number; failed: number }[];
   unsupported_flavors: { kit: string | null; flavor: string | null; rejections: number; users: number }[];
   snapshot_age: { tool: string; reads: number; p50: number; p90: number; p99: number }[];
   tools: { tool: string; calls: number; errors: number; with_sections: number }[];
@@ -41,10 +33,14 @@ const WINDOWS = [1, 7, 30] as const;
 /** `DEFAULT_ADMIN_WINDOW_DAYS` in `platform/src/admin.ts`. */
 const DEFAULT_WINDOW = 7;
 
-/** The metrics of the last `days` days, `not-found` for anyone but an admin, or null when the service did not answer them. */
-async function loadMetrics(days: number): Promise<AdminMetrics | "not-found" | null> {
+/**
+ * The metrics of the last `days` days, `not-found` for anyone but an admin,
+ * or null when the service did not answer them or `signal` aborted the
+ * request.
+ */
+async function loadMetrics(days: number, signal: AbortSignal): Promise<AdminMetrics | "not-found" | null> {
   try {
-    const res = await fetch(`/api/v1/admin/metrics?days=${days}`, { headers: { Accept: "application/json" } });
+    const res = await fetch(`/api/v1/admin/metrics?days=${days}`, { headers: { Accept: "application/json" }, signal });
     if (res.status === 404) return "not-found";
     if (!res.ok) return null;
     return (await res.json()) as AdminMetrics;
@@ -109,9 +105,10 @@ function Table({ head, rows }: { head: string[]; rows: (string | number)[][] }) 
 
 /**
  * The Admin page (§13.2): the §16.1 metrics and the storage volume (§11) of
- * the last day, 7 days, or 30 days. It is read-only. For anyone but an admin
- * the API answers 404, and the page is the Page not found page, so it does
- * not say that it exists. Nothing on it names a user.
+ * the last day, 7 days, or 30 days. It is read-only. Anyone but an admin gets
+ * no data: the API answers 404, and the page shows the Page not found page,
+ * as at a path that does not exist. Nothing on it names a user. A new window
+ * aborts the request of the one before.
  */
 export function Admin() {
   const [days, setDays] = useState<number>(DEFAULT_WINDOW);
@@ -120,10 +117,10 @@ export function Admin() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const request = new AbortController();
     setStatus("loading");
-    void loadMetrics(days).then((loaded) => {
-      if (cancelled) return;
+    void loadMetrics(days, request.signal).then((loaded) => {
+      if (request.signal.aborted) return;
       if (loaded === "not-found" || loaded === null) {
         setStatus(loaded === null ? "error" : "not-found");
         return;
@@ -131,9 +128,7 @@ export function Admin() {
       setMetrics(loaded);
       setStatus("ready");
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => request.abort();
   }, [days]);
 
   if (status === "not-found") return <NotFound />;
@@ -180,15 +175,13 @@ function Metrics({ metrics }: { metrics: AdminMetrics }) {
         ])}
       />
 
-      <h2>Parse errors</h2>
-      <p className="og-hint">Parsed uploads by kit version, then by adapter schema and flavor. A failed parse has neither.</p>
+      <h2>Parse errors by kit version</h2>
+      <p className="og-hint">A failed parse does not record its adapter schema or flavor yet, so the rate is by kit version only.</p>
       <Table
-        head={["Kit", "Kit version", "Adapter schema", "Flavor", "Uploads", "Failed", "Rate"]}
+        head={["Kit", "Kit version", "Uploads", "Failed", "Rate"]}
         rows={metrics.parses.map((row) => [
           row.kit ?? "none",
           row.kit_version ?? "none",
-          row.version_total ? "all" : (row.adapter_schema?.toString() ?? "none"),
-          row.version_total ? "all" : (row.flavor ?? "none"),
           row.uploads,
           row.failed,
           percent(row.failed, row.uploads),
@@ -219,7 +212,8 @@ function Metrics({ metrics }: { metrics: AdminMetrics }) {
 
       <h2>Grounding</h2>
       <p className="og-hint">
-        Visits by agent client. Read state: called a game&apos;s tool. Searched: called search_game_info or fetch_game_page.
+        Visits by agent client. Read state: a call of a game&apos;s tool succeeded. Searched: a call of search_game_info or
+        fetch_game_page succeeded.
       </p>
       <Table
         head={["Agent client", "Visits", "Read state", "Read state, never searched", "Share"]}
