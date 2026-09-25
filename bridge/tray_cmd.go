@@ -25,7 +25,8 @@ import (
 
 // runTray runs the bridge as a tray app (§7): an icon in the macOS menu bar or
 // the Windows notification area, with a menu that shows the status and offers
-// the login, the folder picker, and start at login. It logs to a file
+// the login, the folder picker, the server (§13.3), and start at login. It
+// logs to a file
 // (package logfile), and returns the exit status. On macOS it needs cgo; see
 // tray_nocgo.go.
 //
@@ -63,32 +64,46 @@ func runTray() int {
 	}
 	defer held.Release()
 
-	client, base, err := newClient()
-	if err != nil {
-		logger.Error("could not start", "error", err.Error())
-		alert("Open Gamer MCP could not start: " + err.Error())
-		return 1
-	}
-	settingsPath, err := config.DefaultPath()
-	var settings config.File
-	if err == nil {
-		settings, err = config.Load(settingsPath)
-	}
+	settings, settingsPath, err := loadSettings()
 	if err != nil {
 		logger.Error("could not read the settings file", "error", err.Error())
 		alert("Open Gamer MCP could not read its settings file: " + err.Error())
 		return 1
 	}
+	client, base, err := newClient(settings)
+	if err != nil {
+		// A server URL the bridge refuses: it does not fall back to the
+		// hosted service.
+		logger.Error("could not start", "error", err.Error())
+		msg := "Open Gamer MCP could not start: " + err.Error()
+		if os.Getenv(config.EnvServerURL) == "" {
+			cmd := "ogmcp-bridge"
+			if exe, err := executable(); err == nil {
+				cmd = `"` + exe + `"`
+			}
+			msg += "\n\nCorrect server_url in " + settingsPath + ", or run " + cmd + " server reset to use the hosted service."
+		}
+		alert(msg)
+		return 1
+	}
 	return runMenu(logger, logPath, &tray.Controller{
-		Base:         base,
-		Version:      version,
-		Auth:         client,
+		Base:    base,
+		Version: version,
+		Auth:    client,
+		NewAuth: func(base string) (tray.Auth, error) {
+			client, err := newAuth(base)
+			if err != nil {
+				return nil, err
+			}
+			return client, nil
+		},
 		Settings:     settings,
 		SettingsPath: settingsPath,
 		Model:        &tray.Model{},
 		Log:          logger,
 		Open:         openBrowser,
 		PickFolder:   pickFolder,
+		AskServer:    askServer,
 	})
 }
 
@@ -156,6 +171,7 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 	ui.login.Hide()
 	ui.folder = systray.AddMenuItem(tray.TitleChooseFolder, "")
 	ui.folder.Hide()
+	server := systray.AddMenuItem(tray.TitleServer, "")
 	ui.autostart = systray.AddMenuItemCheckbox(tray.TitleAutostart, "", false)
 	systray.AddSeparator()
 	quit := systray.AddMenuItem(tray.TitleQuit, "")
@@ -192,6 +208,8 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 				ctl.Login(ctx)
 			case <-ui.folder.ClickedCh:
 				ctl.ChooseFolder()
+			case <-server.ClickedCh:
+				ctl.ChangeServer(ctx)
 			case <-ui.autostart.ClickedCh:
 				ctl.ToggleAutostart()
 			case <-quit.ClickedCh:
