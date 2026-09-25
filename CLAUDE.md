@@ -130,6 +130,9 @@ unreachable.
 - `pnpm --filter @ogmcp/platform migrate [--dry-run]`: after a build, apply the
   pending migrations to `DATABASE_URL`, or only list them. For a local
   database; production migrates on deploy.
+- `pnpm --filter @ogmcp/platform reparse [--dry-run]`: after a build, re-parse
+  the stored uploads of `DATABASE_URL` with the current kits (§11); options
+  in `platform/src/reparse.ts`. Not part of the deploy.
 - `pnpm -s --filter @ogmcp/platform gen-oidc-keys`: after a build, print fresh
   values for `OIDC_JWKS` and `OIDC_COOKIE_KEYS`, the OAuth server's keys, as
   `KEY=value` lines for Railway or `platform/.env`. They are secrets. `-s`

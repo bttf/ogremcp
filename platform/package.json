@@ -10,6 +10,7 @@
     "dev:web": "vite web",
     "start": "node --env-file-if-exists=.env dist/index.js",
     "migrate": "node --env-file-if-exists=.env dist/migrate.js",
+    "reparse": "node --env-file-if-exists=.env dist/reparse.js",
     "gen-oidc-keys": "node dist/gen-oidc-keys.js",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "test": "vitest run --passWithNoTests"
