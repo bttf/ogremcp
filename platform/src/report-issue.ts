@@ -19,13 +19,14 @@ import type { PlatformTool } from "./tools.js";
  *   when it succeeded), as the events row holds them. The call's own row is
  *   written after it answers, so it is not among them. Events rows are
  *   written without waiting, so a call made a moment before can be missing.
- * - The snapshot the agent read most recently: the newest snapshot of `game`
- *   that one of the attached calls returned (`events.snapshot_uuid`), by its
- *   uuid and `snapshot_at`. The row holds none of its state. A snapshot read
- *   only before the attached calls is not named.
+ * - The snapshot the agent read most recently: of the attached calls that
+ *   returned a snapshot of `game` (`events.snapshot_uuid`), the most recent
+ *   call's snapshot, by its uuid and `snapshot_at`. The row holds none of its
+ *   state. A snapshot read only before the attached calls is not named.
  *
  * `game` must be one of the user's enabled games. `note` is trimmed and
- * holds 1 to `NOTE_MAX_CHARS` characters. A user records at most
+ * holds 1 to `NOTE_MAX_CHARS` characters, and no U+0000, which Postgres
+ * text cannot hold. A user records at most
  * `REPORT_ISSUE_MAX_PER_DAY` reports in 24 hours (*proposed*), so an agent
  * that loops cannot fill the table. Past it, and on a bad argument, the call
  * answers a `userError` (§10.5). A lock on the user's row orders the user's
@@ -188,6 +189,7 @@ function readInput(args: unknown): Input | string {
   if (typeof game !== "string" || game === "") return "game must be a game key, as list_games returns it.";
   const trimmed = typeof note === "string" ? note.trim() : "";
   if (trimmed === "") return "note must say what went wrong, in a sentence or two.";
+  if (trimmed.includes("\u0000")) return "note must be plain text, without NUL characters.";
   // Characters as Postgres and JSON Schema count them: code points.
   if ([...trimmed].length > NOTE_MAX_CHARS) return `note must be at most ${NOTE_MAX_CHARS} characters. Say what went wrong in a sentence or two.`;
   return { game, note: trimmed };

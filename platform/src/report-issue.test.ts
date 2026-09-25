@@ -140,16 +140,19 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => 
     expect(JSON.stringify(issue)).not.toContain("someone else");
   });
 
-  it("refuses a game that is not enabled, and an empty or oversized note", async () => {
-    const tools = createToolRegistry({ pool, kits: KITS, events });
+  it("refuses a game that is not enabled, and an empty, oversized, or NUL note", async () => {
+    // A refusal is a user error: nothing reaches the failure log.
+    const failures: string[] = [];
+    const tools = createToolRegistry({ pool, kits: KITS, events, log: (line) => failures.push(line) });
     const user = await player(false);
 
     const off = await tools.call(user.caller, "report_issue", { game: "wow", note: "Wrong zone." });
     expect(off).toMatchObject({ isError: true, content: [{ text: NOT_ENABLED_MESSAGE }] });
     await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [user.id]);
-    for (const note of ["   ", "x".repeat(NOTE_MAX_CHARS + 1), undefined]) {
+    for (const note of ["   ", "x".repeat(NOTE_MAX_CHARS + 1), "Wrong\u0000zone.", undefined]) {
       expect(await tools.call(user.caller, "report_issue", { game: "wow", note })).toMatchObject({ isError: true });
     }
+    expect(failures).toEqual([]);
     expect(await issuesOf(user.id)).toEqual([]);
   });
 
