@@ -40,7 +40,7 @@ function call(
   games: readonly Kit[] = [WOW],
   settings: ToolContextSettings = DEFAULT_TOOL_CONTEXT,
 ): Promise<ToolResult> {
-  return fetchGamePage.handler(args, { pool: {} as Pool, user: USER, games, settings, search: null, fetchPage });
+  return fetchGamePage.handler(args, { pool: {} as Pool, user: USER, games, settings, search: null, fetchPage, event: {} });
 }
 
 describe("fetch_game_page (§10.3, §12)", () => {

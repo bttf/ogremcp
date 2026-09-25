@@ -30,6 +30,9 @@ import { UserFacingError } from "./tool-context.js";
  *
  * An unknown tool name is not a result: `mcp.ts` answers it with the
  * protocol error -32602.
+ *
+ * Each call's answer also names its `ToolCallError`, which the events table
+ * records (§16): a category, never the message.
  */
 
 /** What the agent gets when a tool call fails for a reason it cannot act on. */
@@ -41,30 +44,49 @@ export const TOO_LARGE_MESSAGE = "The result is too large to send in one call. C
 /** The fields of every kit tool result (§10.5). */
 export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] as const;
 
+/**
+ * Why a call answered an `isError` result (§16):
+ *
+ * - `user_error`: a user-facing condition, such as a bad argument or no
+ *   snapshot yet.
+ * - `game_off`: a tool of a game the user has turned off.
+ * - `too_large`: a kit tool result over the size cap.
+ * - `no_envelope_field`: a kit tool result without an envelope field.
+ * - `failed`: the handler threw an error that is not user-facing.
+ * - `no_sources` and `search_unavailable`: search_game_info's (§12).
+ */
+export type ToolCallError = "user_error" | "game_off" | "too_large" | "no_envelope_field" | "failed" | "no_sources" | "search_unavailable";
+
+/** What a call answers, and why it is an error, or null when it is not one. */
+export interface ToolAnswer {
+  result: ToolResult;
+  error: ToolCallError | null;
+}
+
 type Log = (line: string) => void;
 
 /** What a kit tool call answers with its handler's `result`. */
-export function kitToolResult(result: ToolResult, tool: string, maxResultBytes: number, log: Log): ToolResult {
-  if (result.isError === true) return result;
+export function kitToolResult(result: ToolResult, tool: string, maxResultBytes: number, log: Log): ToolAnswer {
+  if (result.isError === true) return { result, error: "user_error" };
   const data = result.structuredContent;
   if (data === undefined || ENVELOPE_FIELDS.some((field) => data[field] === undefined)) {
     log(`tool call failed: tool=${tool} code=NO_ENVELOPE_FIELD`);
-    return userError(TOOL_FAILED_MESSAGE);
+    return { result: userError(TOOL_FAILED_MESSAGE), error: "no_envelope_field" };
   }
   const text = JSON.stringify(data);
   const bytes = utf8Length(text);
   if (bytes > maxResultBytes) {
     log(`tool result over the size cap: tool=${tool} bytes=${bytes}`);
-    return userError(TOO_LARGE_MESSAGE);
+    return { result: userError(TOO_LARGE_MESSAGE), error: "too_large" };
   }
-  return { content: [{ type: "text", text }], structuredContent: data };
+  return { result: { content: [{ type: "text", text }], structuredContent: data }, error: null };
 }
 
 /** What a call answers when the handler of `tool` threw `err`. */
-export function errorResult(err: unknown, tool: string, log: Log): ToolResult {
-  if (err instanceof UserFacingError) return userError(err.message);
+export function errorResult(err: unknown, tool: string, log: Log): ToolAnswer {
+  if (err instanceof UserFacingError) return { result: userError(err.message), error: "user_error" };
   log(`tool call failed: tool=${tool} code=${failureCode(err)}`);
-  return userError(TOOL_FAILED_MESSAGE);
+  return { result: userError(TOOL_FAILED_MESSAGE), error: "failed" };
 }
 
 /** What a call to a tool of the game `gameName` answers when the user has turned the game off. */

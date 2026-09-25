@@ -2,6 +2,7 @@ import express, { type RequestHandler, type Response, type Router } from "expres
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
 
+import type { EventRecorder } from "./events.js";
 import { DEFAULT_INGEST, ingestHandler, type IngestSettings } from "./ingest.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { currentToken, requireToken, resourcesOf } from "./oidc-tokens.js";
@@ -92,9 +93,11 @@ export interface BridgeApiOptions {
   ingest?: IngestSettings;
   /** The ingest endpoint's log (`IngestOptions.log`). */
   ingestLog?: (line: string) => void;
+  /** Where each ingest request's events row goes (`IngestOptions.events`). */
+  events?: EventRecorder;
 }
 
-export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = DEFAULT_INGEST, ingestLog }: BridgeApiOptions): Router {
+export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = DEFAULT_INGEST, ingestLog, events }: BridgeApiOptions): Router {
   const router = express.Router();
   const requireIngest = requireToken({ provider, resource: resourcesOf(new URL(publicBaseUrl).origin).bridge, scope: "ingest" });
   const noStore: RequestHandler = (_req, res, next) => {
@@ -156,7 +159,7 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
     }),
   );
 
-  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest, log: ingestLog }));
+  router.post("/api/v1/ingest", noStore, requireIngest, ingestHandler({ pool, kits, settings: ingest, log: ingestLog, events }));
 
   return router;
 }

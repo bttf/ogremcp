@@ -65,12 +65,20 @@ export interface SearchHit {
   excerpt: string;
 }
 
+/** What one search cost, for the events table (§16). The `ScopedSearch` sets it as it runs. */
+export interface SearchUsage {
+  /** The Firecrawl credits the search used, when Firecrawl said. */
+  searchCredits?: number;
+  /** Whether the search cache answered (§12). */
+  cacheHit?: boolean;
+}
+
 /**
  * Searches `scope` for `query`, a `normalizeQuery` result. Answers the hits
- * in scope, at most `MAX_RESULTS`. Throws a `FirecrawlError` when the
- * provider fails.
+ * in scope, at most `MAX_RESULTS`, and sets what the search cost on `usage`.
+ * Throws a `FirecrawlError` when the provider fails.
  */
-export type ScopedSearch = (scope: SearchScope, query: string) => Promise<SearchHit[]>;
+export type ScopedSearch = (scope: SearchScope, query: string, usage?: SearchUsage) => Promise<SearchHit[]>;
 
 /** The scope of `flavor` of `kit`, from the flavor's `search` prefixes. A prefix that does not parse is left out: no URL could match it. */
 export function searchScope(kit: string, flavor: string, prefixes: readonly string[]): SearchScope {
@@ -175,26 +183,29 @@ export function plainText(snippet: string): string {
 }
 
 /**
- * The `ScopedSearch` on Firecrawl: one request per call. Each call writes one
- * log line with the kit, flavor, hit counts, and time, or the failure's
+ * The `ScopedSearch` on Firecrawl: one request per call. It sets the credits
+ * Firecrawl says the search used on `usage`. Each call writes one log line
+ * with the kit, flavor, hit counts, credits, and time, or the failure's
  * reason and status. Never the query: the line carries the user's uuid, and
  * a query can hold a character's name.
  */
 export function firecrawlScopedSearch(options: FirecrawlOptions): ScopedSearch {
-  return async (scope, query) => {
+  return async (scope, query, usage) => {
     const started = performance.now();
     const fields = { kit: scope.kit, flavor: scope.flavor };
     let hits: FirecrawlHit[];
+    let credits: number | null;
     try {
-      hits = await firecrawlSearch(options, providerQuery(query, scope.prefixes), PROVIDER_LIMIT);
+      ({ hits, creditsUsed: credits } = await firecrawlSearch(options, providerQuery(query, scope.prefixes), PROVIDER_LIMIT));
     } catch (err) {
       if (err instanceof FirecrawlError) {
         logger[failureLevel(err)]("search failed", { ...fields, reason: err.reason, status: err.status, duration_ms: since(started) });
       }
       throw err;
     }
+    if (usage !== undefined && credits !== null) usage.searchCredits = credits;
     const selected = selectHits(hits, scope.prefixes);
-    logger.info("search", { ...fields, hits: hits.length, in_scope: selected.length, duration_ms: since(started) });
+    logger.info("search", { ...fields, hits: hits.length, in_scope: selected.length, credits, duration_ms: since(started) });
     return selected.slice(0, MAX_RESULTS);
   };
 }

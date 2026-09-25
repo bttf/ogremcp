@@ -8,6 +8,7 @@ import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";
 import type { Pool, PoolClient } from "pg";
 
+import type { EventRecorder, IngestEvent } from "./events.js";
 import { UploadLimiter } from "./ingest-limit.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { formatLine, writeLine } from "./log.js";
@@ -67,6 +68,15 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *
  * `snapshot_at` is the adapter's stamp (`Parsed.capturedAt`), else
  * `meta.mtime`, else the receipt time (§6.2).
+ *
+ * An answer writes one events row (`events.ts`, §16.1) after it is sent:
+ * the user, the device, the status, the latency, and what is known of the
+ * upload by then: `meta.client`, the kit and its version, and the parse's
+ * status, flavor, and adapter schema. `bad_request` and `rate_limited`
+ * answers write none, so a device that loops on them cannot grow the table;
+ * the access log has them. Nor does a 401, which names no live device. A
+ * request that fails with an error in step 4, such as an interpreter crash,
+ * writes one with status `error`, and the app answers 500.
  */
 
 /** The ingest limits (*proposed*, §0). `config.ts` reads them from the environment. */
@@ -202,24 +212,48 @@ export interface IngestOptions {
   settings: IngestSettings;
   /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log, at `warn`. */
   log?: (line: string) => void;
+  /** Where each request's events row goes (§16.1). Default: none, and nothing is recorded. */
+  events?: EventRecorder;
 }
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
-export function ingestHandler({ pool, kits, settings, log = (line) => writeLine("warn", line) }: IngestOptions): RequestHandler {
+export function ingestHandler({
+  pool,
+  kits,
+  settings,
+  log = (line) => writeLine("warn", line),
+  events,
+}: IngestOptions): RequestHandler {
   const limiter = new UploadLimiter(settings);
   return async (req, res) => {
+    const occurredAt = new Date();
+    const started = performance.now();
     const token = currentToken(res);
     const device = token === null ? undefined : await findDevice(pool, token);
     if (device === undefined) return refuseDevice(res);
 
+    /** `meta`, once checked. */
+    let checked: CheckedMeta | null = null;
+    /** Records the request with `status`. */
+    const record = (status: IngestEvent["status"], parse: UploadParse | null): void => {
+      events?.record(ingestEvent(device, occurredAt, performance.now() - started, status, checked, parse));
+    };
+    /** Sends the answer, then records the request, unless it is a refusal a looping device can repeat. */
+    const finish = (outcome: Outcome, parse: UploadParse | null = null): void => {
+      reply(req, res, outcome);
+      const { status } = outcome.answer;
+      if (status !== "bad_request" && status !== "rate_limited") record(status, parse);
+    };
+
     // The limit's key is in `meta`, so it is taken as `meta` is read, before the file part.
     const parts = await readParts(req, maxCompressedBytes(settings.maxBytes), (text) => {
-      const checked = checkMeta(text, kits);
-      if ("http" in checked) return checked;
-      const wait = limiter.take(device.id, uploadKey(device, checked));
-      return wait > 0 ? rateLimited(wait) : checked;
+      const result = checkMeta(text, kits);
+      if ("http" in result) return result;
+      checked = result;
+      const wait = limiter.take(device.id, uploadKey(device, result));
+      return wait > 0 ? rateLimited(wait) : result;
     });
-    if ("http" in parts) return reply(req, res, parts);
+    if ("http" in parts) return finish(parts);
     const meta = parts.meta;
 
     let bytes: Buffer;
@@ -227,16 +261,50 @@ export function ingestHandler({ pool, kits, settings, log = (line) => writeLine(
       bytes = await decompress(parts.file, settings.maxBytes);
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;
-      if (code === "ERR_BUFFER_TOO_LARGE") return reply(req, res, tooLarge(`The file is over ${size(settings.maxBytes)} uncompressed.`));
-      return reply(req, res, badRequest("The file part is not gzip data."));
+      if (code === "ERR_BUFFER_TOO_LARGE") return finish(tooLarge(`The file is over ${size(settings.maxBytes)} uncompressed.`));
+      return finish(badRequest("The file part is not gzip data."));
     }
     if (createHash("sha256").update(bytes).digest("hex") !== meta.sha256) {
-      return reply(req, res, badRequest("meta.sha256 is not the SHA-256 of the uncompressed file."));
+      return finish(badRequest("meta.sha256 is not the SHA-256 of the uncompressed file."));
     }
 
-    const outcome = await store(pool, device, meta, parts.file, bytes, log);
-    if (outcome === null) return refuseDevice(res);
-    reply(req, res, outcome);
+    let stored: Awaited<ReturnType<typeof store>>;
+    try {
+      stored = await store(pool, device, meta, parts.file, bytes, log);
+    } catch (err) {
+      // An interpreter crash or a database failure. The app's error handler answers 500.
+      record("error", null);
+      throw err;
+    }
+    if (stored === null) return refuseDevice(res);
+    finish(stored.outcome, stored.parse);
+  };
+}
+
+/** The events row of a request of `device` with `status`. */
+function ingestEvent(
+  device: Device,
+  occurredAt: Date,
+  latencyMs: number,
+  status: IngestEvent["status"],
+  meta: CheckedMeta | null,
+  parse: UploadParse | null,
+): IngestEvent {
+  return {
+    kind: "ingest",
+    userId: device.userId,
+    deviceId: device.id,
+    occurredAt,
+    latencyMs,
+    status,
+    meta: meta && {
+      kit: meta.kit.key,
+      kitVersion: meta.kit.manifest.version,
+      bridgeVersion: meta.bridgeVersion,
+      os: meta.os,
+      errors: meta.errors,
+    },
+    parse,
   };
 }
 
@@ -412,8 +480,9 @@ function checkMeta(text: string, kits: KitRegistry): CheckedMeta | Outcome {
 }
 
 /**
- * Steps 4 and 5 of the module comment, in one transaction. Answers null when
- * the device was revoked since `findDevice`.
+ * Steps 4 and 5 of the module comment, in one transaction. Answers the
+ * outcome and how the upload parsed (null for a duplicate), or null when the
+ * device was revoked since `findDevice`.
  */
 async function store(
   pool: Pool,
@@ -422,7 +491,7 @@ async function store(
   gzipped: Buffer,
   bytes: Buffer,
   log: (line: string) => void,
-): Promise<Outcome | null> {
+): Promise<{ outcome: Outcome; parse: UploadParse | null } | null> {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -440,7 +509,7 @@ async function store(
     if (last.rows[0]?.sha256 === meta.sha256) {
       await touchDevice(client, device, meta, false);
       await client.query("commit");
-      return { http: 200, answer: { status: "duplicate" } };
+      return { outcome: { http: 200, answer: { status: "duplicate" } }, parse: null };
     }
 
     const result = parseUpload(meta.kit, meta.sourceId, bytes);
@@ -481,10 +550,13 @@ async function store(
     await client.query("commit");
     if (result.status === "rejected") {
       if (result.rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device.userUuid, meta.kit, uploadRow.uuid, result.parsed.unknownFlavor));
-      return { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } };
+      return {
+        outcome: { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } },
+        parse: result,
+      };
     }
-    if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: result.parseError ?? "" } };
-    return { http: 201, answer: { status: "stored", snapshot_uuid: snapshotUuid } };
+    if (snapshotUuid === undefined) return { outcome: { http: 422, answer: { status: "parse_error", message: result.parseError ?? "" } }, parse: result };
+    return { outcome: { http: 201, answer: { status: "stored", snapshot_uuid: snapshotUuid } }, parse: result };
   } catch (err) {
     await client.query("rollback").catch(() => {});
     throw err;

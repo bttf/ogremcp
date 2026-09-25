@@ -34,7 +34,8 @@ import type { ToolRegistry } from "./tools.js";
  *   get 405, as does every method other than POST. The body is at most
  *   `MAX_MCP_BODY_BYTES`. Every error on the route is a JSON-RPC error.
  * - `tools/list` and `tools/call` serve the tools of the token's user, from
- *   the tool registry (`tools.ts`, §10).
+ *   the tool registry (`tools.ts`, §10). A call's events row names the
+ *   token's OAuth client as the agent client (§16).
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
@@ -153,7 +154,7 @@ function createMcpServer(agent: VerifiedToken, tools: ToolRegistry, log: (line: 
     tools: await internal("tools/list", () => tools.list(agent.userUuid)),
   }));
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-    const result = await internal("tools/call", () => tools.call(agent.userUuid, params.name, params.arguments));
+    const result = await internal("tools/call", () => tools.call(agent, params.name, params.arguments));
     if (result === null) throw new McpError(ErrorCode.InvalidParams, "Unknown tool");
     return result;
   });

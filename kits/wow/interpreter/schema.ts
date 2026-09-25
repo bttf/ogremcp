@@ -114,8 +114,10 @@ export const locationSchema = z.object({
   /** UiMapID. `C_Map.GetBestMapForUnit("player")` returns nil in some places. */
   map_id: nilable(z.number().int().nonnegative()),
   /**
-   * `GetRealZoneText()`. It returns an empty string until the zone resolves
-   * after a loading screen, so an empty string is a real value.
+   * The name of the zone map that `map_id` lies in (`C_Map.GetMapInfo`), when
+   * the client gives a map ID in a zone. Otherwise `GetRealZoneText()`, which
+   * returns an empty string until the zone resolves after a loading screen,
+   * so an empty string is a real value.
    */
   zone: nilable(z.string()),
   /** `GetSubZoneText()`. An empty string when there is no subzone. */

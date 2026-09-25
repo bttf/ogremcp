@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
+import { createEventRecorder, createEventsPool } from "./events.js";
 import { type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { applyServerLimits, startServer } from "./listen.js";
 import { captureConsole, configureLogger, logger } from "./log.js";
@@ -138,6 +139,11 @@ const search = apiKey === null ? null : cachedSearch(firecrawlScopedSearch({ api
 const fetchPage = apiKey === null ? null : cachedPageFetch(firecrawlPageFetch({ apiKey, timeoutMs }), cache);
 logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecrawl, with the shared cache"}`);
 
+// The events table (§16): one row per tool call and ingest request, written
+// on a pool of its own, so that a slow or locked table never holds a
+// connection a request needs.
+const events = createEventRecorder({ pool: createEventsPool({ url: config.databaseUrl }) });
+
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
@@ -154,6 +160,7 @@ const app = createApp({
   fetchPage,
   bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
+  events,
   https,
   trustProxyHops: config.trustProxyHops,
 });

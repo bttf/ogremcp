@@ -199,6 +199,13 @@ local function DefaultWorld()
 			mapID = 1429, x = 0.4312, y = 0.6127, zone = "Test Forest", subzone = "Test Village",
 			facing = 3.1, inInstance = false,
 		},
+		-- What C_Map.GetMapInfo returns for a map ID. mapType is an
+		-- Enum.UIMapType value: 2 Continent, 3 Zone, 5 Micro. An ID not listed
+		-- returns nothing.
+		maps = {
+			[1429] = { name = "Test Forest", mapType = 3, parentMapID = 1415 },
+			[1415] = { name = "Test Continent", mapType = 2, parentMapID = 0 },
+		},
 		questLog = {
 			{ header = true, title = "Test Forest" },
 			{
@@ -480,6 +487,13 @@ local function InstallStubs()
 					return self.x, self.y
 				end,
 			}
+		end,
+		GetMapInfo = function(mapID)
+			local map = w.maps[mapID]
+			if not map then
+				return nil
+			end
+			return { mapID = mapID, name = map.name, mapType = map.mapType, parentMapID = map.parentMapID }
 		end,
 	}
 	G.GetRealZoneText = function()
@@ -1005,8 +1019,38 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(path[2].zone, "Test Cave", "the instance")
 	end)
 
+	test(client .. ": recent_path takes the zone from the map while the zone text names a building", function()
+		-- A login inside an inn: at first the zone text names the inn.
+		local function Inn(w)
+			w.loc.zone = "Test Inn"
+		end
+		Start(Setup(Inn))
+		EnterWorld()
+		local db = Logout()
+		eq(db.state.recent_path[1].zone, "Test Forest", "the first entry of the session")
+		eq(db.state.location.zone, "Test Forest", "location")
+
+		-- The same after a reload, until the zone text settles.
+		Start(Setup(Inn), WriteSavedVariables())
+		EnterWorld()
+		world.loc.zone = "Test Forest"
+		Advance(5)
+		local path = Logout().state.recent_path
+		eq(#path, 1, "entries")
+		eq(path[1].zone, "Test Forest", "the carried entry")
+
+		-- An entry written while the zone came from the zone text.
+		OpenGamerMCPDB.state.recent_path[1].zone = "Test Inn"
+		Start(Setup(), WriteSavedVariables())
+		EnterWorld()
+		eq(Logout().state.recent_path[1].zone, "Test Forest", "a carried building name")
+	end)
+
 	test(client .. ": recent_path keeps the zone of the entry before on a subzone change", function()
-		local ns = Start(Setup())
+		local ns = Start(Setup(function(w)
+			-- A map the client gives no info for, so the zone text names the zone.
+			w.loc.mapID = 2001
+		end))
 		EnterWorld()
 		Advance(ns.RECENT_PATH_MIN_INTERVAL)
 		-- Entering a building on the same map can name it as zone and subzone.
@@ -1044,6 +1088,16 @@ for _, client in ipairs({ "forever", "era" }) do
 	end)
 end
 
+test("location takes the zone above a micro map, and the zone text on a continent map", function()
+	local ns = Start(function(w)
+		w.maps[2001] = { name = "Test Mine", mapType = 5, parentMapID = 1429 }
+		w.loc.mapID, w.loc.zone = 2001, "Test Mine"
+	end)
+	eq(ns.CollectLocation().zone, "Test Forest", "the zone of a micro map")
+	world.loc.mapID, world.loc.zone = 1415, "Test Sea"
+	eq(ns.CollectLocation().zone, "Test Sea", "the zone text on a continent map")
+end)
+
 test("/transmit reloads the UI and is the only command", function()
 	Start()
 	eq(Keys(SlashCmdList), "OPENGAMERMCPTRANSMIT", "slash commands")
@@ -1070,6 +1124,7 @@ test("values the client marks secret are left out of the file", function()
 	for _, setup in ipairs({ false, Era() }) do
 		Start(setup or nil)
 		world.loc.facing = Secret()
+		world.maps[1429].name = Secret()
 		world.loc.zone = Secret()
 		world.char.guid = Secret()
 		world.questLog[2].objectives[1].text = Secret()
