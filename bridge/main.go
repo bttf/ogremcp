@@ -1,21 +1,33 @@
 // Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
-// Until the tray UI (P5), it has one development command:
+// Until the tray UI (P5), it has two development commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
+//	bridge kits     fetch the enabled kits' manifests (§8.2), locate each
+//	                game folder (§6.1), remember it, and print it
+//	    -root DIR   answer the folder prompt with DIR; without it the prompt
+//	                is skipped
+//	    -watch      keep running, and fetch and locate again every refresh
+//	                interval
 //
-// The server is OGMCP_BASE_URL, or the development default below.
+// The server is OGMCP_BASE_URL, or the development default below. The game
+// folders and the refresh interval are in the settings file (package config).
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 
 	"github.com/bttf/ogmcp/bridge/internal/auth"
+	"github.com/bttf/ogmcp/bridge/internal/config"
 	"github.com/bttf/ogmcp/bridge/internal/keychain"
+	"github.com/bttf/ogmcp/bridge/internal/kits"
+	"github.com/bttf/ogmcp/bridge/internal/locate"
 )
 
 // version is set by the build's ldflags: the bridge-v tag without its prefix,
@@ -36,22 +48,33 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Login failed:", err)
 			os.Exit(1)
 		}
+	case "kits":
+		if err := listKits(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bridge kits:", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge login")
+		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch]")
 		os.Exit(2)
 	}
 }
 
-func login() error {
+// newClient returns the auth client of the server and its base URL.
+func newClient() (*auth.Client, string, error) {
 	raw := os.Getenv("OGMCP_BASE_URL")
 	if raw == "" {
 		raw = defaultBaseURL
 	}
 	base, err := auth.ParseBaseURL(raw)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	client, err := auth.New(base, version, keychain.Entry{Account: base})
+	return client, base, err
+}
+
+func login() error {
+	client, base, err := newClient()
 	if err != nil {
 		return err
 	}
@@ -68,5 +91,89 @@ func login() error {
 		return err
 	}
 	fmt.Println("Logged in to", base+". The refresh token is in the OS keychain.")
+	return nil
+}
+
+// folderFlag answers the folder prompt with the -root flag.
+type folderFlag string
+
+func (f folderFlag) PickFolder(context.Context, string) (string, error) {
+	return string(f), nil
+}
+
+func listKits(args []string) error {
+	flags := flag.NewFlagSet("bridge kits", flag.ContinueOnError)
+	rootFlag := flags.String("root", "", "answer the folder prompt with this folder; without it the prompt is skipped")
+	watch := flags.Bool("watch", false, "keep running, and fetch and locate again every refresh interval")
+	if err := flags.Parse(args); errors.Is(err, flag.ErrHelp) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var prompter locate.Prompter
+	if *rootFlag != "" {
+		dir, err := filepath.Abs(*rootFlag)
+		if err != nil {
+			return err
+		}
+		prompter = folderFlag(dir)
+	}
+	client, base, err := newClient()
+	if err != nil {
+		return err
+	}
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	settings, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	env := locate.DefaultEnv()
+	show := func(list []kits.Kit, err error) {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
+			return
+		}
+		if len(list) == 0 {
+			fmt.Println("No kits are enabled for this account.")
+		}
+		for _, k := range list {
+			if k.Err != nil {
+				fmt.Printf("%s: %v\n", k.Kit, k.Err)
+				continue
+			}
+			root, err := locate.Root(ctx, k.Manifest.Root, settings.Roots[k.Kit], env, prompter)
+			if err != nil {
+				fmt.Printf("%s %s: %v\n", k.Kit, k.Manifest.Version, err)
+				continue
+			}
+			fmt.Printf("%s %s: %s\n", k.Kit, k.Manifest.Version, root)
+			if settings.Roots[k.Kit] != root {
+				if settings.Roots == nil {
+					settings.Roots = map[string]string{}
+				}
+				settings.Roots[k.Kit] = root
+				if err := config.Save(path, settings); err != nil {
+					fmt.Fprintln(os.Stderr, "Could not remember the game folder:", err)
+				}
+			}
+		}
+	}
+
+	api := kits.New(base, client)
+	if *watch {
+		kits.NewPoller(api, settings.Interval(), show).Run(ctx)
+		return nil
+	}
+	list, err := api.Fetch(ctx)
+	if err != nil {
+		return err
+	}
+	show(list, nil)
 	return nil
 }
