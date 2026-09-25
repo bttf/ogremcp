@@ -421,3 +421,53 @@ code {
   opacity: 0.6;
   cursor: default;
 }
+
+/* Get started and Connect your agent */
+
+.og-button--inline {
+  display: inline-block;
+}
+
+.og-steps {
+  padding: 0;
+  list-style: none;
+  counter-reset: og-step;
+}
+
+.og-steps h2::before {
+  counter-increment: og-step;
+  content: counter(og-step) ". ";
+}
+
+.og-client-steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+.og-client-steps li + li {
+  margin-top: 4px;
+}
+
+.og-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0 16px;
+}
+
+.og-copy code {
+  padding: 8px 10px;
+  border: 1px solid var(--og-line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.og-copy button {
+  border: 1px solid var(--og-ink);
+  cursor: pointer;
+}
+
+.og-copy [role="status"] {
+  color: var(--og-dim);
+}

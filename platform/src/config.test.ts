@@ -41,6 +41,7 @@ describe("loadConfig", () => {
       deviceCodeMisses: DEFAULT_MISSES,
       ingest: DEFAULT_INGEST,
       toolContext: DEFAULT_TOOL_CONTEXT,
+      bridgeDownloadUrl: null,
       production: false,
     });
     const config = loadConfig({ DATABASE_URL: url, PORT: "8080", DATABASE_QUERY_TIMEOUT_MS: "2500" });
@@ -134,6 +135,14 @@ describe("loadConfig", () => {
       "https://agent.example/client.json",
     ]);
     expect(() => loadConfig({ DATABASE_URL: url, CIMD_TRUSTED_CLIENT_IDS: "https://CLAUDE.ai/x" })).toThrow("CIMD_TRUSTED_CLIENT_IDS must list");
+  });
+
+  it("reads BRIDGE_DOWNLOAD_URL as an https URL", () => {
+    const config = loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: " https://downloads.example/ogmcp-bridge " });
+    expect(config.bridgeDownloadUrl).toBe("https://downloads.example/ogmcp-bridge");
+    for (const bad of ["javascript:alert(1)", "http://downloads.example/ogmcp-bridge", "downloads.example"]) {
+      expect(() => loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: bad })).toThrow("BRIDGE_DOWNLOAD_URL must be an https URL");
+    }
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

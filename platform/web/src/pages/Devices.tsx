@@ -37,7 +37,7 @@ function fallbackName(device: Device): string {
 }
 
 /** The user's devices, or null when the service did not answer them. */
-async function loadDevices(): Promise<Device[] | null> {
+export async function loadDevices(): Promise<Device[] | null> {
   try {
     const res = await fetch("/api/v1/devices", { headers: { Accept: "application/json" } });
     if (!res.ok) return null;

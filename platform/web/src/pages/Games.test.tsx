@@ -51,7 +51,14 @@ it("lists WoW with a switch that enables it, then shows its in-game tips", async
   expect(container.querySelector("h1")?.textContent).toBe("Games");
   expect(container.querySelector("h2")?.textContent).toBe("World of Warcraft");
   expect(container.textContent).toContain("The bridge picks up changes on its own.");
-  expect([...container.querySelectorAll("nav a")].map((a) => a.textContent)).toEqual(["Home", "Games", "Devices", "Connected agents"]);
+  expect([...container.querySelectorAll("nav a")].map((a) => a.textContent)).toEqual([
+    "Home",
+    "Get started",
+    "Games",
+    "Connect your agent",
+    "Devices",
+    "Connected agents",
+  ]);
   expect(toggle.checked).toBe(false);
   expect(container.querySelector(".og-tips")).toBeNull();
 

@@ -1,10 +1,12 @@
 import { type RouteObject, useRoutes } from "react-router";
 
+import { ConnectAgent } from "./pages/ConnectAgent.js";
 import { ConnectedAgents } from "./pages/ConnectedAgents.js";
 import { Consent } from "./pages/Consent.js";
 import { Device } from "./pages/Device.js";
 import { Devices } from "./pages/Devices.js";
 import { Games } from "./pages/Games.js";
+import { GetStarted } from "./pages/GetStarted.js";
 import { Home } from "./pages/Home.js";
 import { NotFound } from "./pages/NotFound.js";
 import { SignIn } from "./pages/SignIn.js";
@@ -29,7 +31,9 @@ export const routes: RouteObject[] = [
         element: <RequireSession />,
         children: [
           { path: "/", element: <Home /> },
+          { path: "/get-started", element: <GetStarted /> },
           { path: "/games", element: <Games /> },
+          { path: "/connect", element: <ConnectAgent /> },
           { path: "/devices", element: <Devices /> },
           { path: "/agents", element: <ConnectedAgents /> },
         ],
