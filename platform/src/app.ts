@@ -72,7 +72,7 @@ export function createApp({
   app.use(healthRouter(health));
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
-    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins }));
+    app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest, ingestLog }));
   }

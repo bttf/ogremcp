@@ -1,14 +1,25 @@
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import type Provider from "oidc-provider";
 import type { Pool } from "pg";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
+import { createPool } from "./db.js";
+import { MAX_MCP_BODY_BYTES } from "./mcp.js";
+import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
+import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { WebSessions } from "./web-sessions.js";
+
+/** As in migrations.test.ts: a Postgres server whose user may create databases. */
+const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
+if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in mcp.test.ts are skipped");
 
 const ISSUER = "https://ogmcp.example";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,14 +31,18 @@ afterEach(() => {
   server = undefined;
 });
 
-// No request here sends a cookie or reaches a model, so nothing queries the database.
-async function serve(): Promise<number> {
-  const noDatabase = {} as Pool;
-  const oidc = createOidcProvider({ pool: noDatabase, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 1, log: () => {} });
-  const sessions = new WebSessions({ pool: noDatabase, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
+/**
+ * The app on a free port. Without a pool, no request may send a cookie or
+ * reach a model, because nothing may query the database.
+ */
+async function serve(
+  pool = {} as Pool,
+  oidc = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 1, log: () => {} }),
+): Promise<number> {
+  const sessions = new WebSessions({ pool, lifetimeMs: DAY_MS, renewWithinMs: DAY_MS, secure: true });
   const app = createApp({
     health: { checkDatabase: () => Promise.resolve() },
-    auth: { pool: noDatabase, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER },
+    auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER },
     oidc,
     trustProxyHops: 1,
   });
@@ -42,8 +57,16 @@ interface Answer {
   body: string;
 }
 
-/** A request as Railway's edge forwards it: the public Host, and https in X-Forwarded-Proto. */
-async function send(port: number, method: string, path: string, headers: Record<string, string> = {}): Promise<Answer> {
+const INITIALIZE = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}';
+
+/** A request as Railway's edge forwards it: the public Host, and https in X-Forwarded-Proto. A POST sends `body`. */
+async function send(
+  port: number,
+  method: string,
+  path: string,
+  headers: Record<string, string> = {},
+  body: string | undefined = method === "POST" ? INITIALIZE : undefined,
+): Promise<Answer> {
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -61,7 +84,7 @@ async function send(port: number, method: string, path: string, headers: Record<
       },
     );
     req.on("error", reject);
-    req.end(method === "POST" ? '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' : undefined);
+    req.end(body);
   });
 }
 
@@ -146,5 +169,109 @@ describe("/mcp", () => {
     for (const origin of [ISSUER, "https://claude.ai"]) {
       expect((await send(port, "POST", "/mcp", { origin })).status).toBe(401);
     }
+  });
+});
+
+describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () => {
+  const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
+  const CLIENT_ID = "test-client";
+  const RESOURCE = `${ISSUER}/mcp`;
+  let admin: Pool;
+  let pool: Pool;
+  let provider: Provider;
+
+  beforeAll(async () => {
+    admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
+    await admin.query(`create database "${name}"`);
+    const url = new URL(TEST_DATABASE_URL ?? "");
+    url.pathname = `/${name}`;
+    pool = createPool({ url: url.toString(), queryTimeoutMs: 10_000, max: 4 });
+    await migrate(pool);
+    await new PostgresAdapter(pool, "Client").upsert(CLIENT_ID, {
+      client_id: CLIENT_ID,
+      redirect_uris: ["https://agent.example/callback"],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+    });
+    provider = createOidcProvider({ pool, issuer: ISSUER, keys: generateOidcKeys(), trustProxyHops: 1, log: () => {} });
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    try {
+      await admin.query(`drop database if exists "${name}" with (force)`);
+    } finally {
+      await admin.end();
+    }
+  });
+
+  /** The headers of a POST by an agent with a new user's `read` token, as the consent page leaves one (RED-303). */
+  async function asAgent(): Promise<Record<string, string>> {
+    const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
+    const accountId = rows[0]?.uuid ?? "";
+    const client = await provider.Client.find(CLIENT_ID);
+    if (client === undefined) throw new Error("the test client is missing");
+    const grant = new provider.Grant({ accountId, clientId: CLIENT_ID });
+    grant.addResourceScope(RESOURCE, "read");
+    const grantId = await grant.save();
+    const token = await new provider.AccessToken({
+      accountId,
+      client,
+      grantId,
+      gty: "authorization_code",
+      scope: "read",
+      resourceServer: new provider.ResourceServer(RESOURCE, { scope: "read" }),
+    }).save();
+    return { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  }
+
+  it("answers initialize and an empty tools/list, each on its own, with JSON and no session", async () => {
+    const port = await serve(pool, provider);
+    const agent = await asAgent();
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+
+    const init = await send(
+      port,
+      "POST",
+      "/mcp",
+      agent,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+      }),
+    );
+    expect(init.status).toBe(200);
+    expect(init.headers["content-type"]).toMatch(/^application\/json/);
+    expect(init.headers["mcp-session-id"]).toBeUndefined();
+    // No `listChanged`: the stateless server never sends it (D12).
+    expect(JSON.parse(init.body)).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "ogmcp", version } },
+    });
+
+    const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
+    expect(list.status).toBe(200);
+    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [] } });
+  });
+
+  it("answers GET and DELETE with 405, and a body too large or not JSON with a JSON-RPC error", async () => {
+    const port = await serve(pool, provider);
+    const agent = await asAgent();
+    for (const method of ["GET", "DELETE"]) {
+      const res = await send(port, method, "/mcp", { authorization: agent["authorization"] ?? "" });
+      expect(res.status).toBe(405);
+      expect(res.headers["allow"]).toBe("POST");
+      expect(JSON.parse(res.body)).toEqual({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null });
+    }
+    const large = await send(port, "POST", "/mcp", agent, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { pad: "x".repeat(MAX_MCP_BODY_BYTES) } }));
+    expect(large.status).toBe(413);
+    expect(JSON.parse(large.body)).toEqual({ jsonrpc: "2.0", error: { code: -32600, message: "Request too large" }, id: null });
+    const malformed = await send(port, "POST", "/mcp", agent, '{"jsonrpc":');
+    expect(malformed.status).toBe(400);
+    expect(JSON.parse(malformed.body)).toEqual({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null });
   });
 });

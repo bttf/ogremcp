@@ -146,8 +146,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("OAuth tokens against Postgres"
     });
   }
 
-  /** `/mcp` passes a token it accepts on to the MCP server, which answers 501 until RED-325. */
-  const MCP_ACCEPTED = 501;
+  /**
+   * `/mcp` passes a token it accepts on to the MCP server. `call` sends no
+   * `Accept`, so the server answers 406. The MCP exchange: mcp.test.ts.
+   */
+  const MCP_ACCEPTED = 406;
 
   it("accepts a read token only at /mcp and an ingest token only at the bridge API", async () => {
     const agent = await approve(RESOURCES.mcp, "read");

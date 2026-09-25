@@ -32,8 +32,11 @@ const RESOURCES = resourcesOf(ISSUER);
 const AGENT_CLIENT_ID = "test-agent";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** `/mcp` passes a token it accepts on to the MCP server, which answers 501 until RED-325. */
-const MCP_ACCEPTED = 501;
+/**
+ * `/mcp` passes a token it accepts on to the MCP server. `call` sends no
+ * `Accept`, so the server answers 406.
+ */
+const MCP_ACCEPTED = 406;
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the Devices and Connected agents API against Postgres (§13.2)", () => {
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
