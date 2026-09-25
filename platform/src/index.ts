@@ -190,6 +190,7 @@ const app = createApp({
   ingest: config.ingest,
   events,
   toolCallCaps: caps,
+  retention: config.retention,
   admin,
   https,
   trustProxyHops: config.trustProxyHops,

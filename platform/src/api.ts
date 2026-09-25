@@ -6,10 +6,12 @@ import { deleteAccount, deleteUserData } from "./account.js";
 import { listAgentGrants, revokeAgentGrant } from "./agents.js";
 import { deviceName, findDevice, listDevices, renameDevice, revokeDevice } from "./devices.js";
 import type { ProviderName } from "./identities.js";
+import type { DeviceLimits } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
 import { mcpResource } from "./mcp.js";
 import { requireSameOrigin } from "./same-origin.js";
 import type { SignInProviders } from "./sign-in-providers.js";
+import type { ToolCallCaps } from "./usage.js";
 import { currentUser, type WebSessions } from "./web-sessions.js";
 
 export interface ApiOptions {
@@ -25,6 +27,23 @@ export interface ApiOptions {
   oidc?: Provider;
   /** `BRIDGE_DOWNLOAD_URL`. Left out or null, `GET /api/v1/setup` answers null for it. */
   bridgeDownloadUrl?: string | null;
+  /** The limits `GET /api/v1/account` reports. */
+  tierLimits: TierLimits;
+}
+
+/**
+ * The limits of each tier (§14), as the platform enforces them: the device
+ * limit (`ingest.ts`), the daily tool-call cap (`usage.ts`), and the free
+ * tier's history retention (`retention.ts`). A paid user keeps their history
+ * forever.
+ */
+export interface TierLimits {
+  /** `DEVICES_PER_USER_FREE` and `DEVICES_PER_USER_PAID`. */
+  devicesPerUser: DeviceLimits;
+  /** `TOOL_CALLS_PER_DAY_FREE` and `TOOL_CALLS_PER_DAY_PAID`. */
+  toolCallCaps: ToolCallCaps;
+  /** `FREE_RETENTION_DAYS`. Null is forever. */
+  freeRetentionDays: number | null;
 }
 
 /** What `GET /api/v1/me` answers for a signed-in user. */
@@ -41,6 +60,20 @@ export interface Setup {
   mcp_url: string;
   /** `BRIDGE_DOWNLOAD_URL`, or null when the bridge has no download yet. */
   bridge_download_url: string | null;
+}
+
+/** What `GET /api/v1/account` answers: the signed-in user's tier and what applies to it (§13.2, §14). */
+export interface AccountTier {
+  /** `users.tier`. */
+  tier: "free" | "paid";
+  /** The most devices the user uploads from (§8.3), or null: no limit. */
+  devices: number | null;
+  /** The most MCP tool calls the user makes per UTC day, or null: no cap. */
+  tool_calls_per_day: number | null;
+  /** How many days of uploads and snapshots the user keeps (§11), or null: all of them. */
+  history_days: number | null;
+  /** Whether the user may call the paid-only history tools (`*_get_history`, `tools.ts`). */
+  history_tools: boolean;
 }
 
 /** One first-class kit on the Games page (§13.2). */
@@ -82,6 +115,8 @@ export interface Game {
  *   live agent grants (`agents.ts`).
  * - `DELETE /api/v1/agents/:id`: revokes the agent grant and all its tokens
  *   (`revokeAgentGrant`), and answers 204.
+ * - `GET /api/v1/account`: the signed-in user's `AccountTier`, from
+ *   `users.tier` and `tierLimits`.
  * - `DELETE /api/v1/account/data`: "Delete my data" (`deleteUserData`,
  *   §11). Answers 204.
  * - `DELETE /api/v1/account`: "Delete account" (`deleteAccount`, §11). It
@@ -95,7 +130,16 @@ export interface Game {
  * a web session. Every route that changes something needs this site's
  * `Origin`. Any other path under `/api` answers a JSON 404.
  */
-export function apiRouter({ pool, sessions, providers, publicBaseUrl, kits, oidc, bridgeDownloadUrl = null }: ApiOptions): Router {
+export function apiRouter({
+  pool,
+  sessions,
+  providers,
+  publicBaseUrl,
+  kits,
+  oidc,
+  bridgeDownloadUrl = null,
+  tierLimits,
+}: ApiOptions): Router {
   const router = express.Router();
 
   const sameOrigin = requireSameOrigin(publicBaseUrl);
@@ -242,6 +286,28 @@ export function apiRouter({ pool, sessions, providers, publicBaseUrl, kits, oidc
     };
     router.delete("/api/v1/agents/:id", sameOrigin, revokeOwnAgent);
   }
+
+  router.get("/api/v1/account", async (_req, res) => {
+    const user = currentUser(res);
+    if (user === null) {
+      res.status(401).json({ error: "signed_out" });
+      return;
+    }
+    const { rows } = await pool.query<{ tier: AccountTier["tier"] }>("select tier from users where id = $1", [user.id]);
+    const tier = rows[0]?.tier;
+    if (tier === undefined) {
+      res.status(401).json({ error: "signed_out" });
+      return;
+    }
+    const account: AccountTier = {
+      tier,
+      devices: tierLimits.devicesPerUser[tier],
+      tool_calls_per_day: tierLimits.toolCallCaps[tier],
+      history_days: tier === "paid" ? null : tierLimits.freeRetentionDays,
+      history_tools: tier === "paid",
+    };
+    res.json(account);
+  });
 
   router.delete("/api/v1/account/data", sameOrigin, async (_req, res) => {
     const user = currentUser(res);
