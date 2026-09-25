@@ -30,9 +30,23 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # git describe finds the previous addon-v tag for the release notes.
+          # Every branch and tag: git describe finds the previous addon-v tag
+          # for the release notes, and the next step reads origin/main.
           fetch-depth: 0
           persist-credentials: false
+
+      # docs/releases.md: a release is cut from a commit on main.
+      - name: Check that the tag is on main
+        run: |
+          if ! git rev-parse --verify --quiet origin/main > /dev/null; then
+            echo "::error::The checkout did not fetch main."
+            exit 1
+          fi
+          TAG_SHA=$(git rev-parse "${TAG}^{commit}")
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "::error::${TAG} points at ${TAG_SHA}, which is not on main. Tag a commit on main."
+            exit 1
+          fi
 
       - name: Check the tag against the TOC version
         id: toc

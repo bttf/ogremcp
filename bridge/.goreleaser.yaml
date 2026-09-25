@@ -58,8 +58,13 @@ checksum:
   extra_files:
     - glob: dist/*.app.zip
 
-# The repo's one Releases page also holds the addon-v releases (§5).
+# The repo's one Releases page also holds the addon-v releases (§5). A
+# pre-release version, such as 1.2.3-rc.1, is never marked Latest. The
+# prerelease key is not a template, and `auto` needs the semver parse that
+# --skip=validate turns off, so the release workflow adds `prerelease: "true"`
+# to this config for a pre-release version (docs/releases.md).
 release:
   name_template: "Bridge {{ .Env.BRIDGE_VERSION }}"
+  make_latest: '{{ if contains .Env.BRIDGE_VERSION "-" }}false{{ else }}true{{ end }}'
   extra_files:
     - glob: dist/*.app.zip

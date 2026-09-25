@@ -6,13 +6,15 @@ RED-344 (P9.3) build on this.
 ## Cutting a release
 
 Pushing a `bridge-v` or `addon-v` tag publishes a release. There is no
-approval step after the push, so tag only a commit on `main` that passed CI.
-Both kinds of release go to the repo's one Releases page (§5).
+approval step after the push. Tag a commit on `main` that passed CI: both
+workflows fail when the tagged commit is not on `main`. Both kinds of release
+go to the repo's one Releases page (§5).
 
 ### Bridge
 
-1. Check that the six signing secrets are set ("Signing secrets" below).
-   Without them the job fails before it builds, and nothing is published.
+1. Check that the six signing secrets are set in the `release` environment
+   ("Signing secrets" below). Without them the job fails at its first step,
+   and nothing is published.
 2. Optionally, run the dry run on `main` (below).
 3. Tag the commit and push the tag:
 
@@ -20,9 +22,10 @@ Both kinds of release go to the repo's one Releases page (§5).
        git tag -a bridge-v1.2.3 -m "Bridge 1.2.3" origin/main
        git push origin bridge-v1.2.3
 
-The `Bridge release` workflow (`.github/workflows/bridge-release.yml`) runs on
-a macOS runner. It imports the certificate into a temporary keychain, then
-runs "A tag build" (below). GoReleaser's `universal_binaries` post hook
+The `Bridge release` workflow (`.github/workflows/bridge-release.yml`) runs
+its `release` job on a macOS runner, in the `release` environment. It checks
+the secrets and the tag, imports the certificate into a temporary keychain,
+then runs "A tag build" (below). GoReleaser's `universal_binaries` post hook
 (`bridge/scripts/macos-app.sh`) builds `Ogre MCP.app`, and
 `bridge/scripts/macos-sign.sh` signs it with the Developer ID identity
 (hardened runtime, secure timestamp), notarizes it, and staples the ticket.
@@ -40,8 +43,12 @@ and `macos-sign.sh` has no unsigned fallback. Snapshots (`make -C bridge
 dist`, the dev build, the dry run) get an ad hoc signature only.
 
 The version is the tag without `bridge-v`, such as `1.2.3` or `1.2.3-rc.1`.
-The job fails on a tag with any other form. To mark a release as a
-pre-release, see "Known limits in OSS".
+The job fails on a tag with any other form. A version with a `-`, such as
+`1.2.3-rc.1`, is published as a pre-release and is never marked Latest.
+
+Bridge releases run one at a time. A second tag waits for the first release
+to finish. GitHub keeps only one waiting run, so a third tag pushed while one
+runs and one waits cancels the waiting one. Push one `bridge-v` tag at a time.
 
 When the job fails, fix the cause and re-run it from the Actions tab. A
 failure during upload leaves a draft release, because GoReleaser publishes
@@ -80,16 +87,39 @@ packagers (§7 Listings).
 
 Run the `Bridge release` workflow by hand on `main`: Actions, "Bridge
 release", "Run workflow", or `gh workflow run bridge-release.yml --ref main`.
-A manual run never publishes, even on a tag. It builds a snapshot, as `make
--C bridge dist` does, and lists the files a release would publish. It warns
-about each signing secret that is not set. It does not sign, so it cannot
-show that the secrets' values work; the first tag does.
+A manual run runs only the `dry-run` job and never publishes, even on a tag.
+It builds a snapshot, as `make -C bridge dist` does, and lists the files a
+release would publish. It has a read-only token and no access to the
+`release` environment, so it neither signs nor checks the secrets. The first
+tag is the first run that uses them.
+
+The `Bridge dev build` workflow runs on pushes to `main` that touch `bridge/`,
+not on PRs, to save macOS minutes. Start it for a branch with
+`gh workflow run bridge-dev-build.yml --ref <branch>`.
 
 ### Signing secrets
 
 D6: macOS builds are Developer ID signed and notarized. The bridge release
-reads six repository secrets (Settings, Secrets and variables, Actions).
-`gh secret set NAME` sets one and reads the value from standard input.
+job reads six secrets from a GitHub environment named `release`. Only that
+job uses the environment. The dry run does not.
+
+The owner creates the environment once and limits it to `bridge-v*` tags, so
+no other branch or tag can deploy to it or read its secrets: Settings,
+Environments, New environment, `release`; then under "Deployment branches and
+tags", choose "Selected branches and tags" and add the tag rule `bridge-v*`.
+The same from a terminal:
+
+    gh api -X PUT 'repos/{owner}/{repo}/environments/release' \
+      -F 'deployment_branch_policy[protected_branches]=false' \
+      -F 'deployment_branch_policy[custom_branch_policies]=true'
+    gh api -X POST 'repos/{owner}/{repo}/environments/release/deployment-branch-policies' \
+      -f name='bridge-v*' -f type=tag
+
+In a private repo, environment secrets and deployment rules need GitHub Pro,
+Team, or Enterprise. On GitHub Free they work once the repo is public (P9).
+
+`gh secret set NAME --env release` sets one secret in the environment and
+reads the value from standard input.
 
 | Secret | What it holds |
 | ------ | ------------- |
@@ -112,18 +142,18 @@ certificate needs the Account Holder role):
   login keychain. In Keychain Access, My Certificates, export
   "Developer ID Application: … (TEAM ID)" as a `.p12` with a password. Then:
 
-      base64 -i DeveloperID.p12 | gh secret set MACOS_CERT_P12_BASE64
-      gh secret set MACOS_CERT_PASSWORD
-      gh secret set APPLE_TEAM_ID
+      base64 -i DeveloperID.p12 | gh secret set MACOS_CERT_P12_BASE64 --env release
+      gh secret set MACOS_CERT_PASSWORD --env release
+      gh secret set APPLE_TEAM_ID --env release
 
 - **API key.** appstoreconnect.apple.com, Users and Access, Integrations, App
   Store Connect API, Team Keys. Generate a key with the Developer role. The
   page shows the Issuer ID above the list and the Key ID in the list. The
   `.p8` file can be downloaded once only. Then:
 
-      base64 -i AuthKey_<key id>.p8 | gh secret set APPLE_API_KEY_P8_BASE64
-      gh secret set APPLE_API_KEY_ID
-      gh secret set APPLE_API_ISSUER_ID
+      base64 -i AuthKey_<key id>.p8 | gh secret set APPLE_API_KEY_P8_BASE64 --env release
+      gh secret set APPLE_API_KEY_ID --env release
+      gh secret set APPLE_API_ISSUER_ID --env release
 
 Keep the `.p12` and `.p8` files outside the repo, and delete them once they
 are stored somewhere safe. `.gitignore` lists both extensions.
@@ -214,9 +244,10 @@ checksum:
   addon and platform commits. Filtering by path (`changelog.paths`) is Pro.
 - `release.prerelease: auto` does not work, because `--skip=validate` leaves the
   semver fields empty. The key accepts only the literals `auto` and `true` and
-  is not a template, so its value is fixed in the config. To change it for one
-  release, run `gh release edit "$TAG" --prerelease` (or `--prerelease=false`)
-  after publishing.
+  is not a template. For a pre-release version, the release job pipes the
+  config to `goreleaser release -f -` with `prerelease: "true"` added.
+  `release.make_latest` is a template, so the config itself keeps a
+  pre-release off Latest.
 - The first bridge release has no previous `bridge-v` tag. Its changelog starts
   at the nearest tag of any prefix.
 - Pro-only features this project would otherwise use: `app_bundles`, `dmg`,
@@ -270,15 +301,17 @@ OSS binary v2.18.2.
   machine's macOS version. The `bridge-windows` build sets `CGO_ENABLED=0` and
   adds `-H windowsgui` to its ldflags.
 - Unsigned dev builds are CI artifacts from `--snapshot`. The `Bridge dev
-  build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on PRs that
-  touch `bridge/` and on `workflow_dispatch`. It uploads the Windows binary
-  and the zipped `.app` and publishes no release.
+  build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on pushes
+  to `main` that touch `bridge/` and on `workflow_dispatch`. It uploads the
+  Windows binary and the zipped `.app` and publishes no release.
 
 ## How P9.3 (RED-344) uses it
 
 - `.github/workflows/bridge-release.yml` runs on `push: tags: ['bridge-v*']`
-  on a macOS runner. It checks out with `fetch-depth: 0` so `git describe`
-  sees the tags, and runs "A tag build" above with a check of the tag's form.
+  on a macOS runner, in the `release` environment, one release at a time. It
+  checks out with `fetch-depth: 0` so `git describe` sees the tags and
+  `origin/main` exists. It checks the tag's form and that the tagged commit is
+  on `main`, then runs "A tag build" above.
   It installs GoReleaser with `.github/actions/install-goreleaser`, which the
   dev build shares: the pinned OSS release, checked against its SHA-256. It
   does not use `goreleaser/goreleaser-action`.

@@ -1,12 +1,14 @@
 # Unsigned dev builds of the bridge (§7, docs/releases.md): the Windows binary
 # and the macOS universal binary as a zipped .app, uploaded as workflow
-# artifacts. Runs on PRs that touch bridge/ and on demand. It publishes no
-# release, pushes no tag, and signs nothing: tagged, signed releases are
-# .github/workflows/bridge-release.yml.
+# artifacts. Runs on pushes to main that touch bridge/, and by hand for any
+# branch. Not on PRs: macOS minutes count 10x against the Actions spending
+# limit. It publishes no release, pushes no tag, and signs nothing: tagged,
+# signed releases are .github/workflows/bridge-release.yml.
 name: Bridge dev build
 
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - bridge/**
       - .github/workflows/bridge-dev-build.yml
@@ -28,9 +30,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # On a PR, build the branch's head commit, not the merge commit, so
-          # the version names a commit on the branch.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The version comes from git describe over the bridge-v tags.
           fetch-depth: 0
           persist-credentials: false
