@@ -101,10 +101,12 @@ export interface ToolDef<State> {
 
 /**
  * A tool handler's only way to read snapshots (§6.2). The platform resolves
- * `character` (a name or `Name-Realm`, case-insensitive) and applies tier
- * gating. An unknown or ambiguous `character`, or a bad `since` or `limit`,
- * rejects with an error whose message is user-facing (§10.5). A handler lets
- * it propagate: the platform turns it into an `isError` result.
+ * `character` (a name or `Name-Realm`, case-insensitive). It does not check
+ * the tier: the platform's tool registry gates `paidOnly` tools before their
+ * handler runs (§10.2, §14). An unknown or ambiguous `character`, or a bad
+ * `since` or `limit`, rejects with an error whose message is user-facing
+ * (§10.5). A handler lets it propagate: the platform turns it into an
+ * `isError` result.
  */
 export interface ToolContext<State> {
   user: { uuid: string; tier: "free" | "paid" };

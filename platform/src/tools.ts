@@ -12,7 +12,7 @@ import { reportIssue } from "./report-issue.js";
 import type { ScopedSearch, SearchUsage } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type SnapshotRef, type ToolContextSettings, type ToolUser } from "./tool-context.js";
-import { errorResult, gameOffResult, kitToolResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
+import { errorResult, gameOffResult, kitToolResult, paidOnlyResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } from "./usage.js";
 
@@ -33,6 +33,12 @@ import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } 
  * that fails through the service's fault, one of `REFUNDED_ERRORS`, is taken
  * back once it has its answer. A call to a tool of a game the user has turned
  * off runs nothing and is not counted.
+ *
+ * A paid-only tool, a kit's or the platform's (`paidOnly`), is listed for
+ * every user, so the tool list does not change on upgrade (§10.2). A free
+ * user's call of one runs nothing and answers `paidOnlyResult`, whatever the
+ * cap (§14). It is not counted: the player made no error, and the call costs
+ * nothing. Its events row has the error `paid_only`.
  *
  * Each call of a tool the user may call, or of a tool of a game the user has
  * turned off, writes one events row (`events.ts`, §16) once it has its
@@ -93,6 +99,8 @@ export interface PlatformTool {
   description: string;
   inputSchema: ToolInputSchema;
   annotations?: ToolAnnotations;
+  /** Still listed for free users, who get an upgrade message instead of a result (§10.2, §14). */
+  paidOnly?: boolean;
   handler(args: unknown, ctx: PlatformToolContext): Promise<ToolResult>;
 }
 
@@ -133,10 +141,11 @@ export interface ToolRegistry {
    * response envelope (`tool-envelope.ts`): a kit tool's result is checked,
    * the handler's errors become `isError` results, and a tool of a game the
    * user has not enabled gets an `isError` result that says the game is
-   * turned off, and a call past the daily cap gets one that says when the
-   * count resets. Null when there is no user with this uuid or no tool of
-   * that name; neither writes an events row. An error while looking up the
-   * user or counting the call propagates.
+   * turned off, a free user's call of a paid-only tool one that says the
+   * tool is part of the paid plan, and a call past the daily cap one that
+   * says when the count resets. Null when there is no user with this uuid
+   * or no tool of that name; neither writes an events row. An error while
+   * looking up the user or counting the call propagates.
    */
   call(caller: ToolCaller, name: string, args: unknown): Promise<ToolResult | null>;
 }
@@ -198,9 +207,13 @@ export function createToolRegistry({
       let answer: ToolAnswer;
       let schema: ToolInputSchema;
       const tool = found.tools.find(({ def }) => def.name === name);
+      const paidOnly = tool?.def.paidOnly === true && user.tier !== "paid";
       // Before the tool runs, so that a call past the cap costs nothing (§14).
-      const count = tool === undefined ? null : await usage.count(user);
-      if (tool !== undefined && count?.kind === "cap_reached") {
+      const count = tool === undefined || paidOnly ? null : await usage.count(user);
+      if (tool !== undefined && paidOnly) {
+        schema = tool.def.inputSchema;
+        answer = { result: paidOnlyResult(), error: "paid_only" };
+      } else if (tool !== undefined && count?.kind === "cap_reached") {
         schema = tool.def.inputSchema;
         answer = { result: capReachedResult(count), error: "cap_reached" };
       } else if (tool !== undefined) {
