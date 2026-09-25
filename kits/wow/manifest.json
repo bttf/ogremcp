@@ -15,14 +15,13 @@
   "adapter": {
     "install": "_*_/Interface/AddOns/OpenGamerMCP",
     "process": [
+      "WowClassic*.exe",
       "Wow.exe",
-      "Wow?.exe",
       "Wow-64.exe",
-      "Wow?-64.exe",
-      "WowClassic.exe",
-      "WowClassic?.exe",
-      "WowClassic-64.exe",
-      "WowClassic?-64.exe",
+      "WowT.exe",
+      "WowT-64.exe",
+      "WowB.exe",
+      "WowB-64.exe",
       "World of Warcraft*"
     ]
   },

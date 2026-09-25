@@ -75,6 +75,8 @@ func TestValidateRejects(t *testing.T) {
 		{"duplicate source id", func(m *Manifest) { m.Sources = append(m.Sources, m.Sources[0]) }, "earlier source"},
 		{"unknown source type", func(m *Manifest) { m.Sources[0].Type = "log_tail" }, "not file"},
 		{"kit name", func(m *Manifest) { m.Kit = "../x" }, "snake_case"},
+		{"question mark in a process glob", func(m *Manifest) { m.Adapter.Process = []string{"Wow?.exe"} }, "adapter.process[0]"},
+		{"bracket in a process glob", func(m *Manifest) { m.Adapter.Process = []string{"Wow[TB].exe"} }, "adapter.process[0]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := wow(t)

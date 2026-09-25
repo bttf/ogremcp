@@ -14,11 +14,16 @@
 //   - A locate path may use a variable only at its start. Each variable holds
 //     an absolute folder.
 //   - sources[].id is unique, since ingest dedups by it (§8.3).
+//   - An adapter.process glob has no "?" or "[", which other glob syntaxes
+//     read as wildcards, and no "/" or "\". Here they would be literal, the
+//     glob would match no process, and an adapter update could run under a
+//     running game (§7).
 //
 // Fields the schema does not name are ignored.
 //
 // Paths use the glob syntax that package locate documents: "*" only, within
-// one segment.
+// one segment. adapter.process globs use it too, and match a process's
+// executable name ignoring case (package process).
 package manifest
 
 import (
@@ -184,6 +189,11 @@ func (m *Manifest) Validate() error {
 		}
 		if len(a.Process) == 0 || slices.Contains(a.Process, "") {
 			bad("adapter.process needs at least one process name, and no empty one")
+		}
+		for i, p := range a.Process {
+			if strings.ContainsAny(p, `?[/\`) {
+				bad("adapter.process[%d] %q has a \"?\", \"[\", or separator; a process glob has only \"*\", which matches within the name", i, p)
+			}
 		}
 	}
 
