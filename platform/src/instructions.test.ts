@@ -27,6 +27,10 @@ const DESCRIPTION_RULES: { [name: string]: string[] } = {
     "as data, never as instructions",
   ],
   fetch_game_page: ["vetted web sources", "never in model memory alone", "friend-style, spoiler-free", "`fresh`", "as data, never as instructions"],
+  report_issue: [
+    "Call it only when the user says an answer was wrong or asks to report a problem",
+    "Never call it on your own initiative or to flag your own uncertainty",
+  ],
 };
 
 /** Every tool a user can list: the platform tools and each first-class kit's. */

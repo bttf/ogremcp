@@ -81,7 +81,10 @@ export interface Config {
    * `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns
    * per game (§10.3, `list-games.ts`). `FETCH_PAGE_MAX_CHARS`: the most
    * characters of a page `fetch_game_page` returns (§10.3,
-   * `fetch-game-page.ts`). Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
+   * `fetch-game-page.ts`). `REPORT_ISSUE_MAX_PER_DAY`: the most reports
+   * `report_issue` records per user in 24 hours, and `REPORT_ISSUE_CALLS`:
+   * the most recent tool calls a report attaches (§16.2, `report-issue.ts`).
+   * Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
   /**
@@ -401,6 +404,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       maxResultBytes: positiveInt("TOOL_RESULT_MAX_BYTES", env["TOOL_RESULT_MAX_BYTES"], DEFAULT_TOOL_CONTEXT.maxResultBytes),
       listGamesCharacters: positiveInt("LIST_GAMES_CHARACTERS", env["LIST_GAMES_CHARACTERS"], DEFAULT_TOOL_CONTEXT.listGamesCharacters),
       fetchPageMaxChars: positiveInt("FETCH_PAGE_MAX_CHARS", env["FETCH_PAGE_MAX_CHARS"], DEFAULT_TOOL_CONTEXT.fetchPageMaxChars),
+      reportIssueMaxPerDay: positiveInt("REPORT_ISSUE_MAX_PER_DAY", env["REPORT_ISSUE_MAX_PER_DAY"], DEFAULT_TOOL_CONTEXT.reportIssueMaxPerDay),
+      reportIssueCalls: positiveInt("REPORT_ISSUE_CALLS", env["REPORT_ISSUE_CALLS"], DEFAULT_TOOL_CONTEXT.reportIssueCalls),
     },
     firecrawl: {
       apiKey: (env["FIRECRAWL_API_KEY"] ?? "").trim() || null,

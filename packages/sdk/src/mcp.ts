@@ -18,10 +18,12 @@ export type ToolInputSchema = {
 
 /**
  * Hints that clients use to decide when to ask the user for confirmation
- * (§10.5). `readOnlyHint: true` on every kit tool.
+ * (§10.5). `readOnlyHint: true` on every kit tool. `destructiveHint` counts
+ * only when `readOnlyHint` is not true, and MCP's default for it is `true`.
  */
 export type ToolAnnotations = {
   readOnlyHint?: boolean;
+  destructiveHint?: boolean;
   openWorldHint?: boolean;
 };
 

@@ -38,7 +38,7 @@ function stubSearch(): { search: ScopedSearch; calls: { scope: SearchScope; quer
 
 /** Calls the tool with `flavor` given, so that no query reaches the (absent) database. */
 function call(args: unknown, search: ScopedSearch | null, games: readonly Kit[] = [WOW]): Promise<ToolResult> {
-  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, games, settings: DEFAULT_TOOL_CONTEXT, search, fetchPage: null, event: {} });
+  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, agentClient: "agent", games, settings: DEFAULT_TOOL_CONTEXT, search, fetchPage: null, event: {} });
 }
 
 describe("search_game_info (§10.3, §12)", () => {

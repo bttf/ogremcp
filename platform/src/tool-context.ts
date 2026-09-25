@@ -33,6 +33,10 @@ import type { Pool } from "pg";
  * `UserFacingError`, so that the agent gets a tool result it can act on
  * (§10.5).
  *
+ * `onRead` gets the uuid and `snapshot_at` of each snapshot a read returns.
+ * The kit never sees a uuid: the tool registry uses them to name, in the
+ * call's events row, the snapshot the call returned (§16.2).
+ *
  * Paid-only gating of `history` is not here yet (§14).
  *
  * The matching rule and the newest-first pick are adapted from
@@ -54,9 +58,20 @@ export interface ToolContextSettings {
   listGamesCharacters: number;
   /** `FETCH_PAGE_MAX_CHARS`: the most characters of a page's markdown `fetch_game_page` returns (§10.3). */
   fetchPageMaxChars: number;
+  /** `REPORT_ISSUE_MAX_PER_DAY`: the most reports `report_issue` records per user in 24 hours (§16.2). */
+  reportIssueMaxPerDay: number;
+  /** `REPORT_ISSUE_CALLS`: the most recent tool calls of the visit a report attaches (§16.2). */
+  reportIssueCalls: number;
 }
 
-export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024, listGamesCharacters: 5, fetchPageMaxChars: 20_000 };
+export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = {
+  maxHistoryLimit: 100,
+  maxResultBytes: 40 * 1024,
+  listGamesCharacters: 5,
+  fetchPageMaxChars: 20_000,
+  reportIssueMaxPerDay: 10,
+  reportIssueCalls: 20,
+};
 
 /**
  * A user-facing condition of a tool call (§10.5). Its message is plain
@@ -92,9 +107,19 @@ export interface ToolContextOptions {
   /** The manifest's `kit`, e.g. `wow`. */
   kit: string;
   settings: ToolContextSettings;
+  /** Gets the snapshots each read returns. */
+  onRead?: (snapshots: SnapshotRef[]) => void;
+}
+
+/** A snapshot, by its uuid and when the game captured it. */
+export interface SnapshotRef {
+  /** `snapshots.uuid`. */
+  uuid: string;
+  snapshotAt: Date;
 }
 
 interface SnapshotRow {
+  uuid: string;
   snapshot_at: Date;
   flavor: string;
   rules: string[];
@@ -116,7 +141,7 @@ interface Query {
   character?: string;
 }
 
-export function createToolContext({ pool, user, kit, settings }: ToolContextOptions): ToolContext<unknown> {
+export function createToolContext({ pool, user, kit, settings, onRead }: ToolContextOptions): ToolContext<unknown> {
   /** The keys of the character `wanted` names (see the module comment). */
   async function characterKeys(wanted: string, flavor: string | undefined): Promise<string[]> {
     const params: unknown[] = [user.id, kit];
@@ -155,7 +180,7 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
   async function read(q: Query, since: Date | null, limit: number): Promise<Snapshot<unknown>[]> {
     const flavor = q.flavor;
     const params: unknown[] = [user.id, kit];
-    let sql = `select snapshot_at, flavor, rules, character_key, character_name, character_realm, state
+    let sql = `select uuid, snapshot_at, flavor, rules, character_key, character_name, character_realm, state
                  from snapshots where user_id = $1 and kit = $2`;
     if (flavor !== undefined) {
       params.push(flavor);
@@ -175,6 +200,7 @@ export function createToolContext({ pool, user, kit, settings }: ToolContextOpti
     params.push(limit);
     sql += ` order by snapshot_at desc, id desc limit $${params.length}`;
     const { rows } = await pool.query<SnapshotRow>(sql, params);
+    onRead?.(rows.map((row) => ({ uuid: row.uuid, snapshotAt: row.snapshot_at })));
     return rows.map(toSnapshot);
   }
 
