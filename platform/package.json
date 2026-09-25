@@ -18,12 +18,14 @@
     "@ogmcp/kit-wow": "workspace:*",
     "@ogmcp/sdk": "workspace:*",
     "ajv": "^8.20.0",
+    "busboy": "1.6.0",
     "express": "^5.2.1",
     "oidc-provider": "~9.12.2",
     "openid-client": "^6.8.8",
     "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@types/busboy": "1.5.4",
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.6",
     "@types/oidc-provider": "~9.12.1",

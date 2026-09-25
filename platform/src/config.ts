@@ -1,5 +1,6 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { DEFAULT_MISSES, type MissSettings } from "./devices.js";
+import { DEFAULT_INGEST, type IngestSettings } from "./ingest.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
 import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
@@ -61,6 +62,11 @@ export interface Config {
    * `DEFAULT_MISSES`'s.
    */
   deviceCodeMisses: MissSettings;
+  /**
+   * `INGEST_MAX_UNCOMPRESSED_BYTES`: the cap on an upload's uncompressed
+   * bytes (§8.3, `ingest.ts`). Unset, `DEFAULT_INGEST`'s.
+   */
+  ingest: IngestSettings;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
   production: boolean;
 }
@@ -317,6 +323,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
         DEFAULT_MISSES.globalRatePerHour,
       ),
       globalBurst: positiveInt("DEVICE_CODE_MISS_GLOBAL_BURST", env["DEVICE_CODE_MISS_GLOBAL_BURST"], DEFAULT_MISSES.globalBurst),
+    },
+    ingest: {
+      maxBytes: positiveInt("INGEST_MAX_UNCOMPRESSED_BYTES", env["INGEST_MAX_UNCOMPRESSED_BYTES"], DEFAULT_INGEST.maxBytes),
     },
     production: env["NODE_ENV"] === "production",
   };
