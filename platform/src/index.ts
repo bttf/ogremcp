@@ -3,8 +3,8 @@
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
 // endpoint's discovery (§9), the kit tools of each user's enabled games (§10)
-// and search_game_info (§12), the bridge's device flow (§8.1), and the
-// bridge's kit and ingest endpoints (§8.2, §8.3).
+// and search_game_info and fetch_game_page (§12), the bridge's device flow
+// (§8.1), and the bridge's kit and ingest endpoints (§8.2, §8.3).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import { captureConsole, configureLogger, logger } from "./log.js";
 import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { startClientCleanup } from "./oidc-registration.js";
+import { firecrawlPageFetch } from "./pages.js";
 import { firecrawlScopedSearch } from "./search.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
@@ -127,10 +128,11 @@ try {
   process.exit(1);
 }
 
-// Game-scoped search (§12). Without a key, search_game_info answers
-// search_unavailable. No line repeats the key.
+// Game-scoped search and page fetches (§12). Without a key, search_game_info
+// and fetch_game_page answer search_unavailable. No line repeats the key.
 const { apiKey, timeoutMs } = config.firecrawl;
 const search = apiKey === null ? null : firecrawlScopedSearch({ apiKey, timeoutMs });
+const fetchPage = apiKey === null ? null : firecrawlPageFetch({ apiKey, timeoutMs });
 logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecrawl"}`);
 
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
@@ -146,6 +148,7 @@ const app = createApp({
   kits,
   toolContext: config.toolContext,
   search,
+  fetchPage,
   bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
   https,
