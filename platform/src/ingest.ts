@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
 
-import { ParseError, type Parsed } from "@ogmcp/sdk";
+import { ParseError, type Parsed, type UnknownFlavor } from "@ogmcp/sdk";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";
@@ -33,10 +33,18 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  *    that of the last upload of its `(device, kit, source_id, instance)`
  *    stores nothing and gets 200 `duplicate`. Otherwise the kit's
  *    interpreter parses it (§6.2, §11), and the upload is stored. A parsed
- *    upload gets its snapshot and 201 `stored` with `snapshot_uuid`. A
- *    `ParseError` keeps the upload with `parse_status = 'failed'` for a
- *    re-parse, and gets 422 `parse_error` with the error's user-facing
- *    message.
+ *    upload whose flavor the kit manifest's `flavors` registers gets its
+ *    snapshot and 201 `stored` with `snapshot_uuid`. Experimental flavors
+ *    are registered, so they are stored (D8). A `ParseError` keeps the upload
+ *    with `parse_status = 'failed'` for a re-parse, and gets 422
+ *    `parse_error` with the error's user-facing message.
+ * 5. A parsed upload whose flavor is "unknown" or not registered is kept
+ *    with `parse_status = 'rejected'` and its `flavor`, so rejections can be
+ *    counted by flavor (§16.1), and gets no snapshot. It gets 422
+ *    `unsupported_flavor` with a message that names the game, not the
+ *    flavor (§8.3). For "unknown", ingest also logs the interpreter's
+ *    `unknownFlavor` reason and raw facts as one JSON line, with the user's
+ *    uuid as the only user identifier (§6.3.1).
  *
  * Every request that reaches step 4 sets the device's `last_seen_at`, and
  * its `os` and `bridge_version` when `meta.client` names them. A stored
@@ -74,12 +82,12 @@ export function maxCompressedBytes(maxBytes: number): number {
   return maxBytes + Math.ceil(maxBytes / 1024) + 1024;
 }
 
-export type IngestStatus = "stored" | "duplicate" | "parse_error" | "too_large" | "bad_request";
+export type IngestStatus = "stored" | "duplicate" | "parse_error" | "unsupported_flavor" | "too_large" | "bad_request";
 
 /** The answer's body (§8.3). A 401 has none. */
 export interface IngestAnswer {
   status: IngestStatus;
-  /** For `parse_error`, the interpreter's user-facing message. */
+  /** For `parse_error`, the interpreter's user-facing message. For `unsupported_flavor`, one that names the game. */
   message?: string;
   /** For `stored`. */
   snapshot_uuid?: string;
@@ -160,10 +168,12 @@ export interface IngestOptions {
   pool: Pool;
   kits: KitRegistry;
   settings: IngestSettings;
+  /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: `console.log`. */
+  log?: (line: string) => void;
 }
 
 /** The route's handler. It must run after `requireToken` for the bridge API with scope `ingest`. */
-export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestHandler {
+export function ingestHandler({ pool, kits, settings, log = console.log }: IngestOptions): RequestHandler {
   return async (req, res) => {
     const token = currentToken(res);
     const device = token === null ? undefined : await findDevice(pool, token);
@@ -186,7 +196,7 @@ export function ingestHandler({ pool, kits, settings }: IngestOptions): RequestH
       return reply(req, res, badRequest("meta.sha256 is not the SHA-256 of the uncompressed file."));
     }
 
-    const outcome = await store(pool, device, meta, parts.file, bytes);
+    const outcome = await store(pool, device, meta, parts.file, bytes, log);
     if (outcome === null) return refuseDevice(res);
     reply(req, res, outcome);
   };
@@ -211,6 +221,8 @@ interface Device {
   id: string;
   /** `users.id`. */
   userId: string;
+  /** `users.uuid`: the only user identifier a log line holds. */
+  userUuid: string;
 }
 
 /** The live device of the token's grant and user, or undefined. */
@@ -220,7 +232,7 @@ async function findDevice(pool: Pool, token: VerifiedToken): Promise<Device | un
     [token.grantId, token.userUuid],
   );
   const row = rows[0];
-  return row === undefined ? undefined : { id: row.id, userId: row.user_id };
+  return row === undefined ? undefined : { id: row.id, userId: row.user_id, userUuid: token.userUuid };
 }
 
 /**
@@ -334,10 +346,17 @@ function checkMeta(text: string, kits: KitRegistry): CheckedMeta | Outcome {
 }
 
 /**
- * Step 4 of the module comment, in one transaction. Answers null when the
- * device was revoked since `findDevice`.
+ * Steps 4 and 5 of the module comment, in one transaction. Answers null when
+ * the device was revoked since `findDevice`.
  */
-async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buffer, bytes: Buffer): Promise<Outcome | null> {
+async function store(
+  pool: Pool,
+  device: Device,
+  meta: CheckedMeta,
+  gzipped: Buffer,
+  bytes: Buffer,
+  log: (line: string) => void,
+): Promise<Outcome | null> {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -366,15 +385,14 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
       if (!(err instanceof ParseError)) throw err;
       parseError = err.message;
     }
-    // RED-314 rejects here a parsed flavor that is "unknown" or not in
-    // meta.kit.manifest.flavors, with 422 `unsupported_flavor` (§6.3.1, §8.3).
-    // Until then every flavor is stored as parsed.
+    // "unknown" is never a key of `flavors` (the SDK's manifest schema).
+    const rejectedFlavor = parsed !== undefined && !Object.hasOwn(meta.kit.manifest.flavors, parsed.flavor) ? parsed.flavor : null;
 
-    const upload = await client.query<{ id: string }>(
+    const upload = await client.query<{ id: string; uuid: string }>(
       `insert into uploads (user_id, device_id, kit, source_id, instance, sha256, content_gzip, mtime, kit_version,
-                            adapter_schema, parse_status, parse_error, client_errors)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       returning id`,
+                            adapter_schema, parse_status, parse_error, flavor, client_errors)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       returning id, uuid`,
       [
         device.userId,
         device.id,
@@ -386,16 +404,18 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
         meta.mtime,
         meta.kit.manifest.version,
         parsed?.adapterSchema ?? null,
-        parsed === undefined ? "failed" : "parsed",
+        parsed === undefined ? "failed" : rejectedFlavor === null ? "parsed" : "rejected",
         parseError,
+        rejectedFlavor,
         meta.errors === null ? null : JSON.stringify(meta.errors),
       ],
     );
-    const uploadId = upload.rows[0]?.id;
-    if (uploadId === undefined) throw new Error("insert into uploads returned no row");
+    const uploadRow = upload.rows[0];
+    if (uploadRow === undefined) throw new Error("insert into uploads returned no row");
+    const uploadId = uploadRow.id;
 
     let snapshotUuid: string | undefined;
-    if (parsed !== undefined) {
+    if (parsed !== undefined && rejectedFlavor === null) {
       // now() is the transaction's start, which is also the upload's received_at.
       const snapshot = await client.query<{ uuid: string }>(
         `insert into snapshots (user_id, upload_id, kit, flavor, rules, character_key, character_name, character_realm,
@@ -421,6 +441,10 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
 
     await touchDevice(client, device, meta, true);
     await client.query("commit");
+    if (rejectedFlavor !== null) {
+      if (rejectedFlavor === UNKNOWN_FLAVOR) log(unknownFlavorLine(device, meta.kit, uploadRow.uuid, parsed?.unknownFlavor));
+      return { http: 422, answer: { status: "unsupported_flavor", message: `This version of ${meta.kit.name} isn't supported yet.` } };
+    }
     if (snapshotUuid === undefined) return { http: 422, answer: { status: "parse_error", message: parseError ?? "" } };
     return { http: 201, answer: { status: "stored", snapshot_uuid: snapshotUuid } };
   } catch (err) {
@@ -429,6 +453,26 @@ async function store(pool: Pool, device: Device, meta: CheckedMeta, gzipped: Buf
   } finally {
     client.release();
   }
+}
+
+/** The flavor an interpreter returns for a payload that maps to no flavor (§6.3.1). */
+const UNKNOWN_FLAVOR = "unknown";
+
+/**
+ * The log line for an upload whose flavor is "unknown": why, with the raw
+ * detection facts, as JSON (§6.3.1, §16). The user's uuid is its only user
+ * identifier.
+ */
+function unknownFlavorLine(device: Device, kit: Kit, uploadUuid: string, unknown: UnknownFlavor | undefined): string {
+  return JSON.stringify({
+    level: "warn",
+    message: "ingest: unsupported_flavor for an unknown flavor",
+    user_uuid: device.userUuid,
+    upload_uuid: uploadUuid,
+    kit: kit.key,
+    reason: unknown?.reason ?? null,
+    facts: unknown?.facts ?? null,
+  });
 }
 
 /** Sets the device's `last_seen_at`, its versions, and, for a stored upload, `first_upload_at` when unset. */

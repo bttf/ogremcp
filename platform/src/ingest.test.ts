@@ -39,11 +39,14 @@ function sha256(data: string | Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** The `client` facts of a Classic Era client (§6.3.1). */
+const CLASSIC_ERA_CLIENT = `{ ["project_id"] = 2, ["interface"] = 11509 }`;
+
 /** A SavedVariables file the WoW interpreter parses (§6.3), with synthetic data. */
-function savedVariables(capturedAt: number, zone = "Elwynn Forest"): string {
+function savedVariables(capturedAt: number, zone = "Elwynn Forest", client = CLASSIC_ERA_CLIENT): string {
   return `OpenGamerMCPDB = {
   ["schema"] = 1,
-  ["client"] = { ["project_id"] = 2, ["interface"] = 11509 },
+  ["client"] = ${client},
   ["character"] = { ["guid"] = "Player-0000-00000001", ["name"] = "Zoela", ["realm"] = "Testrealm" },
   ["captured_at"] = ${capturedAt},
   ["state"] = { ["location"] = { ["zone"] = "${zone}" } },
@@ -80,6 +83,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
   let kits: KitRegistry;
   let server: Server | undefined;
   let base: string;
+  /** What the ingest endpoint logged. */
+  const logged: string[] = [];
 
   beforeAll(async () => {
     adaptersDir = mkdtempSync(join(tmpdir(), "ogmcp-adapters-"));
@@ -106,6 +111,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
       auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER, log: () => {} },
       oidc: provider,
       kits,
+      ingestLog: (line) => logged.push(line),
     });
     server = createServer(app).listen(0, "127.0.0.1");
     await once(server, "listening");
@@ -275,6 +281,52 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
     const snapshots = await pool.query("select 1 from snapshots where upload_id = $1", [rows[0]?.["id"]]);
     expect(snapshots.rowCount).toBe(0);
     expect((await deviceRow(deviceId))["first_upload_at"]).toEqual(expect.any(Date));
+  });
+
+  it("keeps an unregistered or unknown flavor's upload without a snapshot, and stores an experimental one", async () => {
+    const user = await newUser();
+    const { accessToken, deviceId } = await token(user);
+    logged.length = 0;
+    const unsupported = { status: "unsupported_flavor", message: "This version of World of Warcraft isn't supported yet." };
+
+    // TBC Classic maps to a flavor the manifest does not register (§6.3.1).
+    const tbc = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Hellfire Peninsula", `{ ["project_id"] = 5, ["interface"] = 20506 }`)));
+    expect(tbc.res.status).toBe(422);
+    expect(tbc.body).toEqual(unsupported);
+    expect(logged).toEqual([]);
+
+    // A Classic Era project ID with a Mists Classic interface fails the sanity check.
+    const mismatch = `{ ["project_id"] = 2, ["interface"] = 50504, ["build"] = "69934" }`;
+    const unknown = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Durotar", mismatch)));
+    expect(unknown.res.status).toBe(422);
+    expect(unknown.body).toEqual(unsupported);
+
+    const rows = await uploadsOf(deviceId);
+    expect(rows.map((row) => [row["parse_status"], row["flavor"], row["parse_error"], row["adapter_schema"]])).toEqual([
+      ["rejected", "tbc_classic", null, 1],
+      ["rejected", "unknown", null, 1],
+    ]);
+    const snapshots = await pool.query("select 1 from snapshots where upload_id = any($1)", [rows.map((row) => row["id"])]);
+    expect(snapshots.rowCount).toBe(0);
+
+    expect(logged.map((line) => JSON.parse(line) as unknown)).toEqual([
+      {
+        level: "warn",
+        message: expect.any(String),
+        user_uuid: user.uuid,
+        upload_uuid: rows[1]?.["uuid"],
+        kit: "wow",
+        reason: "interface 50504 does not match classic_era",
+        facts: { project_id: 2, season_id: null, version: null, build: "69934", interface: 50504 },
+      },
+    ]);
+
+    // Forever is experimental, and experimental flavors have no gate (D8).
+    const forever = await post(accessToken, upload(savedVariables(CAPTURED_AT, "Elwynn Forest", `{ ["project_id"] = 1, ["interface"] = 16001 }`)));
+    expect(forever.res.status).toBe(201);
+    const { rows: stored } = await pool.query("select flavor from snapshots where uuid = $1", [forever.body?.snapshot_uuid]);
+    expect(stored[0]).toEqual({ flavor: "forever" });
+    expect((await uploadsOf(deviceId)).at(-1)).toMatchObject({ parse_status: "parsed", flavor: null });
   });
 
   it("answers a body that ends inside the file part, and keeps serving", async () => {
