@@ -471,3 +471,67 @@ code {
 .og-copy [role="status"] {
   color: var(--og-dim);
 }
+
+/* Admin */
+
+.og-admin h2 {
+  margin: 32px 0 4px;
+  font-size: 18px;
+}
+
+.og-admin p {
+  margin: 0 0 8px;
+}
+
+.og-admin p[role="alert"] {
+  color: var(--og-error);
+}
+
+.og-admin__window {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.og-admin__window select {
+  padding: 4px 8px;
+  border: 1px solid var(--og-line);
+  border-radius: 6px;
+  background: none;
+  color: var(--og-ink);
+  font: inherit;
+}
+
+.og-table {
+  overflow-x: auto;
+}
+
+.og-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.og-table th,
+.og-table td {
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--og-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.og-table th {
+  color: var(--og-dim);
+  font-weight: 600;
+}
+
+.og-table td {
+  overflow-wrap: anywhere;
+}
+
+.og-table .og-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: normal;
+}

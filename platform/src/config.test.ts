@@ -48,6 +48,7 @@ describe("loadConfig", () => {
       searchCache: DEFAULT_SEARCH_CACHE,
       toolCallCaps: NO_TOOL_CALL_CAPS,
       bridgeDownloadUrl: null,
+      adminUserUuids: [],
       logLevel: "info",
       production: false,
     });
@@ -156,6 +157,15 @@ describe("loadConfig", () => {
     for (const bad of ["javascript:alert(1)", "http://downloads.example/ogmcp-bridge", "downloads.example"]) {
       expect(() => loadConfig({ DATABASE_URL: url, BRIDGE_DOWNLOAD_URL: bad })).toThrow("BRIDGE_DOWNLOAD_URL must be an https URL");
     }
+  });
+
+  it("reads ADMIN_USER_UUIDS as user uuids in lower case", () => {
+    const config = loadConfig({
+      DATABASE_URL: url,
+      ADMIN_USER_UUIDS: " 0B3D5E0A-7C1F-4E2B-9A6D-1F2E3D4C5B6A, 5f1e2d3c-4b5a-4968-8776-655443322110 ",
+    });
+    expect(config.adminUserUuids).toEqual(["0b3d5e0a-7c1f-4e2b-9a6d-1f2e3d4c5b6a", "5f1e2d3c-4b5a-4968-8776-655443322110"]);
+    expect(() => loadConfig({ DATABASE_URL: url, ADMIN_USER_UUIDS: "admin" })).toThrow("ADMIN_USER_UUIDS must list user uuids, comma-separated");
   });
 
   it("reads the OAuth server's keys as a pair, and never repeats one in an error", () => {

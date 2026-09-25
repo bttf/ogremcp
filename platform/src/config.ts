@@ -115,6 +115,11 @@ export interface Config {
    * says the download is not available yet.
    */
   bridgeDownloadUrl: string | null;
+  /**
+   * `ADMIN_USER_UUIDS`: the `users.uuid` of each user who may open `/admin`
+   * (§13.2, `admin.ts`), in lower case. Empty when it is unset: nobody may.
+   */
+  adminUserUuids: string[];
   /** `LOG_LEVEL`: the least severe level the log writes (§16). Unset, `info`. */
   logLevel: LogLevel;
   /** Whether `NODE_ENV` is `production`. Railpack sets it on Railway. */
@@ -336,6 +341,23 @@ function bridgeDownloadUrl(value: string | undefined): string | null {
   return url.href;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * `ADMIN_USER_UUIDS`, comma-separated, in lower case as Postgres writes a
+ * uuid. Unset or empty, nobody is an admin.
+ */
+function adminUserUuids(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== "")
+    .map((entry) => {
+      if (!UUID.test(entry)) throw new Error("ADMIN_USER_UUIDS must list user uuids, comma-separated");
+      return entry;
+    });
+}
+
 /** `LOG_LEVEL`, in any case. */
 function logLevel(value: string | undefined): LogLevel {
   const raw = (value ?? "").trim().toLowerCase();
@@ -438,6 +460,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       paid: optionalPositiveInt("TOOL_CALLS_PER_DAY_PAID", env["TOOL_CALLS_PER_DAY_PAID"]),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
+    adminUserUuids: adminUserUuids(env["ADMIN_USER_UUIDS"]),
     logLevel: logLevel(env["LOG_LEVEL"]),
     production: env["NODE_ENV"] === "production",
   };

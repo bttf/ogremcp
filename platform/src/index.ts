@@ -4,7 +4,8 @@
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
 // endpoint's discovery (§9), the kit tools of each user's enabled games (§10)
 // and search_game_info and fetch_game_page (§12), the bridge's device flow
-// (§8.1), and the bridge's kit and ingest endpoints (§8.2, §8.3).
+// (§8.1), the bridge's kit and ingest endpoints (§8.2, §8.3), and the §16.1
+// metrics of the Admin page (§13.2).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -149,6 +150,9 @@ const events = createEventRecorder({ pool: createEventsPool({ url: config.databa
 const caps = config.toolCallCaps;
 logger.info(`tool calls per day: free ${caps.free ?? "no cap"}, paid ${caps.paid ?? "no cap"}`);
 
+// Who may open /admin (§13.2). The line counts them and names none.
+logger.info(`admin users: ${config.adminUserUuids.length}`);
+
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
@@ -167,6 +171,7 @@ const app = createApp({
   ingest: config.ingest,
   events,
   toolCallCaps: caps,
+  adminUserUuids: config.adminUserUuids,
   https,
   trustProxyHops: config.trustProxyHops,
 });

@@ -1,5 +1,6 @@
 import { type RouteObject, useRoutes } from "react-router";
 
+import { Admin } from "./pages/Admin.js";
 import { ConnectAgent } from "./pages/ConnectAgent.js";
 import { ConnectedAgents } from "./pages/ConnectedAgents.js";
 import { Consent } from "./pages/Consent.js";
@@ -38,6 +39,9 @@ export const routes: RouteObject[] = [
           { path: "/agents", element: <ConnectedAgents /> },
         ],
       },
+      // Not under RequireSession: anyone but an admin, signed in or not, gets
+      // the Page not found page, as at a path that does not exist.
+      { path: "/admin", element: <Admin /> },
       { path: "*", element: <NotFound /> },
     ],
   },
