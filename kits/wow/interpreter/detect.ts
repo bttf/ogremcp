@@ -61,13 +61,28 @@ const INTERFACE: Readonly<Record<string, readonly [min: number, max: number]>> =
   retail: [100000, 999999],
 };
 
+/**
+ * A player-facing name for each flavor `detect` maps to. Ingest names a flavor
+ * the manifest does not register in its `unsupported_flavor` message, e.g.
+ * "TBC Classic isn't supported yet" (§6.3.1, §8.3).
+ */
+export const FLAVOR_NAMES = {
+  classic_era: "Classic Era",
+  classic_sod: "Season of Discovery",
+  tbc_classic: "TBC Classic",
+  mists_classic: "Mists of Pandaria Classic",
+  forever: "Forever",
+  retail: "Retail WoW",
+} as const satisfies Readonly<Record<string, string>>;
+
 interface Row {
   project: number;
   /** The row matches only this season, with nil read as NoSeason. Absent: any season. */
   season?: number;
   /** The row matches only an `interface` in its flavor's range. */
   keyedOnInterface?: true;
-  flavor: string;
+  /** Every flavor but "unknown" has a name in FLAVOR_NAMES. */
+  flavor: keyof typeof FLAVOR_NAMES | "unknown";
   rules: readonly string[];
 }
 

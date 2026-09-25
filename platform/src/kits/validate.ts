@@ -12,6 +12,12 @@ export interface KitSource {
   /** The kit's `manifest.json`, checked against the SDK's manifest schema. */
   manifest: unknown;
   interpreter: Interpreter<unknown>;
+  /**
+   * A player-facing name for each flavor the interpreter maps to, by key, e.g.
+   * `tbc_classic` → `TBC Classic`. Ingest names a flavor the manifest does not
+   * register with it (§6.3.1, §8.3).
+   */
+  flavorNames: Readonly<Record<string, string>>;
   /** The kit's `adapter/` folder. The build zips it (§5, §8.2). */
   adapterDir: string;
 }
