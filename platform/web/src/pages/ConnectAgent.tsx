@@ -47,7 +47,7 @@ export function ConnectAgent() {
             <Client name="Claude Code">
               <li>
                 Run this command:
-                <Copyable text={`claude mcp add --transport http ${CLAUDE_CODE_NAME} ${setup.mcp_url}`} label="Copy command" />
+                <Copyable text={`claude mcp add --transport http --scope user ${CLAUDE_CODE_NAME} ${setup.mcp_url}`} label="Copy command" />
               </li>
               <li>
                 In Claude Code, run <code>/mcp</code>, choose <code>{CLAUDE_CODE_NAME}</code>, and sign in to approve it.

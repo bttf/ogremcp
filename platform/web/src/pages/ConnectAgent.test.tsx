@@ -56,7 +56,7 @@ it("shows the MCP URL with a copy button, and steps for each target client", asy
   expect(container.textContent).toContain("Claude's Free plan allows one custom connector.");
   expect([...container.querySelectorAll(".og-copy code")].map((code) => code.textContent)).toEqual([
     url,
-    `claude mcp add --transport http ogmcp ${url}`,
+    `claude mcp add --transport http --scope user ogmcp ${url}`,
   ]);
 
   container.querySelector<HTMLButtonElement>(".og-copy button")?.click();
