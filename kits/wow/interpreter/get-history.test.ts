@@ -108,7 +108,7 @@ it("passes limit, flavor, and character to ToolContext, and returns only the nam
 });
 
 it("rejects a bad since or limit with a user-facing message, without reading history", async () => {
-  for (const args of [{}, { since: "yesterday" }, { since: "2026-13-01" }, { since: 1727179200 }, { since: "2026-09-24", limit: 0 }, { since: "2026-09-24", limit: 2.5 }]) {
+  for (const args of [{}, { since: "yesterday" }, { since: "2026-13-01" }, { since: "2026-02-30" }, { since: 1727179200 }, { since: "2026-09-24", limit: 0 }, { since: "2026-09-24", limit: 2.5 }]) {
     const { result, ctx } = await call(args, eraHistory(1));
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toMatch(/^(since|limit) must be/);
@@ -151,5 +151,40 @@ it("over the size cap, leaves out the quest descriptions, then the oldest snapsh
   expect(quests.entries[0]).not.toHaveProperty("description");
   expect(data.notes).toEqual([
     `To stay under the server's size limit, this result leaves out the quest descriptions and lists only the newest ${shown} of the 20 snapshots. Call wow_get_history with fewer sections to get the rest.`,
+  ]);
+});
+
+it("with one snapshot left still over the cap, cuts its bag list the way wow_get_state does (§10.5)", async () => {
+  const history = eraHistory(3);
+  for (const { state } of history) {
+    if (state.inventory === null) throw new Error("The era stub has no inventory.");
+    for (let i = 0; i < 96; i++) {
+      state.inventory.items.push({
+        item_id: 5000 + i,
+        name: `Test Item Number ${i}`,
+        count: 1,
+        quality: 1,
+        item_level: 10,
+        min_level: 5,
+        equip_loc: null,
+        type: "Trade Goods",
+        sub_type: "Cloth",
+        sell_price: 25,
+        stats: null,
+      });
+    }
+  }
+  const cap = 8 * 1024;
+  const { result } = await call({ since: "2026-09-01", sections: ["inventory"] }, history, cap);
+
+  expect(utf8Length(result.content[0]?.text ?? "")).toBeLessThanOrEqual(cap);
+  const data = content(result);
+  expect(data.snapshots.map((entry) => entry.snapshot_at)).toEqual([history[0]?.snapshotAt.toISOString()]);
+  const items = (data.snapshots[0]?.state["inventory"] as { items: object[] }).items;
+  const total = history[0]?.state.inventory?.items.length ?? 0;
+  expect(items.length).toBeGreaterThan(0);
+  expect(items.length).toBeLessThan(total);
+  expect(data.notes).toEqual([
+    `To stay under the server's size limit, this result lists only the newest 1 of the 3 snapshots and lists only the first ${items.length} of the ${total} bag items. Call wow_get_history with fewer sections to get the rest.`,
   ]);
 });

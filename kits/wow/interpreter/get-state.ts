@@ -188,35 +188,75 @@ function trim(sections: BuiltSections, maxBytes: number, build: (state: JsonObje
   const full = build(sections, null);
   if (fits(full)) return full;
 
-  let state: JsonObject = sections;
-  let descriptionsLeftOut = false;
-  const { quests, inventory } = sections;
-  if (quests && quests.entries.some((quest) => quest.description !== null)) {
-    state = { ...state, quests: { ...quests, entries: quests.entries.map(({ description: _, ...quest }) => quest) } };
-    descriptionsLeftOut = true;
-  }
-  const withoutDescriptions = build(state, trimNote(descriptionsLeftOut, null));
-  if (fits(withoutDescriptions) || !inventory || inventory.items.length === 0) return withoutDescriptions;
-
-  // The most items that fit, by binary search: fewer items never take more bytes.
-  const items = inventory.items;
-  const cut = (shown: number) =>
-    build({ ...state, inventory: { ...inventory, items: items.slice(0, shown) } }, trimNote(descriptionsLeftOut, { shown, total: items.length }));
-  let low = 0;
-  let high = items.length - 1;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (fits(cut(mid))) low = mid;
-    else high = mid - 1;
-  }
-  return cut(low);
+  const descriptionsLeftOut = hasDescriptions(sections);
+  const state = descriptionsLeftOut ? withoutDescriptions(sections) : sections;
+  const note = (bags: Cut | null) => trimNote("wow_get_state", { descriptionsLeftOut, bags });
+  const withoutDescriptionsResult = build(state, note(null));
+  const { inventory } = sections;
+  if (fits(withoutDescriptionsResult) || !inventory || inventory.items.length === 0) return withoutDescriptionsResult;
+  return cutBags(state, inventory, (cutState, bags) => build(cutState, note(bags)), fits);
 }
 
-/** The note of a trimmed result: what it left out, and how to get it. Null when it left out nothing. */
-function trimNote(descriptionsLeftOut: boolean, bags: { shown: number; total: number } | null): string | null {
+/** How many of a list a trimmed result shows. */
+export interface Cut {
+  shown: number;
+  total: number;
+}
+
+type BuiltInventory = NonNullable<BuiltSections["inventory"]>;
+
+/** Whether `sections` has a quest description to leave out. */
+export function hasDescriptions(sections: BuiltSections): boolean {
+  return sections.quests?.entries.some((quest) => quest.description !== null) ?? false;
+}
+
+/** `sections` without the quest descriptions. */
+export function withoutDescriptions(sections: BuiltSections): JsonObject {
+  const { quests } = sections;
+  if (!quests) return sections;
+  return { ...sections, quests: { ...quests, entries: quests.entries.map(({ description: _, ...quest }) => quest) } };
+}
+
+/**
+ * The result `build` makes of `state` with the most bag items of `inventory`
+ * that `fits`, in bag order, and none when even one does not fit. Only the
+ * bag list changes: the gear comparison was made from the whole list.
+ */
+export function cutBags(
+  state: JsonObject,
+  inventory: BuiltInventory,
+  build: (state: JsonObject, bags: Cut) => JsonObject,
+  fits: (result: JsonObject) => boolean,
+): JsonObject {
+  const total = inventory.items.length;
+  const cut = (shown: number) => build({ ...state, inventory: { ...inventory, items: inventory.items.slice(0, shown) } }, { shown, total });
+  return cut(mostThatFit(0, total - 1, (shown) => fits(cut(shown))));
+}
+
+/**
+ * The largest count from `low` to `high` that `fits`, by binary search, or
+ * `low` when none does. A trimmed result with fewer items never takes more
+ * bytes, so a count fits when a larger one does.
+ */
+export function mostThatFit(low: number, high: number, fits: (count: number) => boolean): number {
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(mid)) low = mid;
+    else high = mid - 1;
+  }
+  return low;
+}
+
+/**
+ * The note of a trimmed result of `tool`: what it left out, and how to get
+ * it. Null when it left out nothing.
+ */
+export function trimNote(tool: string, left: { descriptionsLeftOut: boolean; snapshots?: Cut | null; bags: Cut | null }): string | null {
   const parts: string[] = [];
-  if (descriptionsLeftOut) parts.push("leaves out the quest descriptions");
-  if (bags !== null) parts.push(`lists only the first ${bags.shown} of the ${bags.total} bag items`);
+  if (left.descriptionsLeftOut) parts.push("leaves out the quest descriptions");
+  if (left.snapshots) parts.push(`lists only the newest ${left.snapshots.shown} of the ${left.snapshots.total} snapshots`);
+  if (left.bags) parts.push(`lists only the first ${left.bags.shown} of the ${left.bags.total} bag items`);
   if (parts.length === 0) return null;
-  return `To stay under the server's size limit, this result ${parts.join(" and ")}. Call wow_get_state with fewer sections to get the rest.`;
+  const list = parts.length < 3 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+  return `To stay under the server's size limit, this result ${list}. Call ${tool} with fewer sections to get the rest.`;
 }

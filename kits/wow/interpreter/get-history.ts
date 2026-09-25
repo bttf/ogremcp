@@ -5,7 +5,20 @@
 // sections (sections.ts). It goes out as `structuredContent` and as the same
 // JSON in a text block, trimmed to the size cap (§10.5).
 import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogmcp/sdk";
-import { envelope, EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, type JsonObject, readInput, stateRules } from "./get-state.js";
+import {
+  type Cut,
+  cutBags,
+  envelope,
+  EXPERIMENTAL_FLAVORS,
+  FOREVER_PATH_NOTE,
+  hasDescriptions,
+  type JsonObject,
+  mostThatFit,
+  readInput,
+  stateRules,
+  trimNote,
+  withoutDescriptions,
+} from "./get-state.js";
 import type { WowState } from "./schema.js";
 import { buildSections, type BuiltSections, type Section, SECTIONS } from "./sections.js";
 
@@ -43,8 +56,11 @@ export function describeGetHistory(experimental: readonly string[]): string {
 const NO_HISTORY_MESSAGE =
   "No World of Warcraft snapshot from that time on matches. Try an earlier since, or call wow_get_state for the latest snapshot.";
 
-/** An ISO-8601 date, or date and time with an optional offset. Group 1 is the time, group 2 the offset. */
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/i;
+/**
+ * An ISO-8601 date, or date and time with an optional offset. Groups 1 to 3
+ * are the year, month, and day, group 4 the time, and group 5 the offset.
+ */
+const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/i;
 
 const BAD_SINCE_MESSAGE = "since must be an ISO-8601 date or date and time, such as 2026-09-24 or 2026-09-24T18:00:00Z.";
 
@@ -111,9 +127,14 @@ function readSince(since: unknown): Date | null {
   const text = since.trim();
   const match = ISO_8601.exec(text);
   if (match === null) return null;
+  // JavaScript rolls a day past the month's end, such as 2026-02-30, into
+  // the next month. It refuses a bad time on its own.
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return null;
   // JavaScript reads a date alone as UTC but a date and time without an
   // offset as local time, which is the server's.
-  const date = new Date(match[1] !== undefined && match[2] === undefined ? `${text}Z` : text);
+  const date = new Date(match[4] !== undefined && match[5] === undefined ? `${text}Z` : text);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -144,10 +165,11 @@ function historyResult(snapshots: readonly Snapshot<WowState>[], sections: reado
 /**
  * The result `build` makes of `built`, newest first, with JSON of at most
  * `maxBytes` (§10.5). Over the cap, the quest descriptions of every snapshot
- * are left out first, then the oldest snapshots, down to the newest one.
- * `build` gets a note that says what was left out and suggests fewer
- * sections. A result that does not fit even so is returned as it is: the
- * platform answers it with a user-facing error.
+ * are left out first. Then the oldest snapshots, down to the newest one.
+ * Then the newest one's bag list is cut to the most items that fit, as
+ * `wow_get_state` does. `build` gets a note that says what was left out and
+ * suggests fewer sections. A result that does not fit even so is returned as
+ * it is: the platform answers it with a user-facing error.
  */
 function trim(
   built: readonly { snapshot: Snapshot<WowState>; sections: BuiltSections }[],
@@ -158,35 +180,17 @@ function trim(
   const full = build(built.map(({ snapshot, sections }) => ({ snapshot, state: sections })), null);
   if (fits(full)) return full;
 
-  const descriptionsLeftOut = built.some(({ sections }) => sections.quests?.entries.some((quest) => quest.description !== null));
+  const descriptionsLeftOut = built.some(({ sections }) => hasDescriptions(sections));
   const kept = built.map(({ snapshot, sections }) => ({ snapshot, state: descriptionsLeftOut ? withoutDescriptions(sections) : sections }));
-  const withoutDescriptionsResult = build(kept, trimNote(descriptionsLeftOut, null));
-  if (fits(withoutDescriptionsResult) || kept.length === 1) return withoutDescriptionsResult;
+  const total = kept.length;
+  const note = (shown: number, bags: Cut | null) =>
+    trimNote("wow_get_history", { descriptionsLeftOut, snapshots: shown < total ? { shown, total } : null, bags });
+  const cut = (shown: number) => build(kept.slice(0, shown), note(shown, null));
+  const result = cut(mostThatFit(1, total, (shown) => fits(cut(shown))));
+  const [newest] = kept;
+  const inventory = built[0]?.sections.inventory;
+  if (fits(result) || newest === undefined || !inventory || inventory.items.length === 0) return result;
 
-  // The most snapshots that fit, newest first, by binary search: fewer snapshots never take more bytes.
-  const cut = (shown: number) => build(kept.slice(0, shown), trimNote(descriptionsLeftOut, { shown, total: kept.length }));
-  let low = 1;
-  let high = kept.length - 1;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (fits(cut(mid))) low = mid;
-    else high = mid - 1;
-  }
-  return cut(low);
-}
-
-/** `sections` without the quest descriptions. */
-function withoutDescriptions(sections: BuiltSections): JsonObject {
-  const { quests } = sections;
-  if (!quests) return sections;
-  return { ...sections, quests: { ...quests, entries: quests.entries.map(({ description: _, ...quest }) => quest) } };
-}
-
-/** The note of a trimmed result: what it left out, and how to get it. Null when it left out nothing. */
-function trimNote(descriptionsLeftOut: boolean, snapshots: { shown: number; total: number } | null): string | null {
-  const parts: string[] = [];
-  if (descriptionsLeftOut) parts.push("leaves out the quest descriptions");
-  if (snapshots !== null) parts.push(`lists only the newest ${snapshots.shown} of the ${snapshots.total} snapshots`);
-  if (parts.length === 0) return null;
-  return `To stay under the server's size limit, this result ${parts.join(" and ")}. Call wow_get_history with fewer sections to get the rest.`;
+  // Only the newest snapshot is left, and it is still over the cap.
+  return cutBags(newest.state, inventory, (state, bags) => build([{ snapshot: newest.snapshot, state }], note(1, bags)), fits);
 }
