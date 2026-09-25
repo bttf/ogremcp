@@ -11,6 +11,10 @@ Open Gamer MCP (`ogmcp`) connects a video game to any AI agent through one remot
 | `platform/` | `@ogmcp/platform`: service, web UI, MCP server, bridge API, OAuth server | AGPL-3.0-or-later |
 | `bridge/` | Go module: the bridge that runs on the player's PC | MIT |
 
+## Self-host
+
+To run your own server with Docker Compose, see [`docs/self-host.md`](docs/self-host.md).
+
 ## License
 
 Each of the four paths above has its own `LICENSE` file. `platform/` is licensed under the GNU Affero General Public License v3.0 or later. `packages/sdk/`, `kits/wow/`, and `bridge/` are licensed under the MIT License. Every file outside those four paths is licensed under the MIT License in the root [`LICENSE`](LICENSE).

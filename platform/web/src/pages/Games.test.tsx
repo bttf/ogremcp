@@ -58,6 +58,7 @@ it("lists WoW with a switch that enables it, then shows its in-game tips", async
     "Connect your agent",
     "Devices",
     "Connected agents",
+    "Account",
   ]);
   expect(toggle.checked).toBe(false);
   expect(container.querySelector(".og-tips")).toBeNull();

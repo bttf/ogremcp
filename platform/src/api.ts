@@ -2,6 +2,7 @@ import express, { type RequestHandler, type Router } from "express";
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
 
+import { deleteAccount, deleteUserData } from "./account.js";
 import { listAgentGrants, revokeAgentGrant } from "./agents.js";
 import { deviceName, findDevice, listDevices, renameDevice, revokeDevice } from "./devices.js";
 import type { ProviderName } from "./identities.js";
@@ -9,10 +10,12 @@ import type { KitRegistry } from "./kits/registry.js";
 import { mcpResource } from "./mcp.js";
 import { requireSameOrigin } from "./same-origin.js";
 import type { SignInProviders } from "./sign-in-providers.js";
-import { currentUser } from "./web-sessions.js";
+import { currentUser, type WebSessions } from "./web-sessions.js";
 
 export interface ApiOptions {
   pool: Pool;
+  /** Web sessions, whose cookie "Delete account" clears. */
+  sessions: WebSessions;
   providers: SignInProviders;
   /** `PUBLIC_BASE_URL`. State-changing requests must come from its origin. */
   publicBaseUrl: string;
@@ -79,6 +82,10 @@ export interface Game {
  *   live agent grants (`agents.ts`).
  * - `DELETE /api/v1/agents/:id`: revokes the agent grant and all its tokens
  *   (`revokeAgentGrant`), and answers 204.
+ * - `DELETE /api/v1/account/data`: "Delete my data" (`deleteUserData`,
+ *   §11). Answers 204.
+ * - `DELETE /api/v1/account`: "Delete account" (`deleteAccount`, §11). It
+ *   ends every web session of the user, clears the cookie, and answers 204.
  *
  * The device and agent routes answer 404 `not_found` for a uuid or id that
  * is not one of the signed-in user's devices or agent grants. The bridge's
@@ -88,7 +95,7 @@ export interface Game {
  * a web session. Every route that changes something needs this site's
  * `Origin`. Any other path under `/api` answers a JSON 404.
  */
-export function apiRouter({ pool, providers, publicBaseUrl, kits, oidc, bridgeDownloadUrl = null }: ApiOptions): Router {
+export function apiRouter({ pool, sessions, providers, publicBaseUrl, kits, oidc, bridgeDownloadUrl = null }: ApiOptions): Router {
   const router = express.Router();
 
   const sameOrigin = requireSameOrigin(publicBaseUrl);
@@ -235,6 +242,27 @@ export function apiRouter({ pool, providers, publicBaseUrl, kits, oidc, bridgeDo
     };
     router.delete("/api/v1/agents/:id", sameOrigin, revokeOwnAgent);
   }
+
+  router.delete("/api/v1/account/data", sameOrigin, async (_req, res) => {
+    const user = currentUser(res);
+    if (user === null) {
+      res.status(401).json({ error: "signed_out" });
+      return;
+    }
+    await deleteUserData(pool, user);
+    res.status(204).end();
+  });
+
+  router.delete("/api/v1/account", sameOrigin, async (_req, res) => {
+    const user = currentUser(res);
+    if (user === null) {
+      res.status(401).json({ error: "signed_out" });
+      return;
+    }
+    await deleteAccount(pool, user);
+    sessions.clearCookie(res);
+    res.status(204).end();
+  });
 
   router.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });
