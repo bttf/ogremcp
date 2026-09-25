@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { createEventRecorder } from "./events.js";
 import { parseUpload, writeSnapshot } from "./ingest.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { writeAdapterZips } from "./kits/adapter.js";
@@ -67,6 +68,7 @@ async function serve(
     auth: { pool, sessions, providers: { google: null, discord: null }, publicBaseUrl: ISSUER },
     oidc,
     kits,
+    events: createEventRecorder({ pool }),
     trustProxyHops: 1,
   });
   server = createServer(app).listen(0, "127.0.0.1");

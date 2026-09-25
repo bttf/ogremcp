@@ -2,7 +2,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 
-import { createEventRecorder, type EventRecorder } from "./events.js";
+import type { EventRecorder } from "./events.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
@@ -95,7 +95,7 @@ export interface ToolRegistryOptions {
    * user-facing, or whose result was over the size cap. Default: `logger.error`.
    */
   log?: (line: string) => void;
-  /** Where each call's events row goes (§16). Default: a recorder on `pool`. */
+  /** Where each call's events row goes (§16). Default: none, and nothing is recorded. */
   events?: EventRecorder;
 }
 
@@ -129,7 +129,7 @@ export function createToolRegistry({
   settings = DEFAULT_TOOL_CONTEXT,
   search = null,
   log = logger.error,
-  events = createEventRecorder({ pool, log }),
+  events,
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);
@@ -180,7 +180,7 @@ export function createToolRegistry({
         answer = { result: gameOffResult(off.kit.name), error: "game_off" };
       }
       const snapshotAt = tool?.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
-      events.record({
+      events?.record({
         kind: "tool_call",
         userId: user.id,
         occurredAt,

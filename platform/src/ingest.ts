@@ -8,7 +8,7 @@ import busboy from "busboy";
 import type { Request, RequestHandler, Response } from "express";
 import type { Pool, PoolClient } from "pg";
 
-import { createEventRecorder, type EventRecorder, type IngestEvent } from "./events.js";
+import type { EventRecorder, IngestEvent } from "./events.js";
 import { UploadLimiter } from "./ingest-limit.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { formatLine, writeLine } from "./log.js";
@@ -69,12 +69,14 @@ import { currentToken, type VerifiedToken } from "./oidc-tokens.js";
  * `snapshot_at` is the adapter's stamp (`Parsed.capturedAt`), else
  * `meta.mtime`, else the receipt time (§6.2).
  *
- * Every answer with a §8.3 `status` writes one events row (`events.ts`,
- * §16.1) after it is sent: the user, the device, the status, the latency,
- * and what is known of the upload by then: `meta.client`, the kit and its
- * version, and the parse's status, flavor, and adapter schema. A 401 names
- * no live device and writes none, nor does a request that fails with an
- * error (500).
+ * An answer writes one events row (`events.ts`, §16.1) after it is sent:
+ * the user, the device, the status, the latency, and what is known of the
+ * upload by then: `meta.client`, the kit and its version, and the parse's
+ * status, flavor, and adapter schema. `bad_request` and `rate_limited`
+ * answers write none, so a device that loops on them cannot grow the table;
+ * the access log has them. Nor does a 401, which names no live device. A
+ * request that fails with an error in step 4, such as an interpreter crash,
+ * writes one with status `error`, and the app answers 500.
  */
 
 /** The ingest limits (*proposed*, §0). `config.ts` reads them from the environment. */
@@ -210,7 +212,7 @@ export interface IngestOptions {
   settings: IngestSettings;
   /** Receives one JSON line per upload whose flavor is "unknown" (§6.3.1). Default: the platform's log, at `warn`. */
   log?: (line: string) => void;
-  /** Where each request's events row goes (§16.1). Default: a recorder on `pool`. */
+  /** Where each request's events row goes (§16.1). Default: none, and nothing is recorded. */
   events?: EventRecorder;
 }
 
@@ -220,7 +222,7 @@ export function ingestHandler({
   kits,
   settings,
   log = (line) => writeLine("warn", line),
-  events = createEventRecorder({ pool }),
+  events,
 }: IngestOptions): RequestHandler {
   const limiter = new UploadLimiter(settings);
   return async (req, res) => {
@@ -232,11 +234,15 @@ export function ingestHandler({
 
     /** `meta`, once checked. */
     let checked: CheckedMeta | null = null;
-    /** Sends the answer, then records the request. */
+    /** Records the request with `status`. */
+    const record = (status: IngestEvent["status"], parse: UploadParse | null): void => {
+      events?.record(ingestEvent(device, occurredAt, performance.now() - started, status, checked, parse));
+    };
+    /** Sends the answer, then records the request, unless it is a refusal a looping device can repeat. */
     const finish = (outcome: Outcome, parse: UploadParse | null = null): void => {
-      const latencyMs = performance.now() - started;
       reply(req, res, outcome);
-      events.record(ingestEvent(device, occurredAt, latencyMs, outcome, checked, parse));
+      const { status } = outcome.answer;
+      if (status !== "bad_request" && status !== "rate_limited") record(status, parse);
     };
 
     // The limit's key is in `meta`, so it is taken as `meta` is read, before the file part.
@@ -262,18 +268,25 @@ export function ingestHandler({
       return finish(badRequest("meta.sha256 is not the SHA-256 of the uncompressed file."));
     }
 
-    const stored = await store(pool, device, meta, parts.file, bytes, log);
+    let stored: Awaited<ReturnType<typeof store>>;
+    try {
+      stored = await store(pool, device, meta, parts.file, bytes, log);
+    } catch (err) {
+      // An interpreter crash or a database failure. The app's error handler answers 500.
+      record("error", null);
+      throw err;
+    }
     if (stored === null) return refuseDevice(res);
     finish(stored.outcome, stored.parse);
   };
 }
 
-/** The events row of a request of `device` answered with `outcome`. */
+/** The events row of a request of `device` with `status`. */
 function ingestEvent(
   device: Device,
   occurredAt: Date,
   latencyMs: number,
-  outcome: Outcome,
+  status: IngestEvent["status"],
   meta: CheckedMeta | null,
   parse: UploadParse | null,
 ): IngestEvent {
@@ -283,7 +296,7 @@ function ingestEvent(
     deviceId: device.id,
     occurredAt,
     latencyMs,
-    status: outcome.answer.status,
+    status,
     meta: meta && {
       kit: meta.kit.key,
       kitVersion: meta.kit.manifest.version,

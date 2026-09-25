@@ -1,6 +1,7 @@
 -- 0007: the events table (§11, §16): one row per MCP tool call and one per
--- ingest request, written by platform/src/events.ts. /admin reads it for the
--- §16.1 metrics. Visits (§3) are derived from the gaps between a user's
+-- ingest request, written by platform/src/events.ts. Ingest answers
+-- bad_request and rate_limited write none: a device that loops on them would
+-- grow the table without limit. /admin reads it for the §16.1 metrics. Visits (§3) are derived from the gaps between a user's
 -- tool-call rows (`VISITS_SQL` in events.ts); there are no MCP session ids
 -- (D12).
 --
@@ -61,9 +62,10 @@ create table events (
   -- ingest: the device of the bridge's token (§8.1). A device is deleted
   -- only with its user, which deletes the row too; the row never blocks it.
   device_id             bigint      references devices (id) on delete set null,
-  -- ingest: the §8.3 status of the answer.
+  -- ingest: the §8.3 status of the answer, or error when the request failed
+  -- with an error, such as an interpreter crash, and got a 500.
   status                text        check (status in ('stored', 'duplicate', 'parse_error', 'unsupported_flavor', 'too_large',
-                                                      'device_limit', 'rate_limited', 'bad_request')),
+                                                      'device_limit', 'error')),
   -- ingest: the upload's parse_status, when the upload was parsed.
   parse_status          text        check (parse_status in ('parsed', 'failed', 'rejected')),
   -- ingest: meta.kit, and the manifest version of the kit that read it.

@@ -4,7 +4,7 @@ import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createPool } from "./db.js";
-import { createEventRecorder, listVisits } from "./events.js";
+import { createEventRecorder, createEventsPool, type EventRecorder, listVisits } from "./events.js";
 import { parseUpload, writeSnapshot } from "./ingest.js";
 import { KIT_SOURCES, type Kit, type KitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -47,17 +47,25 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
   const name = `ogmcp_test_${randomBytes(6).toString("hex")}`;
   let admin: Pool;
   let pool: Pool;
+  let url: string;
+  /** The recorder as `index.ts` makes it: on a pool of its own. */
+  let events: EventRecorder;
+  let eventsPool: Pool;
 
   beforeAll(async () => {
     admin = createPool({ url: TEST_DATABASE_URL ?? "", queryTimeoutMs: 10_000, max: 1 });
     await admin.query(`create database "${name}"`);
-    const url = new URL(TEST_DATABASE_URL ?? "");
-    url.pathname = `/${name}`;
-    pool = createPool({ url: url.toString(), queryTimeoutMs: 10_000, max: 4 });
+    const parsed = new URL(TEST_DATABASE_URL ?? "");
+    parsed.pathname = `/${name}`;
+    url = parsed.toString();
+    pool = createPool({ url, queryTimeoutMs: 10_000, max: 4 });
     await migrate(pool);
+    eventsPool = createEventsPool({ url });
+    events = createEventRecorder({ pool: eventsPool });
   });
 
   afterAll(async () => {
+    await eventsPool?.end();
     await pool?.end();
     try {
       await admin.query(`drop database if exists "${name}" with (force)`);
@@ -103,7 +111,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
   }
 
   it("writes one row per tool call, with the args summary and no free text but the query", async () => {
-    const tools = createToolRegistry({ pool, kits: KITS, search });
+    const tools = createToolRegistry({ pool, kits: KITS, search, events });
     const user = await player({ wow: true, snapshot: true });
     const caller = { userUuid: user.uuid, clientId: CLIENT_ID };
 
@@ -155,7 +163,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
         throw Object.assign(new Error("duplicate key value: (Zoela)"), { code: "23505" });
       },
     };
-    const tools = createToolRegistry({ pool, kits: KITS, platformTools: [listGames, searchGameInfo, broken], log: () => {} });
+    const tools = createToolRegistry({ pool, kits: KITS, platformTools: [listGames, searchGameInfo, broken], log: () => {}, events });
     const user = await player({ wow: false, snapshot: true });
     const caller = { userUuid: user.uuid, clientId: CLIENT_ID };
 
@@ -179,13 +187,34 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
     const expected = await tools.call(caller, "wow_get_state", { sections: ["location"] });
     expect(await failing.call(caller, "wow_get_state", { sections: ["location"] })).toEqual(expected);
     await vi.waitFor(() => expect(lines).toEqual(["event insert failed: kind=tool_call code=57P01"]));
+  });
 
-    // Past the bound on pending inserts, an event is dropped.
-    const stuck = { query: () => new Promise(() => {}) } as unknown as Pool;
-    const bounded = createToolRegistry({ pool, kits: KITS, events: createEventRecorder({ pool: stuck, maxPending: 1, log: (line) => lines.push(line) }) });
-    await bounded.call(caller, "list_games", {});
-    expect(await bounded.call(caller, "list_games", {})).toMatchObject({ structuredContent: { games: [{ game: "wow" }] } });
-    expect(lines.at(-1)).toBe("event dropped: kind=tool_call pending=1");
+  it("answers tool calls in normal time while the events table is locked, and drops events past the bound", async () => {
+    const user = await player({ wow: true, snapshot: true });
+    const caller = { userUuid: user.uuid, clientId: CLIENT_ID };
+    const lines: string[] = [];
+    // A statement timeout longer than the test: the inserts wait on the lock throughout.
+    const waitingPool = createEventsPool({ url, statementTimeoutMs: 30_000 });
+    const tools = createToolRegistry({ pool, kits: KITS, events: createEventRecorder({ pool: waitingPool, maxPending: 3, log: (line) => lines.push(line) }) });
+    const locker = await pool.connect();
+    try {
+      await locker.query("begin");
+      await locker.query("lock table events in access exclusive mode");
+      // More calls than the request pool has connections, and than the bound.
+      for (let i = 0; i < 8; i++) {
+        const started = performance.now();
+        expect(await tools.call(caller, "wow_get_state", { sections: ["location"] })).toMatchObject({ structuredContent: { flavor: "classic_era" } });
+        expect(performance.now() - started).toBeLessThan(1_000);
+      }
+      expect(lines).toEqual([]);
+      await locker.query("rollback");
+      await eventsOf(user.id, 3);
+      await vi.waitFor(() => expect(lines).toEqual(["events dropped: count=5"]));
+    } finally {
+      await locker.query("rollback").catch(() => {});
+      locker.release();
+      await waitingPool.end();
+    }
   });
 
   it("groups a user's tool calls into visits by gap (§3)", async () => {
@@ -225,7 +254,10 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
 
   it("deletes a user's events with the user", async () => {
     const user = await player({ wow: true, snapshot: true });
-    await createToolRegistry({ pool, kits: KITS, search }).call({ userUuid: user.uuid, clientId: CLIENT_ID }, "search_game_info", { game: "wow", query: "hogger" });
+    await createToolRegistry({ pool, kits: KITS, search, events }).call({ userUuid: user.uuid, clientId: CLIENT_ID }, "search_game_info", {
+      game: "wow",
+      query: "hogger",
+    });
     await pool.query("insert into events (user_id, occurred_at, kind, latency_ms, device_id, status) values ($1, now(), 'ingest', 1, $2, 'stored')", [
       user.id,
       user.deviceId,

@@ -17,15 +17,20 @@ export interface PoolOptions {
   queryTimeoutMs: number;
   /** Most open connections. Default 5. */
   max?: number;
+  /** Most time a query waits for a connection. Default 10 s. */
+  connectionTimeoutMs?: number;
+  /** The server's `statement_timeout`: it cancels a statement that runs, or waits on a lock, longer. Default: none. */
+  statementTimeoutMs?: number;
 }
 
-export function createPool({ url, queryTimeoutMs, log = logger.error, max = 5 }: PoolOptions): Pool {
+export function createPool({ url, queryTimeoutMs, log = logger.error, max = 5, connectionTimeoutMs = 10_000, statementTimeoutMs }: PoolOptions): Pool {
   const pool = new Pool({
     connectionString: url,
     max,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: connectionTimeoutMs,
     idleTimeoutMillis: 30_000,
     query_timeout: queryTimeoutMs,
+    ...(statementTimeoutMs !== undefined && { statement_timeout: statementTimeoutMs }),
   });
   // An idle connection that fails emits here. Without a listener the process
   // would exit, and the default listener would print the message.

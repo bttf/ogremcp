@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 
-import { failureCode } from "./db.js";
+import { createPool, failureCode } from "./db.js";
 import type { IngestStatus, UploadParse } from "./ingest.js";
 import { logger } from "./log.js";
 import type { ToolCallError } from "./tool-envelope.js";
@@ -10,10 +10,12 @@ import type { ToolCallError } from "./tool-envelope.js";
  * per ingest request (`ingest.ts`), for the §16.1 metrics on `/admin`.
  *
  * Recording never breaks or slows a request. `record` starts the insert and
- * returns at once; it never throws. A failed insert is logged by its code
- * alone, and the request's answer stays what it was. At most `maxPending`
- * inserts wait on the database at once: an event past that is dropped and
- * logged, so a slow database cannot grow a queue without bound.
+ * returns at once; it never throws. The inserts run on a pool of their own
+ * (`createEventsPool`), so a slow or locked events table never holds a
+ * connection a request needs. A failed insert is logged by its code alone,
+ * and the request's answer stays what it was. At most `maxPending` inserts
+ * wait at once: an event past that is dropped, and the drops are logged by
+ * count, so a slow database cannot grow a queue without bound.
  *
  * A row holds no text the agent or the player wrote, except
  * search_game_info's normalized query: user data, which "Delete my data"
@@ -57,7 +59,11 @@ export interface IngestEvent {
   deviceId: string;
   occurredAt: Date;
   latencyMs: number;
-  status: IngestStatus;
+  /**
+   * The §8.3 status of the answer, or `error` when the request failed with an
+   * error, such as an interpreter crash, and the app answered 500.
+   */
+  status: Exclude<IngestStatus, "bad_request" | "rate_limited"> | "error";
   /** The checked `meta`, or null when the request failed before it. */
   meta: {
     kit: string;
@@ -77,15 +83,45 @@ export interface EventRecorder {
   record(event: RecordedEvent): void;
 }
 
-/** The most inserts that wait on the database at once, when `maxPending` is not given. */
-export const DEFAULT_MAX_PENDING_EVENTS = 50;
+/** The most inserts that wait at once, when `maxPending` is not given. */
+export const DEFAULT_MAX_PENDING_EVENTS = 10;
 
 export interface EventRecorderOptions {
+  /** The pool the inserts run on: `createEventsPool`'s, not the one requests use. */
   pool: Pool;
   /** Default: `DEFAULT_MAX_PENDING_EVENTS`. */
   maxPending?: number;
-  /** Receives one line per event dropped or not written. Default: `logger.error`. */
+  /** Receives one line per insert that failed, and one per count of events dropped. Default: `logger.error`. */
   log?: (line: string) => void;
+}
+
+/** The events pool's connections, and its connect and statement timeouts, in milliseconds. */
+export const EVENTS_POOL = { max: 2, connectionTimeoutMs: 2_000, statementTimeoutMs: 2_000 } as const;
+
+export interface EventsPoolOptions {
+  /** `DATABASE_URL`. */
+  url: string;
+  /** Default: `EVENTS_POOL.statementTimeoutMs`. */
+  statementTimeoutMs?: number;
+  /** Receives one line per error of an idle connection. Default: `logger.error`. */
+  log?: (line: string) => void;
+}
+
+/**
+ * The events recorder's own pool: `EVENTS_POOL.max` connections, a short
+ * connect timeout, and a `statement_timeout`, which also ends an insert that
+ * waits on a lock.
+ */
+export function createEventsPool({ url, statementTimeoutMs = EVENTS_POOL.statementTimeoutMs, log }: EventsPoolOptions): Pool {
+  return createPool({
+    url,
+    max: EVENTS_POOL.max,
+    connectionTimeoutMs: EVENTS_POOL.connectionTimeoutMs,
+    statementTimeoutMs,
+    // The client stops waiting shortly after the server cancels.
+    queryTimeoutMs: statementTimeoutMs + 1_000,
+    ...(log !== undefined && { log }),
+  });
 }
 
 /** The columns an insert sets, in its parameters' order. */
@@ -160,6 +196,8 @@ function row(event: RecordedEvent): Row {
 
 export function createEventRecorder({ pool, maxPending = DEFAULT_MAX_PENDING_EVENTS, log = logger.error }: EventRecorderOptions): EventRecorder {
   let pending = 0;
+  /** Events dropped since the last line that counted them. */
+  let dropped = 0;
   function note(line: string): void {
     try {
       log(line);
@@ -167,9 +205,19 @@ export function createEventRecorder({ pool, maxPending = DEFAULT_MAX_PENDING_EVE
       // Recording never breaks the request.
     }
   }
+  /** An insert has ended. Its pool's timeouts see that every insert does. */
+  function settled(): void {
+    pending -= 1;
+    if (dropped === 0) return;
+    note(`events dropped: count=${dropped}`);
+    dropped = 0;
+  }
   return {
     record(event) {
-      if (pending >= maxPending) return note(`event dropped: kind=${event.kind} pending=${pending}`);
+      if (pending >= maxPending) {
+        dropped += 1;
+        return;
+      }
       const failed = (err: unknown): void => note(`event insert failed: kind=${event.kind} code=${failureCode(err)}`);
       let insert: Promise<unknown>;
       try {
@@ -179,15 +227,10 @@ export function createEventRecorder({ pool, maxPending = DEFAULT_MAX_PENDING_EVE
         return failed(err);
       }
       pending += 1;
-      insert.then(
-        () => {
-          pending -= 1;
-        },
-        (err: unknown) => {
-          pending -= 1;
-          failed(err);
-        },
-      );
+      insert.then(settled, (err: unknown) => {
+        settled();
+        failed(err);
+      });
     },
   };
 }
@@ -200,13 +243,13 @@ export function createEventRecorder({ pool, maxPending = DEFAULT_MAX_PENDING_EVE
 export const DEFAULT_VISIT_GAP_MINUTES = 30;
 
 /**
- * One row per visit (§3) that starts in `[$2, $3)`: a user's tool calls
- * with no gap between two of them longer than `$1` seconds. A visit is one
- * user's, whatever agent clients made its calls. Ordered by start.
+ * One row per visit (§3) in `[$2, $3)`: a user's tool calls with no gap
+ * between two of them longer than `$1` seconds. A visit is one user's,
+ * whatever agent clients made its calls. Ordered by start.
  *
- * A call at `$2` or later whose previous call is before `$2` starts a
- * visit here, so a visit that spans `$2` is cut there. `/admin` can use it
- * as a subquery.
+ * Only the calls in `[$2, $3)` count, so a visit that spans `$2` or `$3` is
+ * cut there: the part before `$2` and the part from `$3` on are left out.
+ * `/admin` can use it as a subquery.
  */
 export const VISITS_SQL = `
 select u.uuid as user_uuid, v.started_at, v.ended_at, v.calls, v.tools, v.agent_clients

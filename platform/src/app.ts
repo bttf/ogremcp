@@ -5,7 +5,7 @@ import { apiRouter } from "./api.js";
 import { type AuthOptions, authRouter } from "./auth.js";
 import { bridgeApiRouter } from "./bridge-api.js";
 import { failureCode } from "./db.js";
-import { createEventRecorder, type EventRecorder } from "./events.js";
+import type { EventRecorder } from "./events.js";
 import { type HealthOptions, healthRouter } from "./health.js";
 import type { IngestSettings } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
@@ -50,7 +50,11 @@ export interface AppOptions {
   ingest?: IngestSettings;
   /** The ingest endpoint's log (`IngestOptions.log`). */
   ingestLog?: (line: string) => void;
-  /** Where the events rows of tool calls and ingest requests go (§16). Default: a recorder on `auth`'s pool. */
+  /**
+   * Where the events rows of tool calls and ingest requests go (§16): one
+   * recorder, so that its bound on pending inserts covers both. `index.ts`
+   * gives it a pool of its own. Default: none, and nothing is recorded.
+   */
   events?: EventRecorder;
   /** Whether `PUBLIC_BASE_URL` is https. Every response then carries HSTS. Default false. */
   https?: boolean;
@@ -93,14 +97,12 @@ export function createApp({
   app.use(healthRouter(health));
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
-    // One recorder, so that its bound on pending inserts covers both (§16).
-    const recorder = events ?? createEventRecorder({ pool: auth.pool, log });
     // The registry checks the platform tools' names: a bad one stops the start (§10.1).
-    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, log, events: recorder });
+    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, log, events });
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) {
-      app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest, ingestLog, events: recorder }));
+      app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest, ingestLog, events }));
     }
   }
   if (webRoot !== undefined) app.use(webFiles(webRoot));
