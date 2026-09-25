@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 
 import { useSession } from "./session.js";
 
@@ -16,7 +16,8 @@ const NAV: readonly { to: string; label: string }[] = [
 ];
 
 /**
- * The frame every page sits in: the header and the centered column. A
+ * The frame every page sits in: the header, the centered column, and the
+ * footer, which links to the Privacy and Terms pages for everyone (§13.2). A
  * signed-in user also gets the navigation and Sign out. Sign out is a form,
  * so it works as a plain POST: the service ends the web session and sends the
  * browser to `/`, which then sends it to the Sign in page.
@@ -55,6 +56,10 @@ export function Shell() {
         <main>
           <Outlet />
         </main>
+        <footer className="og-footer">
+          <Link to="/privacy">Privacy</Link>
+          <Link to="/terms">Terms</Link>
+        </footer>
       </div>
     </div>
   );

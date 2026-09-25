@@ -183,6 +183,7 @@ const app = createApp({
   search,
   fetchPage,
   bridgeDownloadUrl: config.bridgeDownloadUrl,
+  contactEmail: config.contactEmail,
   ingest: config.ingest,
   events,
   toolCallCaps: caps,

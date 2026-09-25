@@ -43,7 +43,8 @@ describe("the web UI", () => {
     await once(server, "listening");
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-    for (const path of ["/", "/signin", "/no/such/page"]) {
+    // The Privacy and Terms pages load without a web session, as every page does (§13.2).
+    for (const path of ["/", "/signin", "/privacy", "/terms", "/no/such/page"]) {
       const res = await fetch(`${base}${path}`, { headers: HTML });
       expect(res.status).toBe(200);
       expect(await res.text()).toBe(PAGE);

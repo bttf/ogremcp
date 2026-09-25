@@ -119,6 +119,16 @@ code {
   border-color: var(--og-dim);
 }
 
+.og-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--og-line);
+  font-size: 14px;
+}
+
 /* Sign in */
 
 .og-signin {
@@ -133,6 +143,11 @@ code {
 
 .og-signin p {
   margin: 0;
+  color: var(--og-dim);
+}
+
+.og-signin__legal {
+  margin: 24px 0 0;
   color: var(--og-dim);
 }
 
@@ -534,4 +549,24 @@ code {
   text-align: right;
   font-variant-numeric: tabular-nums;
   overflow-wrap: normal;
+}
+
+/* Privacy and Terms */
+
+.og-legal h2 {
+  margin: 32px 0 8px;
+  font-size: 18px;
+}
+
+.og-legal p,
+.og-legal ul {
+  margin: 0 0 12px;
+}
+
+.og-legal ul {
+  padding-left: 20px;
+}
+
+.og-legal li + li {
+  margin-top: 6px;
 }

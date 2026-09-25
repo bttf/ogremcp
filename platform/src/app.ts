@@ -54,6 +54,8 @@ export interface AppOptions {
   fetchPage?: PageFetch | null;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
+  /** `CONTACT_EMAIL`, for `auth`'s web UI (§13.2). Default: none. */
+  contactEmail?: string | null;
   /**
    * The `INGEST_` and `DEVICES_PER_USER_` names: the ingest endpoint's limits
    * (§8.3, §14). Default: `DEFAULT_INGEST`.
@@ -103,6 +105,7 @@ export function createApp({
   search,
   fetchPage,
   bridgeDownloadUrl,
+  contactEmail,
   ingest,
   ingestLog,
   events,
@@ -139,7 +142,7 @@ export function createApp({
     app.use(authRouter(auth));
     // Before `apiRouter`, whose last route answers every other `/api` path.
     if (admin !== undefined) app.use(adminRouter(admin));
-    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl }));
+    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl, contactEmail }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));
