@@ -2,8 +2,9 @@
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
-// endpoint's discovery (§9), the bridge's device flow (§8.1), and the
-// bridge's kit and ingest endpoints (§8.2, §8.3).
+// endpoint's discovery (§9) and the kit tools of each user's enabled games
+// (§10), the bridge's device flow (§8.1), and the bridge's kit and ingest
+// endpoints (§8.2, §8.3).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -130,6 +131,7 @@ const app = createApp({
   mcpAllowedOrigins: config.mcpAllowedOrigins,
   webRoot,
   kits,
+  toolContext: config.toolContext,
   bridgeDownloadUrl: config.bridgeDownloadUrl,
   ingest: config.ingest,
   https,
