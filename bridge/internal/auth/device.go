@@ -37,8 +37,8 @@ type deviceAnswer struct {
 // Login logs the bridge in with the device flow. It calls show once with the
 // code for the user, then waits until the user approves it (nil), denies it
 // or lets it expire (an error), or ctx ends. On approval it saves the refresh
-// token to the Store before it returns. When the save fails, Login returns the
-// error, and AccessToken tries the save again.
+// token to the Store before it returns. When the save fails, Login returns an
+// error that wraps ErrNotSaved, and AccessToken tries the save again.
 func (c *Client) Login(ctx context.Context, show func(Code)) error {
 	ep, err := c.discover(ctx)
 	if err != nil {

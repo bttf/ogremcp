@@ -271,7 +271,7 @@ func TestRefreshSavesBeforeUse(t *testing.T) {
 
 	// The keychain refuses the new refresh token: its access token is not used.
 	store.setErr = errors.New("keychain locked")
-	if _, err := c.AccessToken(t.Context()); err == nil || errors.Is(err, ErrLoginRequired) {
+	if _, err := c.AccessToken(t.Context()); !errors.Is(err, ErrNotSaved) {
 		t.Fatalf("AccessToken with a failing save: got %v", err)
 	}
 	if err := getKits(t, c, s.URL); err == nil {
