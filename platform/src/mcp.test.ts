@@ -21,6 +21,7 @@ import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
+import { searchGameInfo } from "./search-game-info.js";
 import { WebSessions } from "./web-sessions.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -29,6 +30,14 @@ if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set:
 
 const ISSUER = "https://ogmcp.example";
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A platform tool as `tools/list` lists it, for every user (§10.3). */
+const SEARCH_GAME_INFO = {
+  name: searchGameInfo.name,
+  description: searchGameInfo.description,
+  inputSchema: searchGameInfo.inputSchema,
+  annotations: searchGameInfo.annotations,
+};
 
 let server: Server | undefined;
 
@@ -247,7 +256,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     return { authorization: `Bearer ${token}`, "content-type": "application/json" };
   }
 
-  it("answers initialize and an empty tools/list, each on its own, with JSON and no session", async () => {
+  it("answers initialize and tools/list, each on its own, with JSON and no session", async () => {
     const port = await serve(pool, provider);
     const agent = await asAgent();
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
@@ -276,7 +285,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
     expect(list.status).toBe(200);
-    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [] } });
+    // A user with no game enabled gets the platform tools alone.
+    expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [SEARCH_GAME_INFO] } });
   });
 
   /** When the snapshot of `SAVED_VARIABLES` was captured. */
@@ -340,6 +350,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
       id: 1,
       result: {
         tools: [
+          SEARCH_GAME_INFO,
           {
             name: "wow_get_state",
             description: wowGetState?.description,
@@ -377,7 +388,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     const port = await serve(pool, provider, kits);
     // A snapshot from before the user disabled the game.
     const agent = await player({ wow: false, snapshot: true });
-    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [SEARCH_GAME_INFO] } });
     for (const name of ["wow_get_state", "no_such_tool"]) {
       expect(await rpc(port, agent, "tools/call", { name })).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "MCP error -32602: Unknown tool" } });
     }

@@ -5,6 +5,8 @@ import type { Pool } from "pg";
 import { failureCode } from "./db.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { logger } from "./log.js";
+import type { ScopedSearch } from "./search.js";
+import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser, UserFacingError } from "./tool-context.js";
 import { checkPlatformToolName } from "./tool-names.js";
 
@@ -28,6 +30,8 @@ export interface PlatformToolContext {
   user: ToolUser;
   /** The kits the user has enabled, in registry order. */
   games: readonly Kit[];
+  /** Game-scoped search (§12), or null without `FIRECRAWL_API_KEY`. */
+  search: ScopedSearch | null;
 }
 
 /** A platform tool (§10.3): named `{verb}_{noun}`, with no prefix, and listed for every user. */
@@ -39,8 +43,8 @@ export interface PlatformTool {
   handler(args: unknown, ctx: PlatformToolContext): Promise<ToolResult>;
 }
 
-/** The platform tools (§10.3), in the order `tools/list` lists them. None yet: `list_games` is RED-328. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [];
+/** The platform tools (§10.3), in the order `tools/list` lists them. */
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [searchGameInfo];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -50,6 +54,8 @@ export interface ToolRegistryOptions {
   platformTools?: readonly PlatformTool[];
   /** The `ToolContext` settings (`HISTORY_MAX_SNAPSHOTS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
+  /** Game-scoped search, for `search_game_info` (§12). Default: null, and the tool answers `search_unavailable`. */
+  search?: ScopedSearch | null;
   /** Receives one line per tool call that failed with an error that is not user-facing. Default: `logger.error`. */
   log?: (line: string) => void;
 }
@@ -79,6 +85,7 @@ export function createToolRegistry({
   kits,
   platformTools = PLATFORM_TOOLS,
   settings = DEFAULT_TOOL_CONTEXT,
+  search = null,
   log = logger.error,
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
@@ -115,7 +122,7 @@ export function createToolRegistry({
       if (found === null || tool === undefined) return null;
       const { user, games } = found;
       try {
-        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games });
+        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, search });
         return await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
       } catch (err) {
         return toolErrorResult(err, name, log);

@@ -1,5 +1,6 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { DEFAULT_MISSES, type MissSettings } from "./devices.js";
+import { DEFAULT_FIRECRAWL_TIMEOUT_MS } from "./firecrawl.js";
 import { DEFAULT_INGEST, type IngestSettings } from "./ingest.js";
 import { DEFAULT_LOG_LEVEL, isLogLevel, type LogLevel } from "./log.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
@@ -77,6 +78,13 @@ export interface Config {
    * returns (§6.2, `tool-context.ts`). Unset, `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
+  /**
+   * `FIRECRAWL_API_KEY`, the search provider's key (§12), or null when it is
+   * unset: `search_game_info` then answers `search_unavailable`. Never logged
+   * or repeated. `FIRECRAWL_TIMEOUT_MS`: the most time one Firecrawl request
+   * takes. Unset, `DEFAULT_FIRECRAWL_TIMEOUT_MS`.
+   */
+  firecrawl: { apiKey: string | null; timeoutMs: number };
   /**
    * `BRIDGE_DOWNLOAD_URL`: where the Get started page sends people to
    * download the bridge (§7, §13.2), or null when it is unset. The page then
@@ -375,6 +383,10 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     },
     toolContext: {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
+    },
+    firecrawl: {
+      apiKey: (env["FIRECRAWL_API_KEY"] ?? "").trim() || null,
+      timeoutMs: positiveInt("FIRECRAWL_TIMEOUT_MS", env["FIRECRAWL_TIMEOUT_MS"], DEFAULT_FIRECRAWL_TIMEOUT_MS),
     },
     bridgeDownloadUrl: bridgeDownloadUrl(env["BRIDGE_DOWNLOAD_URL"]),
     logLevel: logLevel(env["LOG_LEVEL"]),
