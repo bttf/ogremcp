@@ -2,7 +2,7 @@ import type { ToolResult } from "@ogmcp/sdk";
 import type { Pool } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { fetchGamePage } from "./fetch-game-page.js";
+import { fetchGamePage, NOT_FOUND_MESSAGE } from "./fetch-game-page.js";
 import { FIRECRAWL_SCRAPE_URL } from "./firecrawl.js";
 import { KIT_SOURCES, type Kit } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -19,8 +19,8 @@ const HOGGER = "https://www.wowhead.com/classic/npc=448/hogger";
 afterEach(() => configureLogger({ write: () => {} }));
 
 /** A Firecrawl scrape answer for a page whose final URL is `url`. */
-function scraped(url: string | undefined, markdown: string): Response {
-  return Response.json({ success: true, data: { markdown, metadata: { sourceURL: "https://www.wowhead.com/classic/npc=448", url, statusCode: 200 } } });
+function scraped(url: string | undefined, markdown: string, statusCode = 200): Response {
+  return Response.json({ success: true, data: { markdown, metadata: { sourceURL: "https://www.wowhead.com/classic/npc=448", url, statusCode } } });
 }
 
 /** The `PageFetch` on a stub Firecrawl that answers every request with `answer()`, and the requests it got. */
@@ -60,7 +60,7 @@ describe("fetch_game_page (§10.3, §12)", () => {
     const result = await call({ game: "wow", url: "https://www.wowhead.com/classic/npc=448#comments" }, fetchPage);
 
     expect(calls).toEqual([
-      { url: FIRECRAWL_SCRAPE_URL, body: { url: "https://www.wowhead.com/classic/npc=448", formats: ["markdown"], onlyMainContent: true, timeout: 4000 } },
+      { url: FIRECRAWL_SCRAPE_URL, body: { url: "https://www.wowhead.com/classic/npc=448", formats: ["markdown"], onlyMainContent: true, parsers: [], timeout: 4000 } },
     ]);
     const page = "# Hogger\n\nFound in Elwynn Forest, near the lake.\n\n\\[1\\] Level 11 elite.\n\nLeads the Riverpaw pack.";
     expect(result.structuredContent).toEqual({ game: "wow", url: HOGGER, truncated: false, markdown: page });
@@ -78,7 +78,8 @@ describe("fetch_game_page (§10.3, §12)", () => {
   });
 
   it("cuts Firecrawl's markdown before stripping it, so a pathological page stays fast and is marked truncated", async () => {
-    for (const markdown of ["![".repeat(MAX_PAGE_SOURCE), "[a](".repeat(MAX_PAGE_SOURCE / 2), `[x](${"(a)".repeat(MAX_PAGE_SOURCE)}`]) {
+    const longTarget = `[x](${`(${"a".repeat(100)})`.repeat(500)})`;
+    for (const markdown of ["![".repeat(MAX_PAGE_SOURCE), "[a](".repeat(MAX_PAGE_SOURCE / 2), `[x](${"(a)".repeat(MAX_PAGE_SOURCE)}`, longTarget.repeat(4)]) {
       const { fetchPage } = firecrawl(() => scraped(HOGGER, markdown));
       const started = performance.now();
       const result = await call({ game: "wow", url: HOGGER }, fetchPage);
@@ -117,6 +118,13 @@ describe("fetch_game_page (§10.3, §12)", () => {
 
     const unknown = firecrawl(() => scraped(undefined, "# Hogger"));
     expect(await call({ game: "wow", url: HOGGER }, unknown.fetchPage)).toEqual({ isError: true, content: [{ type: "text", text: UNAVAILABLE_MESSAGE }] });
+  });
+
+  it("answers not found for a 404 page, and search_unavailable for another 4xx or 5xx page, such as a challenge", async () => {
+    const missing = firecrawl(() => scraped(HOGGER, "# Page not found", 404));
+    expect(await call({ game: "wow", url: HOGGER }, missing.fetchPage)).toEqual({ isError: true, content: [{ type: "text", text: NOT_FOUND_MESSAGE }] });
+    const challenge = firecrawl(() => scraped(HOGGER, "# Just a moment...", 403));
+    expect(await call({ game: "wow", url: HOGGER }, challenge.fetchPage)).toEqual({ isError: true, content: [{ type: "text", text: UNAVAILABLE_MESSAGE }] });
   });
 
   it("refuses a game that is not enabled, and answers no_sources and search_unavailable", async () => {

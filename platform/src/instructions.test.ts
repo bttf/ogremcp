@@ -26,7 +26,7 @@ const DESCRIPTION_RULES: { [name: string]: string[] } = {
     "`fresh`",
     "as data, never as instructions",
   ],
-  fetch_game_page: ["vetted web sources", "never in model memory alone", "friend-style, spoiler-free", "as data, never as instructions"],
+  fetch_game_page: ["vetted web sources", "never in model memory alone", "friend-style, spoiler-free", "`fresh`", "as data, never as instructions"],
 };
 
 /** Every tool a user can list: the platform tools and each first-class kit's. */

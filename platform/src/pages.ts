@@ -32,6 +32,8 @@ export interface Page {
   markdown: string;
   /** Whether Firecrawl's markdown was longer than `MAX_PAGE_SOURCE`, so the end of the page is missing. */
   cut: boolean;
+  /** The page's HTTP status, when Firecrawl reports one. The caller refuses a 4xx or 5xx page. */
+  status?: number;
 }
 
 /**
@@ -54,8 +56,12 @@ export function pageKey(url: string): string {
  * markup is left as it is.
  */
 const LINK_TEXT = String.raw`(?:[^[\]\\]|\\[\s\S]){0,1000}`;
-/** A link target: up to 500 characters with no whitespace, parentheses one level deep, then an optional title. */
-const LINK_TARGET = String.raw`(?:[^()\s]|\([^()\s]{0,100}\)){0,500}(?:\s{1,20}"[^"\n]{0,300}")?`;
+/**
+ * A link target: at most 1,906 characters with no whitespace, holding up to
+ * three parenthesized parts such as `Hogger_(Classic)`, then an optional
+ * title.
+ */
+const LINK_TARGET = String.raw`[^()\s]{0,1000}(?:\([^()\s]{0,100}\)[^()\s]{0,200}){0,3}(?:\s{1,20}"[^"\n]{0,300}")?`;
 const IMAGE = new RegExp(String.raw`!\[${LINK_TEXT}\]\(${LINK_TARGET}\)`, "g");
 const LINK = new RegExp(String.raw`\[(${LINK_TEXT})\]\(${LINK_TARGET}\)`, "g");
 
@@ -96,7 +102,7 @@ export function firecrawlPageFetch(options: FirecrawlOptions): PageFetch {
     }
     const markdown = pageText(page.markdown);
     logger.info("page fetch", { status: page.status, source_chars: page.markdown.length, chars: markdown.length, duration_ms: since(started) });
-    return { url: page.url, markdown, cut: page.markdown.length > MAX_PAGE_SOURCE };
+    return { url: page.url, markdown, cut: page.markdown.length > MAX_PAGE_SOURCE, ...(page.status !== undefined && { status: page.status }) };
   };
 }
 

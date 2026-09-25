@@ -91,12 +91,13 @@ export async function firecrawlSearch(options: FirecrawlOptions, query: string, 
 }
 
 /**
- * The page at `url`, as markdown of its main content (S3). Throws a
+ * The page at `url`, as markdown of its main content (S3). `parsers: []`
+ * turns off PDF parsing, which costs a credit per PDF page. Throws a
  * `FirecrawlError` on any failure, and on an answer without the page's final
  * URL: without it, a redirect out of scope could not be seen.
  */
 export async function firecrawlScrape(options: FirecrawlOptions, url: string): Promise<FirecrawlPage> {
-  const page = scrapedPage(await post(options, FIRECRAWL_SCRAPE_URL, { url, formats: ["markdown"], onlyMainContent: true }));
+  const page = scrapedPage(await post(options, FIRECRAWL_SCRAPE_URL, { url, formats: ["markdown"], onlyMainContent: true, parsers: [] }));
   if (page === null) throw new FirecrawlError("response");
   return page;
 }
