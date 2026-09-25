@@ -1,12 +1,14 @@
 // Package config is the bridge's settings file on this device
 // (docs/architecture.md §6.1, §7). It holds each kit's game folder, as the
-// locate chain found it or the user picked it, and the refresh interval. It
-// holds no secret: the refresh token is in the OS keychain (package keychain).
+// locate chain found it or the user picked it, the refresh interval, and the
+// debounce delay of the watcher. It holds no secret: the refresh token is in
+// the OS keychain (package keychain).
 //
 // The file is JSON, ogmcp-bridge/config.json in the user's config directory:
 //
 //	{
 //	  "refresh_interval": "5m",
+//	  "debounce": "2s",
 //	  "roots": { "wow": "/Applications/World of Warcraft" }
 //	}
 //
@@ -35,11 +37,19 @@ const DefaultRefreshInterval = 5 * time.Minute
 // MinRefreshInterval is the shortest refresh_interval the file may set.
 const MinRefreshInterval = time.Minute
 
+// DefaultDebounce is how long a source instance's file must go without a
+// write before the watcher reports the change, unless the file sets debounce
+// (§7, proposed).
+const DefaultDebounce = 2 * time.Second
+
 // File is the settings file.
 type File struct {
 	// RefreshInterval is how often the bridge fetches the kits and resolves
 	// the globs again. Zero means DefaultRefreshInterval.
 	RefreshInterval Duration `json:"refresh_interval,omitempty"`
+	// Debounce is how long a source instance's file must go without a write
+	// before the watcher reports the change. Zero means DefaultDebounce.
+	Debounce Duration `json:"debounce,omitempty"`
 	// Roots maps each kit to its game folder.
 	Roots map[string]string `json:"roots,omitempty"`
 }
@@ -50,6 +60,14 @@ func (f File) Interval() time.Duration {
 		return DefaultRefreshInterval
 	}
 	return time.Duration(f.RefreshInterval)
+}
+
+// DebounceDelay is the debounce delay.
+func (f File) DebounceDelay() time.Duration {
+	if f.Debounce == 0 {
+		return DefaultDebounce
+	}
+	return time.Duration(f.Debounce)
 }
 
 // Duration is a time.Duration written as a string, such as "5m".
@@ -92,6 +110,9 @@ func Load(path string) (File, error) {
 	}
 	if f.RefreshInterval != 0 && time.Duration(f.RefreshInterval) < MinRefreshInterval {
 		return File{}, fmt.Errorf("%s is not valid: refresh_interval must be at least %s", path, MinRefreshInterval)
+	}
+	if f.Debounce < 0 {
+		return File{}, fmt.Errorf("%s is not valid: debounce may not be negative", path)
 	}
 	return f, nil
 }

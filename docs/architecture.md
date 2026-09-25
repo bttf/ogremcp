@@ -193,7 +193,8 @@ ogmcp/
 /** `State` must be JSON-serializable: snapshots store it as `jsonb` (§11). */
 interface Interpreter<State> {
   /** Pure: no DB or network. Throws ParseError(userMessage) on bad or unsupported input. */
-  parse(sourceId: string, bytes: Uint8Array): Parsed<State>;
+  parse(sourceId: string, bytes: Uint8Array, options?: { now?: Date }): Parsed<State>;
+  // `now`: the time the upload's timestamps are judged against. Default: the current time; a re-parse passes the receipt time (§11).
   tools: ToolDef<State>[];
 }
 

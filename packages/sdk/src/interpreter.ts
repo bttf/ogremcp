@@ -12,8 +12,19 @@ export interface Interpreter<State> {
    * Accepts the current adapter schema and the previous one. Throws
    * `ParseError` on bad or unsupported input.
    */
-  parse(sourceId: string, bytes: Uint8Array): Parsed<State>;
+  parse(sourceId: string, bytes: Uint8Array, options?: ParseOptions): Parsed<State>;
   tools: ToolDef<State>[];
+}
+
+/** Options of one `Interpreter.parse` call. */
+export interface ParseOptions {
+  /**
+   * The time the upload's own timestamps are judged against, e.g. whether a
+   * capture stamp lies in the future. Default: the current time. A re-parse
+   * passes the upload's receipt time, so its result does not depend on the
+   * day it runs (§11).
+   */
+  now?: Date;
 }
 
 /** The character a snapshot belongs to. */
