@@ -175,3 +175,23 @@ for free and needs no tag-prefix settings. It is not chosen because §7 names
 GoReleaser and the free GoReleaser path works. If P9 moves checksums, signing,
 and publishing into a final job, GoReleaser only builds the binaries, and this
 alternative is simpler.
+
+## Self-host image
+
+Spec: §13.3. Built in RED-361. `docker/Dockerfile` builds the platform image,
+and `docker-compose.yml` runs it with Postgres (`docs/self-host.md`). The
+`Self-host image` workflow (`.github/workflows/self-host-image.yml`) builds the
+image on PRs that can change it, starts it with Compose, and checks that it
+answers. It pushes the image nowhere.
+
+Publishing the image is not set up. It waits on:
+
+- The registry and the image name, which follow the org decision (§19.1 D4,
+  RED-356).
+- The repo going public (RED-345). The image holds the platform, which is
+  AGPL-3.0-or-later, so it is published only from a commit whose source is
+  public.
+
+A publish job then needs a trigger, registry credentials in CI secrets, and
+the published image name in `docker-compose.yml` next to `build`. None of
+these exist yet.
