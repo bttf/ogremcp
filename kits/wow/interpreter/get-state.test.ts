@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogmcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
+import manifest from "../manifest.json" with { type: "json" };
+import { describeGetState, EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
 
@@ -60,7 +61,14 @@ function content(result: ToolResult) {
 
 it("is described as §10.1 and §10.5 ask", () => {
   expect(tool?.description).toContain("World of Warcraft");
-  expect(tool?.annotations).toEqual({ readOnlyHint: true });
+  // The rules that act on the result's own fields.
+  for (const phrase of ["Experimental flavors", "`hardcore`", "`fresh`", "say so rather than guess"]) {
+    expect(tool?.description).toContain(phrase);
+  }
+  const experimental = Object.entries(manifest.flavors).flatMap(([key, { status }]) => (status === "experimental" ? [key] : []));
+  expect(EXPERIMENTAL_FLAVORS).toEqual(experimental);
+  expect(describeGetState([])).not.toContain("Experimental");
+  expect(tool?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
   expect(tool?.inputSchema.type).toBe("object");
   expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(["sections", "flavor", "character"]);
 });

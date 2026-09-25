@@ -7,6 +7,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Response, 
 import type Provider from "oidc-provider";
 
 import { failureCode } from "./db.js";
+import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { logger } from "./log.js";
 import { currentToken, requireToken, resourcesOf, type VerifiedToken } from "./oidc-tokens.js";
 import type { ToolRegistry } from "./tools.js";
@@ -136,10 +137,11 @@ const SERVER_INFO = { name: "ogmcp", version: platformVersion() };
  * and a Postgres error's message can repeat a row, so any other error is
  * logged by its code alone and sent as "Internal error".
  *
- * RED-331 sets the server's `instructions` (§10.5).
+ * `initialize` answers with the §10.5 behavior rules as `instructions`
+ * (`instructions.ts`).
  */
 function createMcpServer(agent: VerifiedToken, tools: ToolRegistry, log: (line: string) => void): Server {
-  const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
+  const server = new Server(SERVER_INFO, { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS });
   async function internal<T>(method: string, run: () => Promise<T>): Promise<T> {
     try {
       return await run();
