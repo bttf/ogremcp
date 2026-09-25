@@ -20,6 +20,7 @@ import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { listGames } from "./list-games.js";
+import { configureLogger } from "./log.js";
 import { MAX_MCP_BODY_BYTES } from "./mcp.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
@@ -445,5 +446,43 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     const malformed = await send(port, "POST", "/mcp", agent, '{"jsonrpc":');
     expect(malformed.status).toBe(400);
     expect(JSON.parse(malformed.body)).toEqual({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null });
+  });
+
+  it("logs a refused POST with the SDK's fixed reason, the method, and the protocol version, and nothing else of the request (RED-360)", async () => {
+    const port = await serve(pool, provider);
+    const { rows } = await pool.query<{ uuid: string }>("insert into users default values returning uuid");
+    const user = rows[0]?.uuid ?? "";
+    const agent = await asAgent(user);
+    const lines: string[] = [];
+    configureLogger({ write: (line) => lines.push(line) });
+    try {
+      const res = await send(
+        port,
+        "POST",
+        "/mcp",
+        { ...agent, "mcp-protocol-version": "2099-01-01" },
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { cursor: "c" } }),
+      );
+      expect(res.status).toBe(400);
+      expect((JSON.parse(res.body) as { error: { message: string } }).error.message).toMatch(/^Bad Request: Unsupported protocol version: 2099-01-01 /);
+    } finally {
+      configureLogger({ write: () => {} });
+    }
+    const refused = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line["msg"] === "MCP request refused");
+    // The logger's own fields, then the refusal's: no body, param, token, or other header.
+    expect(refused).toEqual([
+      {
+        level: "warn",
+        time: expect.any(String),
+        msg: "MCP request refused",
+        request_id: expect.any(String),
+        route: "/mcp",
+        user_uuid: user,
+        status: 400,
+        reason: "Bad Request: Unsupported protocol version",
+        rpc_method: "tools/list",
+        protocol_version: "2099-01-01",
+      },
+    ]);
   });
 });
