@@ -3,9 +3,11 @@ import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogm
 import type { Pool } from "pg";
 
 import type { EventRecorder } from "./events.js";
+import { fetchGamePage } from "./fetch-game-page.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
+import type { PageFetch } from "./pages.js";
 import type { ScopedSearch, SearchUsage } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type ToolContextSettings, type ToolUser } from "./tool-context.js";
@@ -46,6 +48,8 @@ export interface PlatformToolContext {
   settings: ToolContextSettings;
   /** Game-scoped search (§12), or null without `FIRECRAWL_API_KEY`. */
   search: ScopedSearch | null;
+  /** Page fetches (§12), or null without `FIRECRAWL_API_KEY`. */
+  fetchPage: PageFetch | null;
   /** What the handler adds to the call's events row. */
   event: ToolCallNotes;
 }
@@ -78,7 +82,7 @@ export interface PlatformTool {
 }
 
 /** The platform tools (§10.3), in the order `tools/list` lists them. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo];
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo, fetchGamePage];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -86,10 +90,12 @@ export interface ToolRegistryOptions {
   kits?: KitRegistry;
   /** Default: `PLATFORM_TOOLS`. */
   platformTools?: readonly PlatformTool[];
-  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`, `FETCH_PAGE_MAX_CHARS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
   /** Game-scoped search, for `search_game_info` (§12). Default: null, and the tool answers `search_unavailable`. */
   search?: ScopedSearch | null;
+  /** Page fetches, for `fetch_game_page` (§12). Default: null, and the tool answers `search_unavailable`. */
+  fetchPage?: PageFetch | null;
   /**
    * Receives one line per tool call that failed with an error that is not
    * user-facing, or whose result was over the size cap. Default: `logger.error`.
@@ -128,6 +134,7 @@ export function createToolRegistry({
   platformTools = PLATFORM_TOOLS,
   settings = DEFAULT_TOOL_CONTEXT,
   search = null,
+  fetchPage = null,
   log = logger.error,
   events,
 }: ToolRegistryOptions): ToolRegistry {
@@ -171,7 +178,7 @@ export function createToolRegistry({
       const tool = found.tools.find(({ def }) => def.name === name);
       if (tool !== undefined) {
         schema = tool.def.inputSchema;
-        answer = await answerCall(tool, args, { pool, user, games, settings, search, event }, log);
+        answer = await answerCall(tool, args, { pool, user, games, settings, search, fetchPage, event }, log);
       } else {
         // A client can keep a turned-off game's tools until a new chat (§10.2).
         const off = allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ kit, def }))).find(({ def }) => def.name === name);

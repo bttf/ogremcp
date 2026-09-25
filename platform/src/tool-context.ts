@@ -52,9 +52,11 @@ export interface ToolContextSettings {
   maxResultBytes: number;
   /** `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns per game (§10.3). */
   listGamesCharacters: number;
+  /** `FETCH_PAGE_MAX_CHARS`: the most characters of a page's markdown `fetch_game_page` returns (§10.3). */
+  fetchPageMaxChars: number;
 }
 
-export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024, listGamesCharacters: 5 };
+export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = { maxHistoryLimit: 100, maxResultBytes: 40 * 1024, listGamesCharacters: 5, fetchPageMaxChars: 20_000 };
 
 /**
  * A user-facing condition of a tool call (§10.5). Its message is plain

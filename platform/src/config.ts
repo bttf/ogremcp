@@ -78,15 +78,17 @@ export interface Config {
    * returns (§6.2, `tool-context.ts`). `TOOL_RESULT_MAX_BYTES`: the cap on
    * one copy of a kit tool result's JSON (§10.5, `tool-envelope.ts`).
    * `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns
-   * per game (§10.3, `list-games.ts`). Each one unset is
-   * `DEFAULT_TOOL_CONTEXT`'s.
+   * per game (§10.3, `list-games.ts`). `FETCH_PAGE_MAX_CHARS`: the most
+   * characters of a page `fetch_game_page` returns (§10.3,
+   * `fetch-game-page.ts`). Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
   /**
    * `FIRECRAWL_API_KEY`, the search provider's key (§12), or null when it is
-   * unset: `search_game_info` then answers `search_unavailable`. Never logged
-   * or repeated. `FIRECRAWL_TIMEOUT_MS`: the most time one Firecrawl request
-   * takes. Unset, `DEFAULT_FIRECRAWL_TIMEOUT_MS`.
+   * unset: `search_game_info` and `fetch_game_page` then answer
+   * `search_unavailable`. Never logged or repeated. `FIRECRAWL_TIMEOUT_MS`:
+   * the most time one Firecrawl request takes. Unset,
+   * `DEFAULT_FIRECRAWL_TIMEOUT_MS`.
    */
   firecrawl: { apiKey: string | null; timeoutMs: number };
   /**
@@ -389,6 +391,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
       maxResultBytes: positiveInt("TOOL_RESULT_MAX_BYTES", env["TOOL_RESULT_MAX_BYTES"], DEFAULT_TOOL_CONTEXT.maxResultBytes),
       listGamesCharacters: positiveInt("LIST_GAMES_CHARACTERS", env["LIST_GAMES_CHARACTERS"], DEFAULT_TOOL_CONTEXT.listGamesCharacters),
+      fetchPageMaxChars: positiveInt("FETCH_PAGE_MAX_CHARS", env["FETCH_PAGE_MAX_CHARS"], DEFAULT_TOOL_CONTEXT.fetchPageMaxChars),
     },
     firecrawl: {
       apiKey: (env["FIRECRAWL_API_KEY"] ?? "").trim() || null,

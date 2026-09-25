@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { FirecrawlError, type FirecrawlHit, type FirecrawlOptions, firecrawlSearch } from "./firecrawl.js";
+import { failureLevel, FirecrawlError, type FirecrawlHit, type FirecrawlOptions, firecrawlSearch } from "./firecrawl.js";
 import { logger } from "./log.js";
 
 /**
@@ -199,9 +199,7 @@ export function firecrawlScopedSearch(options: FirecrawlOptions): ScopedSearch {
       ({ hits, creditsUsed: credits } = await firecrawlSearch(options, providerQuery(query, scope.prefixes), PROVIDER_LIMIT));
     } catch (err) {
       if (err instanceof FirecrawlError) {
-        // A 4xx other than 429 is ours to fix: a bad key, no credits left, or a bad request.
-        const ours = err.reason === "http" && err.status !== undefined && err.status !== 429 && err.status < 500;
-        (ours ? logger.error : logger.warn)("search failed", { ...fields, reason: err.reason, status: err.status, duration_ms: since(started) });
+        logger[failureLevel(err)]("search failed", { ...fields, reason: err.reason, status: err.status, duration_ms: since(started) });
       }
       throw err;
     }
