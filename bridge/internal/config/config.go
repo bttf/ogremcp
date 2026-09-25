@@ -1,12 +1,14 @@
 // Package config is the bridge's settings file on this device
-// (docs/architecture.md §6.1, §7). It holds each kit's game folder, as the
-// locate chain found it or the user picked it, the refresh interval, the
-// debounce delay of the watcher, and the upload cap. It holds no secret: the
-// refresh token is in the OS keychain (package keychain).
+// (docs/architecture.md §6.1, §7, §13.3). It holds the server, each kit's
+// game folder, as the locate chain found it or the user picked it, the
+// refresh interval, the debounce delay of the watcher, and the upload cap. It
+// holds no secret: the refresh token is in the OS keychain (package
+// keychain).
 //
 // The file is JSON, ogmcp-bridge/config.json in the user's config directory:
 //
 //	{
+//	  "server_url": "https://ogmcp.example.com",
 //	  "refresh_interval": "5m",
 //	  "debounce": "2s",
 //	  "max_upload_bytes": 5242880,
@@ -28,7 +30,18 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/bttf/ogmcp/bridge/internal/auth"
 )
+
+// DefaultServerURL is the server when neither OGMCP_BASE_URL nor server_url
+// names one: the platform's Railway domain, for development. The production
+// domain is not decided yet (§19.1 D4).
+const DefaultServerURL = "https://ogmcp-production.up.railway.app"
+
+// EnvServerURL is the environment variable that overrides server_url, for
+// development.
+const EnvServerURL = "OGMCP_BASE_URL"
 
 // DefaultRefreshInterval is how often the bridge fetches the kits and
 // resolves the globs again, unless the file sets refresh_interval (§7,
@@ -50,6 +63,9 @@ const DefaultMaxUploadBytes = 5 << 20
 
 // File is the settings file.
 type File struct {
+	// ServerURL is the base URL of a self-hosted server (§13.3), or "" for
+	// DefaultServerURL. Server checks it.
+	ServerURL string `json:"server_url,omitempty"`
 	// RefreshInterval is how often the bridge fetches the kits and resolves
 	// the globs again. Zero means DefaultRefreshInterval.
 	RefreshInterval Duration `json:"refresh_interval,omitempty"`
@@ -61,6 +77,28 @@ type File struct {
 	MaxUploadBytes int64 `json:"max_upload_bytes,omitempty"`
 	// Roots maps each kit to its game folder.
 	Roots map[string]string `json:"roots,omitempty"`
+}
+
+// Server returns the server's base URL, as auth.ParseBaseURL returns it: env,
+// the value of EnvServerURL, when it is not "", or else ServerURL, or else
+// DefaultServerURL. A URL that auth.ParseBaseURL refuses is an error, never a
+// reason to fall back to the next one.
+func (f File) Server(env string) (string, error) {
+	switch {
+	case env != "":
+		base, err := auth.ParseBaseURL(env)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", EnvServerURL, err)
+		}
+		return base, nil
+	case f.ServerURL != "":
+		base, err := auth.ParseBaseURL(f.ServerURL)
+		if err != nil {
+			return "", fmt.Errorf("server_url in the settings file: %w", err)
+		}
+		return base, nil
+	}
+	return DefaultServerURL, nil
 }
 
 // Interval is the refresh interval.
