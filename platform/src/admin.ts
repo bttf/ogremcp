@@ -2,10 +2,6 @@ import express, { type Router } from "express";
 import type { Pool, PoolClient } from "pg";
 
 import { createPool } from "./db.js";
-import { DEFAULT_VISIT_GAP_MINUTES, VISITS_SQL } from "./events.js";
-import { fetchGamePage } from "./fetch-game-page.js";
-import { searchGameInfo } from "./search-game-info.js";
-import { PLATFORM_TOOLS } from "./tools.js";
 import { currentUser } from "./web-sessions.js";
 
 /**
@@ -21,21 +17,17 @@ import { currentUser } from "./web-sessions.js";
  *   own (`createAdminPool`): one connection, which no request needs, and a
  *   `statement_timeout`.
  * - Aggregates only. No answer holds a user's uuid, a device's, or any other
- *   row's id. Search queries and issue notes are user data (§16.2), shown to
- *   admins only: queries cut to `QUERY_CHARS`, notes as the agent wrote them,
- *   never with a user. An agent client is its CIMD `client_id`, an https URL
- *   that names the agent product (§9). A client registered by DCR has a
- *   random `client_id` that can stand for one install, so it is shown as
- *   `DCR: ` and its registered name instead.
+ *   row's id. Issue notes are user data (§16.2), shown to admins only, as the
+ *   agent wrote them, never with a user. An agent client is its CIMD
+ *   `client_id`, an https URL that names the agent product (§9). A client
+ *   registered by DCR has a random `client_id` that can stand for one
+ *   install, so it is shown as `DCR: ` and its registered name instead.
  */
 
 /** The window when the request names none, in days. */
 export const DEFAULT_ADMIN_WINDOW_DAYS = 7;
 
-/**
- * The longest window, in days. At about the §11 volume, 50,000 tool calls a
- * day, the visits of 30 days take the grounding query under 2 seconds.
- */
+/** The longest window, in days. */
 export const MAX_ADMIN_WINDOW_DAYS = 30;
 
 /** The most rows of one aggregate table. */
@@ -43,10 +35,6 @@ const ROWS = 100;
 
 /** The most error counters shown per bridge version and OS. */
 const COUNTERS = 20;
-
-/** The most uncached queries shown, and the characters shown of each. */
-const TOP_QUERIES = 50;
-const QUERY_CHARS = 120;
 
 /** The most issue notes shown, the newest first. */
 const NOTES = 50;
@@ -62,12 +50,6 @@ const CLIENT_NAME_CHARS = 60;
 export const ADMIN_POOL = { max: 1, connectionTimeoutMs: 10_000, statementTimeoutMs: 5_000 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** The platform tools. A visit whose call of any other tool, a kit tool, succeeded read state. */
-const PLATFORM_TOOL_NAMES = PLATFORM_TOOLS.map((tool) => tool.name);
-
-/** The tools that ground an answer in search results (§12). */
-const SEARCH_TOOL_NAMES = [searchGameInfo.name, fetchGamePage.name];
 
 /** The agent client of `column`, as the page shows it (see above). */
 function agentLabel(column: string): string {
@@ -212,86 +194,6 @@ select e.tool, s.section, count(*)::int, (count(*) filter (where e.error is not 
  order by tool, section nulls first
  limit $3`;
 
-/**
- * Grounding (§16.1): visits (§3) by agent client. `read_state` counts the
- * visits with a kit tool call that succeeded, and `read_state_no_search`
- * those of them with no `search_game_info` or `fetch_game_page` call that
- * succeeded. A call that answered an error, such as `cap_reached` or
- * `game_off`, is neither. A visit of two agent clients counts for each.
- */
-export interface GroundingRow {
-  agent_client: string;
-  visits: number;
-  read_state: number;
-  read_state_no_search: number;
-}
-
-const GROUNDING_SQL = `
-select label as agent_client, sum(visits)::int as visits, sum(read_state)::int as read_state,
-       sum(read_state_no_search)::int as read_state_no_search
-  from (
-    select ${agentLabel("c.agent_client")} as label, c.visits, c.read_state, c.read_state_no_search
-      from (
-        select a.agent_client, count(*) as visits,
-               count(*) filter (where not (v.succeeded_tools <@ $4::text[])) as read_state,
-               count(*) filter (where not (v.succeeded_tools <@ $4::text[]) and not (v.succeeded_tools && $5::text[])) as read_state_no_search
-          from (${VISITS_SQL}) v
-         cross join lateral unnest(v.agent_clients) as a(agent_client)
-         group by a.agent_client
-      ) c
-  ) labeled
- group by label
- order by visits desc, label
- limit $6`;
-
-/** Search (§16.1), by tool, for the tools that searched, fetched, or missed the scope. */
-export interface SearchToolRow {
-  tool: string;
-  /** Calls the cache answered or missed. */
-  lookups: number;
-  hits: number;
-  /** Firecrawl credits. */
-  credits: number;
-  /** `out_of_scope` answers. */
-  scope_misses: number;
-}
-
-/** Search (§16.1): cache hit rate, Firecrawl cost per active user, and scope misses. */
-export interface SearchMetrics extends Omit<SearchToolRow, "tool"> {
-  /** Users with a tool call in the window. */
-  active_users: number;
-  tools: SearchToolRow[];
-}
-
-const SEARCH_SQL = `
-select tool, count(distinct user_id)::int as users, count(cache_hit)::int as lookups,
-       (count(*) filter (where cache_hit))::int as hits,
-       coalesce(sum(search_credits), 0)::float8 as credits,
-       (count(*) filter (where error = 'out_of_scope'))::int as scope_misses
-  from events
- where kind = 'tool_call' and occurred_at >= $1 and occurred_at < $2
- group by grouping sets ((), (tool))
-having grouping(tool) = 1 or count(cache_hit) > 0 or sum(search_credits) > 0 or count(*) filter (where error = 'out_of_scope') > 0
- order by grouping(tool) desc, tool
- limit $3`;
-
-/** Search (§16.1): the queries `search_game_info` sent to Firecrawl most often. */
-export interface UncachedQueryRow {
-  /** The normalized query, cut to `QUERY_CHARS`. User data. */
-  query: string;
-  searches: number;
-  users: number;
-}
-
-const UNCACHED_QUERIES_SQL = `
-select left(query, $4) as query, count(*)::int as searches, count(distinct user_id)::int as users
-  from events
- where kind = 'tool_call' and tool = $3 and occurred_at >= $1 and occurred_at < $2
-   and cache_hit = false and query is not null
- group by 1
- order by searches desc, query
- limit $5`;
-
 /** Quality (§16.1): `report_issue` reports, and the newest notes. */
 export interface IssueMetrics {
   total: number;
@@ -368,9 +270,6 @@ export interface AdminMetrics {
   snapshot_age: SnapshotAgeRow[];
   tools: ToolRow[];
   sections: SectionRow[];
-  grounding: GroundingRow[];
-  search: SearchMetrics;
-  uncached_queries: UncachedQueryRow[];
   issues: IssueMetrics;
   cap_hits: CapHitRow[];
   storage: StorageMetrics;
@@ -395,22 +294,12 @@ export async function adminMetrics(pool: Pool, { days, now = new Date() }: { day
     const unsupported = await rows<UnsupportedFlavorRow>(client, UNSUPPORTED_FLAVORS_SQL, [...window, ROWS]);
     const ages = await rows<{ tool: string; reads: number; percentiles: number[] }>(client, SNAPSHOT_AGE_SQL, [...window, ROWS]);
     const calls = await rows<ToolRow & { section: string | null }>(client, TOOL_CALLS_SQL, [...window, 2 * ROWS]);
-    const grounding = await rows<GroundingRow>(client, GROUNDING_SQL, [
-      DEFAULT_VISIT_GAP_MINUTES * 60,
-      ...window,
-      PLATFORM_TOOL_NAMES,
-      SEARCH_TOOL_NAMES,
-      ROWS,
-    ]);
-    const search = await rows<SearchToolRow & { tool: string | null; users: number }>(client, SEARCH_SQL, [...window, ROWS]);
-    const queries = await rows<UncachedQueryRow>(client, UNCACHED_QUERIES_SQL, [...window, searchGameInfo.name, QUERY_CHARS, TOP_QUERIES]);
     const issues = await rows<Omit<IssueNote, "created_at"> & { created_at: Date; total: number }>(client, ISSUES_SQL, [...window, NOTES]);
     const capHits = await rows<CapHitRow>(client, CAP_HITS_SQL, [...window, ROWS]);
     const [storage] = await rows<StorageMetrics>(client, STORAGE_SQL, [ROWS]);
 
     await client.query("commit");
 
-    const [overall, ...searchTools] = search;
     return {
       window: { days, since: since.toISOString(), until: until.toISOString() },
       bridges,
@@ -419,16 +308,6 @@ export async function adminMetrics(pool: Pool, { days, now = new Date() }: { day
       snapshot_age: ages.map(({ tool, reads, percentiles: [p50 = 0, p90 = 0, p99 = 0] }) => ({ tool, reads, p50, p90, p99 })),
       tools: calls.filter((row) => row.section === null).map(({ tool, calls, errors, with_sections }) => ({ tool, calls, errors, with_sections })),
       sections: calls.flatMap(({ tool, section, calls }) => (section === null ? [] : [{ tool, section, calls }])),
-      grounding,
-      search: {
-        active_users: overall?.users ?? 0,
-        lookups: overall?.lookups ?? 0,
-        hits: overall?.hits ?? 0,
-        credits: overall?.credits ?? 0,
-        scope_misses: overall?.scope_misses ?? 0,
-        tools: searchTools.map(({ tool, lookups, hits, credits, scope_misses }) => ({ tool: tool ?? "", lookups, hits, credits, scope_misses })),
-      },
-      uncached_queries: queries,
       issues: {
         total: issues[0]?.total ?? 0,
         notes: issues.map(({ created_at, kit, agent_client, note }) => ({ created_at: created_at.toISOString(), kit, agent_client, note })),

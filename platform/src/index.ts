@@ -2,10 +2,10 @@
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
-// endpoint's discovery (§9), the kit tools of each user's enabled games (§10)
-// and search_game_info and fetch_game_page (§12), the bridge's device flow
-// (§8.1), the bridge's kit and ingest endpoints (§8.2, §8.3), and the §16.1
-// metrics of the Admin page (§13.2).
+// endpoint's discovery (§9), the platform tools and the kit tools of each
+// user's enabled games (§10), the bridge's device flow (§8.1), the bridge's
+// kit and ingest endpoints (§8.2, §8.3), and the §16.1 metrics of the Admin
+// page (§13.2).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -23,10 +23,7 @@ import { captureConsole, configureLogger, logger } from "./log.js";
 import { createOidcProvider } from "./oidc.js";
 import { type OidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { startClientCleanup } from "./oidc-registration.js";
-import { firecrawlPageFetch } from "./pages.js";
 import { startRetention } from "./retention.js";
-import { firecrawlScopedSearch } from "./search.js";
-import { cachedPageFetch, cachedSearch } from "./search-cache.js";
 import { createSignInProviders } from "./sign-in-providers.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -134,15 +131,6 @@ try {
   process.exit(1);
 }
 
-// Game-scoped search and page fetches (§12), through the shared cache. Without
-// a key, search_game_info and fetch_game_page answer search_unavailable. No
-// line repeats the key.
-const { apiKey, timeoutMs } = config.firecrawl;
-const cache = { pool, settings: config.searchCache };
-const search = apiKey === null ? null : cachedSearch(firecrawlScopedSearch({ apiKey, timeoutMs }), cache);
-const fetchPage = apiKey === null ? null : cachedPageFetch(firecrawlPageFetch({ apiKey, timeoutMs }), cache);
-logger.info(`search: ${search === null ? "off (set FIRECRAWL_API_KEY)" : "Firecrawl, with the shared cache"}`);
-
 // The events table (§16): one row per tool call and ingest request, written
 // on a pool of its own, so that a slow or locked table never holds a
 // connection a request needs.
@@ -184,8 +172,6 @@ const app = createApp({
   webRoot,
   kits,
   toolContext: config.toolContext,
-  search,
-  fetchPage,
   bridgeDownloadUrl: config.bridgeDownloadUrl,
   contactEmail: config.contactEmail,
   ingest: config.ingest,

@@ -2,7 +2,6 @@ import { jsonResult, userError } from "@ogremcp/sdk";
 import type { PoolClient } from "pg";
 
 import { DEFAULT_VISIT_GAP_MINUTES } from "./events.js";
-import { NOT_ENABLED_MESSAGE } from "./search-game-info.js";
 import type { PlatformTool } from "./tools.js";
 
 /**
@@ -32,8 +31,8 @@ import type { PlatformTool } from "./tools.js";
  * answers a `userError` (§10.5). A lock on the user's row orders the user's
  * reports, so two at once cannot both pass the count.
  *
- * The note and the attached queries are user data: deleting the user
- * deletes the rows, and "Delete my data" does too (§11, §16.2).
+ * The note is user data: deleting the user deletes the rows, and "Delete my
+ * data" does too (§11, §16.2).
  *
  * It never touches the game (§16.2). It writes a row, so it is not
  * read-only, and it changes nothing that exists: `destructiveHint: false`
@@ -45,12 +44,15 @@ export const NOTE_MAX_CHARS = 1000;
 
 /** Names what it covers, and carries the §10.5 rule that acts on it. */
 const DESCRIPTION = [
-  "Report a problem to Ogre MCP about one of the games the user has enabled: a wrong answer, game state that is wrong or out of date, or a search that missed what the user needed.",
+  "Report a problem to Ogre MCP about one of the games the user has enabled: a wrong answer, or game state that is wrong or out of date.",
   "Call it only when the user says an answer was wrong or asks to report a problem. Never call it on your own initiative or to flag your own uncertainty.",
   "`game` is a game key from list_games. `note` says what went wrong, in a sentence or two.",
   "The server attaches your recent tool calls and the snapshot you read, so the note need not repeat them.",
   "Returns the report's id.",
 ].join(" ");
+
+/** For a `game` that is not one of the user's enabled games. */
+export const NOT_ENABLED_MESSAGE = "That is not one of the player's enabled games. Call list_games for the enabled games and their keys.";
 
 /** What a recorded report answers. */
 export const RECORDED_MESSAGE = "The report is recorded, with your recent tool calls. Tell the player it was sent.";
@@ -71,7 +73,6 @@ interface AttachedCall {
   tool: string;
   sections: string[] | null;
   flavor: string | null;
-  query: string | null;
   error: string | null;
 }
 
@@ -80,7 +81,6 @@ interface CallRow {
   tool: string;
   sections: string[] | null;
   flavor: string | null;
-  query: string | null;
   error: string | null;
   snapshot_uuid: string | null;
   snapshot_at: Date | null;
@@ -94,14 +94,14 @@ interface CallRow {
  * snapshot is of the kit `$5` and still exists, else nulls.
  */
 const VISIT_CALLS_SQL = `
-select occurred_at, tool, sections, flavor, query, error, snapshot_uuid, snapshot_at
+select occurred_at, tool, sections, flavor, error, snapshot_uuid, snapshot_at
   from (
     select gaps.*, bool_or(gap) over (order by occurred_at desc, id desc) as cut
       from (
         select newest.*,
                coalesce(lag(occurred_at) over (order by occurred_at desc, id desc), $2) - occurred_at > make_interval(secs => $3) as gap
           from (
-            select e.id, e.occurred_at, e.tool, e.sections, e.flavor, e.query, e.error, s.uuid as snapshot_uuid, s.snapshot_at
+            select e.id, e.occurred_at, e.tool, e.sections, e.flavor, e.error, s.uuid as snapshot_uuid, s.snapshot_at
               from events e
               left join snapshots s on s.uuid = e.snapshot_uuid and s.user_id = e.user_id and s.kit = $5
              where e.user_id = $1 and e.kind = 'tool_call' and e.occurred_at <= $2
@@ -154,7 +154,6 @@ export const reportIssue: PlatformTool = {
         tool: row.tool,
         sections: row.sections,
         flavor: row.flavor,
-        query: row.query,
         error: row.error,
       }));
       const { rows: inserted } = await client.query<{ uuid: string }>(

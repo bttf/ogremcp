@@ -9,9 +9,9 @@ import { logger } from "./log.js";
  * one line with the user's uuid and the rows deleted from each table.
  *
  * - `deleteUserData` deletes the user's uploads, snapshots, events (tool
- *   calls and ingest requests, with their search queries), and issues
- *   (`report_issue`). The account, its sign-in identities, devices, enabled
- *   games, and agent grants stay, so the user can go on using the service.
+ *   calls and ingest requests), and issues (`report_issue`). The account,
+ *   its sign-in identities, devices, enabled games, and agent grants stay,
+ *   so the user can go on using the service.
  *   `usage_daily` (§14) stays too: §11 does not list it, and deleting it
  *   would reset the day's tool-call cap.
  * - `deleteAccount` deletes the same, then the user's rows of oidc-provider
@@ -21,8 +21,6 @@ import { logger } from "./log.js";
  *   `usage_daily` goes with the user's row, by its cascade. Access tokens
  *   are looked up at each request (`requireToken`), so every bridge and
  *   agent token is refused from the commit on.
- *
- * `search_cache` is not linked to users and stays (§11).
  *
  * The deletes run in foreign key order. `uploads.device_id` has no cascade
  * (migration 0002), so uploads go before devices, and snapshots go before

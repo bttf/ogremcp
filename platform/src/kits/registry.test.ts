@@ -62,11 +62,6 @@ describe("loadKitRegistry", () => {
     expect(() => loadKitRegistry({ sources: [badManifest], adaptersDir })).toThrow(
       /^@ogremcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/tool_prefix /,
     );
-    // A search prefix must be https and end in `/`: `/classic` would admit `/classic-ptr/` (§12).
-    const flavors = { ...(wowManifest["flavors"] as object), classic_era: { status: "supported", search: ["https://www.wowhead.com/classic"] } };
-    expect(() => loadKitRegistry({ sources: [{ ...wow, manifest: { ...wowManifest, flavors } }], adaptersDir })).toThrow(
-      /^@ogremcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/flavors\/classic_era\/search\/0 /,
-    );
 
     const tool = {
       name: "get_state",
@@ -95,16 +90,6 @@ describe("loadKitRegistry", () => {
     const nine = Array.from({ length: 9 }, (_, i) => `wow_get_state${i}`);
     expect(() => checkKits([withTools(nine.slice(0, 8))])).not.toThrow();
     expect(() => checkKits([withTools(nine)])).toThrow("@ogremcp/kit-wow: the kit has 9 tools, and a kit may have at most 8 (§10.2).");
-  });
-
-  it("refuses a mixed prefix that is not in the flavor's search (§6.1)", () => {
-    const flavors = {
-      ...(wowManifest["flavors"] as object),
-      classic_era: { status: "supported", search: ["https://www.wowhead.com/classic/"], mixed: ["https://warcraft.wiki.gg/"] },
-    };
-    expect(() => checkKits([{ ...wow, manifest: { ...wowManifest, flavors } }])).toThrow(
-      '@ogremcp/kit-wow: flavors.classic_era.mixed has "https://warcraft.wiki.gg/", which is not in flavors.classic_era.search (§6.1).',
-    );
   });
 
   it("refuses two kits with the same tool_prefix", () => {

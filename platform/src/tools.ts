@@ -3,16 +3,12 @@ import type { ToolAnnotations, ToolDef, ToolInputSchema, ToolResult } from "@ogr
 import type { Pool } from "pg";
 
 import type { EventRecorder } from "./events.js";
-import { fetchGamePage } from "./fetch-game-page.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
 import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
-import type { PageFetch } from "./pages.js";
 import { reportIssue } from "./report-issue.js";
-import type { ScopedSearch, SearchUsage } from "./search.js";
-import { searchGameInfo } from "./search-game-info.js";
 import { createToolContext, DEFAULT_TOOL_CONTEXT, findToolUser, type SnapshotRef, type ToolContextSettings, type ToolUser } from "./tool-context.js";
-import { errorResult, gameOffResult, kitResultBytes, kitToolResult, paidOnlyResult, type ToolAnswer, type ToolCallError } from "./tool-envelope.js";
+import { errorResult, gameOffResult, kitResultBytes, kitToolResult, paidOnlyResult, type ToolAnswer } from "./tool-envelope.js";
 import { checkPlatformToolName } from "./tool-names.js";
 import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } from "./usage.js";
 
@@ -43,10 +39,9 @@ import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } 
  * Each call of a tool the user may call, or of a tool of a game the user has
  * turned off, writes one events row (`events.ts`, §16) once it has its
  * answer: the agent's OAuth client, the tool, the args summary, the latency,
- * the error category, the age of the snapshot it returned, and what a search
- * cost. The args summary is the `sections` the tool's schema names and a
- * `flavor` that is a kit's flavor key; a platform tool adds a query through
- * `ToolCallNotes`. No other argument is recorded: `character` and the like
+ * the error category, and the age of the snapshot it returned. The args
+ * summary is the `sections` the tool's schema names and a `flavor` that is a
+ * kit's flavor key. No other argument is recorded: `character` and the like
  * are free text. A kit tool's snapshot is its envelope's `snapshot_at`, and
  * the row names it by uuid: the snapshot its `ToolContext` read with that
  * `snapshot_at`. `report_issue` attaches it (§16.2).
@@ -65,24 +60,16 @@ export interface PlatformToolContext {
   games: readonly Kit[];
   /** The tool call limits, such as `LIST_GAMES_CHARACTERS`. */
   settings: ToolContextSettings;
-  /** Game-scoped search (§12), or null without `FIRECRAWL_API_KEY`. */
-  search: ScopedSearch | null;
-  /** Page fetches (§12), or null without `FIRECRAWL_API_KEY`. */
-  fetchPage: PageFetch | null;
   /** What the handler adds to the call's events row. */
   event: ToolCallNotes;
 }
 
 /** What a platform tool's handler adds to its call's events row (§16). */
-export interface ToolCallNotes extends SearchUsage {
-  /** search_game_info's normalized query. User data (§16.2). */
-  query?: string;
+export interface ToolCallNotes {
   /** When the snapshot the call returned was captured. */
   snapshotAt?: Date;
   /** The uuid of the snapshot whose state a kit tool call returned. */
   snapshotUuid?: string;
-  /** Why an `isError` result is one, when not `user_error`. */
-  error?: ToolCallError;
 }
 
 /** Who calls a tool: the user and the agent, from the access token (§9). */
@@ -105,7 +92,7 @@ export interface PlatformTool {
 }
 
 /** The platform tools (§10.3), in the order `tools/list` lists them. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo, fetchGamePage, reportIssue];
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, reportIssue];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -115,13 +102,9 @@ export interface ToolRegistryOptions {
   platformTools?: readonly PlatformTool[];
   /**
    * The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`,
-   * `FETCH_PAGE_MAX_CHARS`, `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
+   * `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
    */
   settings?: ToolContextSettings;
-  /** Game-scoped search, for `search_game_info` (§12). Default: null, and the tool answers `search_unavailable`. */
-  search?: ScopedSearch | null;
-  /** Page fetches, for `fetch_game_page` (§12). Default: null, and the tool answers `search_unavailable`. */
-  fetchPage?: PageFetch | null;
   /**
    * Receives one line per tool call that failed with an error that is not
    * user-facing, or whose result was over the size cap. Default: `logger.error`.
@@ -163,8 +146,6 @@ export function createToolRegistry({
   kits,
   platformTools = PLATFORM_TOOLS,
   settings = DEFAULT_TOOL_CONTEXT,
-  search = null,
-  fetchPage = null,
   log = logger.error,
   events,
   usage = createUsageMeter({ pool }),
@@ -218,7 +199,7 @@ export function createToolRegistry({
         answer = { result: capReachedResult(count), error: "cap_reached" };
       } else if (tool !== undefined) {
         schema = tool.def.inputSchema;
-        answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, search, fetchPage, event }, log);
+        answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, event }, log);
       } else {
         // A client can keep a turned-off game's tools until a new chat (§10.2).
         const off = allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ kit, def }))).find(({ def }) => def.name === name);
@@ -227,7 +208,7 @@ export function createToolRegistry({
         answer = { result: gameOffResult(off.kit.name), error: "game_off" };
       }
       const snapshotAt = tool?.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
-      const error = answer.error === "user_error" ? (event.error ?? "user_error") : answer.error;
+      const { error } = answer;
       // A call that failed through the service's fault does not count (§14).
       if (count?.kind === "counted" && error !== null && REFUNDED_ERRORS.has(error)) await usage.refund(count);
       events?.record({
@@ -239,12 +220,9 @@ export function createToolRegistry({
         tool: name,
         sections: knownSections(args, schema),
         flavor: knownFlavor(args, allKits),
-        query: event.query ?? null,
         error,
         snapshotAt: answer.error === null ? (snapshotAt ?? null) : null,
         snapshotUuid: answer.error === null ? (event.snapshotUuid ?? null) : null,
-        cacheHit: event.cacheHit ?? null,
-        searchCredits: event.searchCredits ?? null,
       });
       return answer.result;
     },
