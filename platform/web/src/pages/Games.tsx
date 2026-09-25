@@ -22,7 +22,7 @@ const TIPS: Readonly<Record<string, readonly ReactNode[]>> = {
 };
 
 /** The first-class kits, or null when the service did not answer them. */
-async function loadGames(): Promise<Game[] | null> {
+export async function loadGames(): Promise<Game[] | null> {
   try {
     const res = await fetch("/api/v1/games", { headers: { Accept: "application/json" } });
     if (!res.ok) return null;

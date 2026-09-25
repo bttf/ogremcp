@@ -16,7 +16,7 @@ export function Home() {
         You are signed in.
         {providers.length > 0 && ` Linked accounts: ${providers.map((provider) => PROVIDER_LABELS[provider]).join(", ")}.`}
       </p>
-      <p>New here? Download the bridge, approve it, and connect your AI agent.</p>
+      <p>New here? Choose your games, download the bridge, approve it, and connect your AI agent.</p>
       <p>
         <Link className="og-button og-button--inline" to="/get-started">
           Get started

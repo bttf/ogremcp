@@ -4,9 +4,12 @@ import { Link } from "react-router";
 import { loadSetup, type Setup } from "../setup.js";
 import { loadAgents } from "./ConnectedAgents.js";
 import { loadDevices } from "./Devices.js";
+import { loadGames } from "./Games.js";
 
 /** Which steps are done, from the user's data. Null when the service did not answer it. */
 interface Progress {
+  /** An enabled game (§11 `user_games`). */
+  games: boolean | null;
   /** A live device: the bridge was downloaded and approved (§8.1). */
   bridge: boolean | null;
   /** An agent grant (§9). */
@@ -14,21 +17,24 @@ interface Progress {
 }
 
 async function loadProgress(): Promise<Progress> {
-  const [devices, agents] = await Promise.all([loadDevices(), loadAgents()]);
+  const [games, devices, agents] = await Promise.all([loadGames(), loadDevices(), loadAgents()]);
   return {
+    games: games === null ? null : games.some((game) => game.enabled),
     bridge: devices === null ? null : devices.some((device) => !device.revoked),
     agent: agents === null ? null : agents.length > 0,
   };
 }
 
 /**
- * The Get started page (§13.2): the one-time onboarding. Download the bridge,
- * approve it at `/device`, and connect an agent. A step shows as done when
- * the user's devices or agent grants say so.
+ * The Get started page (§13.2): the one-time onboarding. Choose your games,
+ * download the bridge, approve it at `/device`, and connect an agent. The
+ * bridge installs the addon of each enabled game only (§8.2), so games come
+ * first. A step shows as done when the user's games, devices, or agent
+ * grants say so.
  */
 export function GetStarted() {
   const [setup, setSetup] = useState<Setup | "loading" | "error">("loading");
-  const [progress, setProgress] = useState<Progress>({ bridge: null, agent: null });
+  const [progress, setProgress] = useState<Progress>({ games: null, bridge: null, agent: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -46,13 +52,19 @@ export function GetStarted() {
   return (
     <>
       <h1>Get started</h1>
-      <p>Three steps connect your game to your AI agent.</p>
+      <p>Four steps connect your games to your AI agent.</p>
       {setup === "loading" ? (
         <p>Loading…</p>
       ) : setup === "error" ? (
         <p role="alert">Open Gamer MCP did not answer. Reload the page to try again.</p>
       ) : (
         <ol className="og-cards og-steps">
+          <Step title="Choose your games" done={progress.games}>
+            <p>Enable the games you play. The bridge installs the addon for each one.</p>
+            <p>
+              <Link to="/games">Choose your games</Link>
+            </p>
+          </Step>
           <Step title="Download the bridge" done={progress.bridge}>
             <p>The bridge is one app for every game you play. It runs on Windows and macOS and sends your game state to Open Gamer MCP.</p>
             {setup.bridge_download_url === null ? (

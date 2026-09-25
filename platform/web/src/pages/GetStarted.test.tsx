@@ -25,14 +25,16 @@ const device = {
   revoked: false,
 };
 
-/** Renders Get started, with the download URL and the devices the service answers. */
-async function render(downloadUrl: string | null, devices: unknown[]): Promise<HTMLElement> {
+/** Renders Get started, with the download URL, the enabled games, and the devices the service answers. */
+async function render(downloadUrl: string | null, enabled: boolean, devices: unknown[]): Promise<HTMLElement> {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     switch (String(input)) {
       case "/api/v1/me":
         return Response.json({ uuid: "00000000-0000-4000-8000-000000000000", providers: ["google"] });
       case "/api/v1/setup":
         return Response.json({ mcp_url: "https://ogmcp.example/mcp", bridge_download_url: downloadUrl });
+      case "/api/v1/games":
+        return Response.json({ games: [{ kit: "wow", name: "World of Warcraft", enabled }] });
       case "/api/v1/devices":
         return Response.json({ devices });
       case "/api/v1/agents":
@@ -50,7 +52,7 @@ async function render(downloadUrl: string | null, devices: unknown[]): Promise<H
       </MemoryRouter>
     </SessionProvider>,
   );
-  await vi.waitFor(() => expect(container.querySelectorAll(".og-steps > li")).toHaveLength(3));
+  await vi.waitFor(() => expect(container.querySelectorAll(".og-steps > li")).toHaveLength(4));
   return container;
 }
 
@@ -59,13 +61,16 @@ function steps(container: HTMLElement): string[] {
   return [...container.querySelectorAll(".og-steps > li .og-card__head")].map((head) => head.textContent ?? "");
 }
 
-it("shows the three steps, the download link when one is configured, and which steps are done", async () => {
-  const container = await render("https://downloads.example/ogmcp-bridge", [device]);
+it("shows the four steps, the download link when one is configured, and which steps are done", async () => {
+  const container = await render("https://downloads.example/ogmcp-bridge", true, [device]);
   expect(container.querySelector("h1")?.textContent).toBe("Get started");
-  // An approved bridge marks the first two steps done; no agent is connected yet.
-  await vi.waitFor(() => expect(steps(container)).toEqual(["Download the bridgeDone", "Approve the bridgeDone", "Connect your agent"]));
+  // An enabled game and an approved bridge mark the first three steps done; no agent is connected yet.
+  await vi.waitFor(() =>
+    expect(steps(container)).toEqual(["Choose your gamesDone", "Download the bridgeDone", "Approve the bridgeDone", "Connect your agent"]),
+  );
   const links = [...container.querySelectorAll(".og-steps a")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(links).toEqual([
+    ["Choose your games", "/games"],
     ["Download the bridge", "https://downloads.example/ogmcp-bridge"],
     ["approval page", "/device"],
     ["Connect your agent", "/connect"],
@@ -73,9 +78,9 @@ it("shows the three steps, the download link when one is configured, and which s
   root?.unmount();
   document.body.replaceChildren();
 
-  // No download configured, and only a revoked bridge: no link, and nothing is done.
-  const unconfigured = await render(null, [{ ...device, revoked: true }]);
+  // No download configured, no enabled game, and only a revoked bridge: no link, and nothing is done.
+  const unconfigured = await render(null, false, [{ ...device, revoked: true }]);
   expect(unconfigured.textContent).toContain("The download is not available yet.");
   expect(unconfigured.querySelector(".og-steps a[href^='https:']")).toBeNull();
-  expect(steps(unconfigured)).toEqual(["Download the bridge", "Approve the bridge", "Connect your agent"]);
+  expect(steps(unconfigured)).toEqual(["Choose your games", "Download the bridge", "Approve the bridge", "Connect your agent"]);
 });
