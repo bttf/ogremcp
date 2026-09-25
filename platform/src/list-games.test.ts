@@ -74,7 +74,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("list_games (§10.3)", () => {
   async function call(uuid: string, games: readonly Kit[], settings = DEFAULT_TOOL_CONTEXT) {
     const user = await findToolUser(pool, uuid);
     if (user === null) throw new Error("no user");
-    const result = await listGames.handler({}, { pool, user, games, settings });
+    const result = await listGames.handler({}, { pool, user, games, settings, search: null });
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0]?.text ?? "")).toEqual(result.structuredContent);
     return result.structuredContent;

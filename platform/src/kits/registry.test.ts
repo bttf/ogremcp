@@ -62,6 +62,11 @@ describe("loadKitRegistry", () => {
     expect(() => loadKitRegistry({ sources: [badManifest], adaptersDir })).toThrow(
       /^@ogmcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/tool_prefix /,
     );
+    // A search prefix must be https and end in `/`: `/classic` would admit `/classic-ptr/` (§12).
+    const flavors = { ...(wowManifest["flavors"] as object), classic_era: { status: "supported", search: ["https://www.wowhead.com/classic"] } };
+    expect(() => loadKitRegistry({ sources: [{ ...wow, manifest: { ...wowManifest, flavors } }], adaptersDir })).toThrow(
+      /^@ogmcp\/kit-wow: manifest\.json does not match the SDK manifest schema: manifest\/flavors\/classic_era\/search\/0 /,
+    );
 
     const tool = {
       name: "get_state",

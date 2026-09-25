@@ -10,6 +10,7 @@ import {
   DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS,
   loadConfig,
 } from "./config.js";
+import { DEFAULT_FIRECRAWL_TIMEOUT_MS } from "./firecrawl.js";
 import { DEFAULT_INGEST } from "./ingest.js";
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
@@ -41,6 +42,7 @@ describe("loadConfig", () => {
       deviceCodeMisses: DEFAULT_MISSES,
       ingest: DEFAULT_INGEST,
       toolContext: DEFAULT_TOOL_CONTEXT,
+      firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
       bridgeDownloadUrl: null,
       logLevel: "info",
       production: false,

@@ -11,6 +11,7 @@ import type { KitRegistry } from "./kits/registry.js";
 import { logger, requestLog } from "./log.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
+import type { ScopedSearch } from "./search.js";
 import { securityHeaders } from "./security-headers.js";
 import type { ToolContextSettings } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
@@ -40,6 +41,8 @@ export interface AppOptions {
   kits?: KitRegistry;
   /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   toolContext?: ToolContextSettings;
+  /** Game-scoped search for `search_game_info` (§12), or null without `FIRECRAWL_API_KEY`. Default: null. */
+  search?: ScopedSearch | null;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
   /** The `INGEST_` names: the ingest endpoint's limits (§8.3). Default: `DEFAULT_INGEST`. */
@@ -67,6 +70,7 @@ export function createApp({
   webRoot,
   kits,
   toolContext,
+  search,
   bridgeDownloadUrl,
   ingest,
   ingestLog,
@@ -86,7 +90,7 @@ export function createApp({
   // Also before the web session lookup: `/mcp` and its metadata never read a web session.
   if (auth !== undefined && oidc !== undefined) {
     // The registry checks the platform tools' names: a bad one stops the start (§10.1).
-    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, log });
+    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, log });
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) app.use(bridgeApiRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, pool: auth.pool, kits, ingest, ingestLog }));
