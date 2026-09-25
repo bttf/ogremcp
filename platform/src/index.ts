@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { createAdminPool } from "./admin.js";
 import { createApp } from "./app.js";
+import { startAuthCleanup } from "./auth-cleanup.js";
 import { type Config, loadConfig } from "./config.js";
 import { createPool, failureCode } from "./db.js";
 import { createEventRecorder, createEventsPool } from "./events.js";
@@ -161,6 +162,9 @@ const admin = { pool: createAdminPool({ url: config.databaseUrl }), adminUserUui
 // Deletes the OAuth clients registered by DCR that have gone unused (§9),
 // now and once a day.
 startClientCleanup({ pool, unusedClientDays: config.registration.unusedClientDays });
+
+// Deletes expired OAuth rows and web sessions (§11), now and once a day.
+startAuthCleanup({ pool });
 
 // Deletes free users' expired uploads and snapshots (§11, §14), now and once
 // a day. Paid users keep theirs. FREE_RETENTION_DAYS=off keeps everyone's.
