@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 
 import { failureCode } from "./db.js";
 import type { Kit, KitRegistry } from "./kits/registry.js";
+import { listGames } from "./list-games.js";
 import { logger } from "./log.js";
 import type { ScopedSearch } from "./search.js";
 import { searchGameInfo } from "./search-game-info.js";
@@ -30,6 +31,8 @@ export interface PlatformToolContext {
   user: ToolUser;
   /** The kits the user has enabled, in registry order. */
   games: readonly Kit[];
+  /** The tool call limits, such as `LIST_GAMES_CHARACTERS`. */
+  settings: ToolContextSettings;
   /** Game-scoped search (§12), or null without `FIRECRAWL_API_KEY`. */
   search: ScopedSearch | null;
 }
@@ -44,7 +47,7 @@ export interface PlatformTool {
 }
 
 /** The platform tools (§10.3), in the order `tools/list` lists them. */
-export const PLATFORM_TOOLS: readonly PlatformTool[] = [searchGameInfo];
+export const PLATFORM_TOOLS: readonly PlatformTool[] = [listGames, searchGameInfo];
 
 export interface ToolRegistryOptions {
   pool: Pool;
@@ -52,7 +55,7 @@ export interface ToolRegistryOptions {
   kits?: KitRegistry;
   /** Default: `PLATFORM_TOOLS`. */
   platformTools?: readonly PlatformTool[];
-  /** The `ToolContext` settings (`HISTORY_MAX_SNAPSHOTS`). Default: `DEFAULT_TOOL_CONTEXT`. */
+  /** The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `LIST_GAMES_CHARACTERS`). Default: `DEFAULT_TOOL_CONTEXT`. */
   settings?: ToolContextSettings;
   /** Game-scoped search, for `search_game_info` (§12). Default: null, and the tool answers `search_unavailable`. */
   search?: ScopedSearch | null;
@@ -122,7 +125,7 @@ export function createToolRegistry({
       if (found === null || tool === undefined) return null;
       const { user, games } = found;
       try {
-        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, search });
+        if (tool.kit === null) return await tool.def.handler(args, { pool, user, games, settings, search });
         return await tool.def.handler(args, createToolContext({ pool, user, kit: tool.kit.key, settings }));
       } catch (err) {
         return toolErrorResult(err, name, log);

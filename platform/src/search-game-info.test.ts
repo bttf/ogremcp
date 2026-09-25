@@ -10,6 +10,7 @@ import { checkKits } from "./kits/validate.js";
 import { migrate } from "./migrations.js";
 import { firecrawlScopedSearch, type ScopedSearch, type SearchHit, type SearchScope } from "./search.js";
 import { NOT_SET_UP_MESSAGE, searchGameInfo, UNAVAILABLE_MESSAGE } from "./search-game-info.js";
+import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
 
 /** As in migrations.test.ts: a Postgres server whose user may create databases. */
@@ -37,7 +38,7 @@ function stubSearch(): { search: ScopedSearch; calls: { scope: SearchScope; quer
 
 /** Calls the tool with `flavor` given, so that no query reaches the (absent) database. */
 function call(args: unknown, search: ScopedSearch | null, games: readonly Kit[] = [WOW]): Promise<ToolResult> {
-  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, games, search });
+  return searchGameInfo.handler(args, { pool: {} as Pool, user: USER, games, settings: DEFAULT_TOOL_CONTEXT, search });
 }
 
 describe("search_game_info (§10.3, §12)", () => {
