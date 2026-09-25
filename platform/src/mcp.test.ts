@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { parseUpload, writeSnapshot } from "./ingest.js";
+import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
@@ -31,7 +32,7 @@ if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set:
 const ISSUER = "https://ogmcp.example";
 
 /** `list_games` as `tools/list` lists it, for every user (§10.3). */
-const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: { readOnlyHint: true } };
+const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: listGames.annotations };
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
@@ -275,7 +276,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     expect(JSON.parse(init.body)).toEqual({
       jsonrpc: "2.0",
       id: 1,
-      result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "ogmcp", version } },
+      result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "ogmcp", version }, instructions: SERVER_INSTRUCTIONS },
     });
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
@@ -349,7 +350,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
             name: "wow_get_state",
             description: wowGetState?.description,
             inputSchema: wowGetState?.inputSchema,
-            annotations: { readOnlyHint: true },
+            annotations: wowGetState?.annotations,
           },
         ],
       },

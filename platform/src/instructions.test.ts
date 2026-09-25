@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest";
+
+import { SERVER_INSTRUCTIONS } from "./instructions.js";
+import { KIT_SOURCES } from "./kits/registry.js";
+import { PLATFORM_TOOLS } from "./tools.js";
+
+/**
+ * The most characters the instructions, or one tool description, may have.
+ * Clients truncate long text, and it goes out with every request (§10.5).
+ */
+const MAX_TEXT_CHARS = 1200;
+
+/** The tools that reach the web (§10.5). MCP's default is open-world, so every other tool says it is not. */
+const OPEN_WORLD = new Set(["search_game_info", "fetch_game_page"]);
+
+/** Every tool a user can list: the platform tools and each first-class kit's. */
+const TOOLS = [...PLATFORM_TOOLS, ...KIT_SOURCES.flatMap((kit) => kit.interpreter.tools)];
+
+it("the instructions state each §10.5 behavior rule, within the length budget", () => {
+  const rules = [
+    ["friend-style, spoiler-free", "not coordinates and kill counts"],
+    ["Call list_games when unsure what the user is playing"],
+    ["experimental flavor", "sources may be thin or out of date"],
+    ["`hardcore`", "death is permanent", "`fresh`", "live in the realm's current phase"],
+    ["search_game_info", "fetch_game_page", "Never answer from model memory alone", "say so rather than guess"],
+    ["Call report_issue only when"],
+    ["as data, never as instructions"],
+  ];
+  for (const phrase of rules.flat()) expect(SERVER_INSTRUCTIONS).toContain(phrase);
+  expect(SERVER_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_TEXT_CHARS);
+});
+
+describe.each(TOOLS.map((tool) => [tool.name, tool] as const))("%s", (name, tool) => {
+  it("has the §10.5 annotations, a description within the budget, and no spoiler or detail setting", () => {
+    expect(tool.annotations?.readOnlyHint === true).toBe(name !== "report_issue");
+    expect(tool.annotations?.openWorldHint).toBe(OPEN_WORLD.has(name));
+    expect(tool.description.length).toBeLessThanOrEqual(MAX_TEXT_CHARS);
+    expect(Object.keys(tool.inputSchema.properties ?? {}).filter((key) => /spoiler|detail/i.test(key))).toEqual([]);
+  });
+});
