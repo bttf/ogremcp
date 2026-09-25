@@ -1,0 +1,23 @@
+# The GoReleaser OSS release that docs/releases.md was checked against,
+# verified by its SHA-256 before it runs. The bridge workflows share it, so
+# the dev build and the release build with the same GoReleaser. macOS runners
+# only: it installs the Darwin build.
+name: Install GoReleaser
+description: Install the pinned GoReleaser OSS release on a macOS runner and add it to PATH.
+
+runs:
+  using: composite
+  steps:
+    - name: Install GoReleaser
+      shell: bash
+      env:
+        GORELEASER_VERSION: 2.18.2
+        GORELEASER_SHA256: 4bfd26942aa0f78e275cad3e49144a7c5ce2e8a34f7d0e9d34c718125766ba12
+      run: |
+        archive="${RUNNER_TEMP}/goreleaser.tar.gz"
+        curl -sSfL -o "$archive" "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_Darwin_all.tar.gz"
+        echo "${GORELEASER_SHA256}  ${archive}" | shasum -a 256 -c -
+        mkdir -p "${RUNNER_TEMP}/bin"
+        tar -xzf "$archive" -C "${RUNNER_TEMP}/bin" goreleaser
+        rm "$archive"
+        echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"

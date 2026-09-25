@@ -7,7 +7,8 @@
 #
 # `make dist` needs GoReleaser v2 and a Mac with Xcode's command line tools:
 # the macOS build uses cgo, and scripts/macos-app.sh uses lipo, codesign, and
-# ditto. Nothing is signed with an identity or notarized; that is P9.
+# ditto. Nothing is signed with an identity or notarized: only a release
+# build does that (.github/workflows/bridge-release.yml, docs/releases.md).
 #
 # Adapted from bttf/wow-guide@df80260, bridge/Makefile. GoReleaser replaces
 # its dist and tray-app targets: universal_binaries does the lipo step, and
