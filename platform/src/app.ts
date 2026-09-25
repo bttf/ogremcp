@@ -8,17 +8,18 @@ import { bridgeApiRouter } from "./bridge-api.js";
 import { failureCode } from "./db.js";
 import type { EventRecorder } from "./events.js";
 import { type HealthOptions, healthRouter } from "./health.js";
-import type { IngestSettings } from "./ingest.js";
+import { DEFAULT_INGEST, type IngestSettings } from "./ingest.js";
 import type { KitRegistry } from "./kits/registry.js";
 import { logger, requestLog } from "./log.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
 import type { PageFetch } from "./pages.js";
+import { DEFAULT_RETENTION, type RetentionSettings } from "./retention.js";
 import type { ScopedSearch } from "./search.js";
 import { securityHeaders } from "./security-headers.js";
 import type { ToolContextSettings } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
-import { createUsageMeter, type ToolCallCaps } from "./usage.js";
+import { createUsageMeter, NO_TOOL_CALL_CAPS, type ToolCallCaps } from "./usage.js";
 import { webFiles, webPages } from "./web.js";
 
 export interface AppOptions {
@@ -74,6 +75,12 @@ export interface AppOptions {
    */
   toolCallCaps?: ToolCallCaps;
   /**
+   * `FREE_RETENTION_DAYS` and `DOWNGRADE_GRACE_DAYS` (§11, §14). `index.ts`
+   * runs the retention job; the app only reports the free tier's retention on
+   * the Account page (§13.2). Default: `DEFAULT_RETENTION`.
+   */
+  retention?: RetentionSettings;
+  /**
    * The Admin API of `auth`'s web UI (§13.2, `admin.ts`): its own pool, from
    * `createAdminPool`, and `ADMIN_USER_UUIDS`. Default: none, and its path
    * answers 404 as any other path that does not exist.
@@ -107,6 +114,7 @@ export function createApp({
   ingestLog,
   events,
   toolCallCaps,
+  retention = DEFAULT_RETENTION,
   admin,
   https = false,
   trustProxyHops = 0,
@@ -139,7 +147,13 @@ export function createApp({
     app.use(authRouter(auth));
     // Before `apiRouter`, whose last route answers every other `/api` path.
     if (admin !== undefined) app.use(adminRouter(admin));
-    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl }));
+    // The Account page reports the same limits that ingest, `/mcp`, and the retention job enforce (§14).
+    const tierLimits = {
+      devicesPerUser: (ingest ?? DEFAULT_INGEST).devicesPerUser,
+      toolCallCaps: toolCallCaps ?? NO_TOOL_CALL_CAPS,
+      freeRetentionDays: retention.freeRetentionDays,
+    };
+    app.use(apiRouter({ ...auth, kits, oidc, bridgeDownloadUrl, tierLimits }));
   }
   // Last: it answers page loads that no route above took.
   if (webRoot !== undefined) app.use(webPages(webRoot));
