@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { fetchGamePage } from "./fetch-game-page.js";
 import { parseUpload, writeSnapshot } from "./ingest.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { writeAdapterZips } from "./kits/adapter.js";
@@ -41,8 +42,15 @@ const SEARCH_GAME_INFO = {
   inputSchema: searchGameInfo.inputSchema,
   annotations: searchGameInfo.annotations,
 };
+/** `fetch_game_page` as `tools/list` lists it, for every user (§10.3). */
+const FETCH_GAME_PAGE = {
+  name: fetchGamePage.name,
+  description: fetchGamePage.description,
+  inputSchema: fetchGamePage.inputSchema,
+  annotations: fetchGamePage.annotations,
+};
 /** The platform tools, as `tools/list` lists them. */
-const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO];
+const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO, FETCH_GAME_PAGE];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;
