@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -37,14 +38,21 @@ type Auth interface {
 
 // Controller runs the bridge for the tray app and reports through Model. Run
 // does what the dev commands `bridge run` and `bridge adapter -watch` do
-// together. The menu calls Login, ChooseFolder, and ToggleAutostart.
+// together. The menu calls Login, ChooseFolder, ChangeServer, and
+// ToggleAutostart.
 type Controller struct {
-	// Base is the server's base URL, and Version the bridge's.
+	// Base is the server's base URL, Auth its login, and Version the
+	// bridge's. Run replaces Base and Auth when the server changes
+	// (SetServer), while no part of the bridge runs.
 	Base    string
 	Version string
 	Auth    Auth
+	// NewAuth returns the login of the server at base. The login of each
+	// server is in a keychain entry of its own, so the old server's token
+	// never goes to the new server.
+	NewAuth func(base string) (Auth, error)
 	// Settings is the settings file at SettingsPath (package config). Run
-	// saves each game folder it finds there.
+	// saves each game folder it finds there, and SetServer the server.
 	Settings     config.File
 	SettingsPath string
 	Model        *Model
@@ -54,6 +62,10 @@ type Controller struct {
 	// PickFolder shows a folder picker titled title and returns the folder
 	// the user picked, or "" when the user cancels.
 	PickFolder func(ctx context.Context, title string) (string, error)
+	// AskServer asks the user for a new server, current being the one in
+	// use, and confirms the change. It returns the server_url to save, ""
+	// for config.DefaultServerURL, and false when the user keeps the server.
+	AskServer func(ctx context.Context, current string) (string, bool, error)
 	// Autostart is the login item, or nil where there is none.
 	Autostart autostart.Manager
 	// AutostartBlocked, when Autostart is nil, is the menu title that says
@@ -63,7 +75,21 @@ type Controller struct {
 	// again. Zero means DefaultSaveRetry.
 	SaveRetry time.Duration
 
-	mu        sync.Mutex
+	// settingsMu guards Settings and its saves.
+	settingsMu sync.Mutex
+
+	mu sync.Mutex
+	// run is the context of the bridge's parts for the current server, and
+	// stopRun ends it. next is the server SetServer asked for, which Run
+	// starts once they have stopped.
+	run     context.Context
+	stopRun context.CancelFunc
+	next    *server
+	// tasks counts the logins and the keychain save retries, which run
+	// against the current server. Run waits for them before it changes the
+	// server.
+	tasks     sync.WaitGroup
+	asking    bool
 	loggingIn bool
 	loginURL  string
 	// saving is true while a retrySave runs, and stopSave stops it. saveGen
@@ -80,6 +106,12 @@ type Controller struct {
 	wake   func()
 }
 
+// server is a server and its login.
+type server struct {
+	base string
+	auth Auth
+}
+
 // parts are the bridge's components that the kit fetches drive.
 type parts struct {
 	uploader *upload.Uploader
@@ -91,14 +123,51 @@ type parts struct {
 // Run runs the bridge until ctx ends (§7): it fetches the kits at start,
 // after each login, and every refresh interval, locates each game folder,
 // installs or updates each adapter, watches the kits' sources, and uploads
-// each settled change. It returns once everything it started has stopped.
+// each settled change. When the server changes (SetServer), it stops all of
+// that, the uploads in flight and a running login included, and starts it
+// again against the new server. It returns once everything it started has
+// stopped.
 func (c *Controller) Run(ctx context.Context) {
 	c.readAutostart()
+	for ctx.Err() == nil {
+		run, stop := context.WithCancel(ctx)
+		c.mu.Lock()
+		next := c.next
+		c.next = nil
+		if next != nil {
+			c.Base, c.Auth = next.base, next.auth
+			clear(c.asked)
+			// Under mu, so that no login starts before the menu is reset.
+			c.Model.NewServer()
+		}
+		c.run, c.stopRun = run, stop
+		c.mu.Unlock()
+		if next != nil {
+			c.Log.Info("the server changed", "server", next.base)
+		}
+		c.runServer(run)
+		// Under mu, so that a login either started before, and is waited
+		// for, or sees run ended and does not start.
+		c.mu.Lock()
+		stop()
+		c.resume, c.wake = nil, nil
+		c.mu.Unlock()
+		c.tasks.Wait()
+	}
+}
+
+// runServer runs the bridge against the current server until ctx ends, and
+// returns once everything it started has stopped. An upload in flight ends
+// with ctx.
+func (c *Controller) runServer(ctx context.Context) {
+	c.settingsMu.Lock()
+	settings := c.Settings
+	c.settingsMu.Unlock()
 	p := parts{env: locate.DefaultEnv()}
-	p.uploader = upload.New(c.Base, c.Auth, c.Version, c.Settings.UploadCap(), c.Log)
-	p.watcher = watch.New(c.Settings.DebounceDelay(), c.Settings.Interval(), c.Log, p.uploader.Add)
+	p.uploader = upload.New(c.Base, c.Auth, c.Version, settings.UploadCap(), c.Log)
+	p.watcher = watch.New(settings.DebounceDelay(), settings.Interval(), c.Log, p.uploader.Add)
 	p.updater = adapter.New(adapter.NewClient(c.Base, c.Auth), process.System{})
-	poller := kits.NewPoller(kits.New(c.Base, c.Auth), c.Settings.Interval(), func(list []kits.Kit, err error) {
+	poller := kits.NewPoller(kits.New(c.Base, c.Auth), settings.Interval(), func(list []kits.Kit, err error) {
 		c.onFetch(ctx, p, list, err)
 	})
 	c.mu.Lock()
@@ -180,7 +249,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			errs["kit|"+k.Kit] = names[k.Kit] + ": " + k.Err.Error()
 			continue
 		}
-		root, err := locate.Root(ctx, k.Manifest.Root, c.Settings.Roots[k.Kit], p.env, kitPrompter{c: c, kit: k.Kit})
+		root, err := locate.Root(ctx, k.Manifest.Root, c.savedRoot(k.Kit), p.env, kitPrompter{c: c, kit: k.Kit})
 		if ctx.Err() != nil {
 			return
 		}
@@ -205,8 +274,17 @@ func canPick(r manifest.Root) bool {
 	return slices.ContainsFunc(r.Locate, func(e manifest.LocateEntry) bool { return e.Prompt != "" })
 }
 
+// savedRoot is the game folder of kit in the settings file, or "".
+func (c *Controller) savedRoot(kit string) string {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	return c.Settings.Roots[kit]
+}
+
 // remember saves the game folder of kit to the settings file.
 func (c *Controller) remember(kit, root string) {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
 	if c.Settings.Roots[kit] == root {
 		return
 	}
@@ -312,8 +390,9 @@ func (c *Controller) ChooseFolder() {
 	}
 }
 
-// Login starts a device login (§8.1), or opens its page again while one
-// runs. The menu calls it.
+// Login starts a device login (§8.1) to the current server, or opens its
+// page again while one runs. The menu calls it. The login ends with ctx, or
+// when the server changes.
 func (c *Controller) Login(ctx context.Context) {
 	c.mu.Lock()
 	if c.loggingIn {
@@ -324,22 +403,34 @@ func (c *Controller) Login(ctx context.Context) {
 		}
 		return
 	}
+	if c.run != nil {
+		if c.run.Err() != nil {
+			// The server is changing; the menu offers a login again once
+			// the new one answers.
+			c.mu.Unlock()
+			return
+		}
+		ctx = c.run
+	}
+	s := server{base: c.Base, auth: c.Auth}
 	c.loggingIn, c.loginURL = true, ""
+	c.tasks.Add(1)
 	c.mu.Unlock()
 	c.Model.SetLogin(LoginWaiting)
 	// A new login's failure is shown even when it repeats the last one's.
 	c.showErrors("login", nil)
 	go func() {
+		defer c.tasks.Done()
 		defer Recover(c.Log)
-		c.login(ctx)
+		c.login(ctx, s)
 	}()
 }
 
-// login runs one device login. It opens the login page in the browser once
-// the server gives a code; the menu shows the code.
-func (c *Controller) login(ctx context.Context) {
-	c.Log.Info("logging in", "server", c.Base)
-	err := c.Auth.Login(ctx, func(code auth.Code) {
+// login runs one device login to s. It opens the login page in the browser
+// once the server gives a code; the menu shows the code.
+func (c *Controller) login(ctx context.Context, s server) {
+	c.Log.Info("logging in", "server", s.base)
+	err := s.auth.Login(ctx, func(code auth.Code) {
 		url := cmp.Or(code.VerificationURIComplete, code.VerificationURI)
 		c.mu.Lock()
 		c.loginURL = url
@@ -398,8 +489,10 @@ func (c *Controller) startSaveRetry(ctx context.Context) {
 	c.saving, c.stopSave = true, cancel
 	c.saveGen++
 	gen := c.saveGen
+	c.tasks.Add(1)
 	c.mu.Unlock()
 	go func() {
+		defer c.tasks.Done()
 		defer Recover(c.Log)
 		defer cancel()
 		c.retrySave(ctx)
@@ -446,6 +539,73 @@ func (c *Controller) retrySave(ctx context.Context) {
 		c.resumeAll()
 		return
 	}
+}
+
+// ChangeServer asks the user for a new server (AskServer) and changes to it
+// (SetServer). The menu calls it. It shows one question at a time.
+func (c *Controller) ChangeServer(ctx context.Context) {
+	c.mu.Lock()
+	if c.asking || c.AskServer == nil {
+		c.mu.Unlock()
+		return
+	}
+	c.asking = true
+	current := c.Base
+	c.mu.Unlock()
+	c.showErrors("server", nil)
+	go func() {
+		defer Recover(c.Log)
+		defer func() {
+			c.mu.Lock()
+			c.asking = false
+			c.mu.Unlock()
+		}()
+		value, ok, err := c.AskServer(ctx, current)
+		if err == nil && ok {
+			err = c.SetServer(value)
+		}
+		if err != nil && ctx.Err() == nil {
+			c.showErrors("server", map[string]string{"server": "Could not change the server: " + err.Error()})
+		}
+	}()
+}
+
+// SetServer makes value the server: a base URL that auth.ParseBaseURL
+// accepts, or "" for config.DefaultServerURL. It saves value as server_url in
+// the settings file, and Run then stops the bridge and starts it again
+// against the new server, with the login the bridge holds for that server
+// (NewAuth), or none. The old server's login stays in its keychain entry, for
+// a change back.
+func (c *Controller) SetServer(value string) error {
+	base, err := config.File{ServerURL: value}.Server("")
+	if err != nil {
+		return err
+	}
+	a, err := c.NewAuth(base)
+	if err != nil {
+		return err
+	}
+	c.settingsMu.Lock()
+	saved := c.Settings
+	saved.ServerURL = value
+	if c.SettingsPath != "" {
+		err = config.Save(c.SettingsPath, saved)
+	}
+	if err == nil {
+		c.Settings.ServerURL = value
+	}
+	c.settingsMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("could not save the settings file: %w", err)
+	}
+	c.Log.Info("changing the server", "server", base)
+	c.mu.Lock()
+	c.next = &server{base: base, auth: a}
+	if c.stopRun != nil {
+		c.stopRun()
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *Controller) open(url string) {

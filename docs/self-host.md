@@ -94,23 +94,31 @@ Perplexity.
 
 ## Point a bridge at the server
 
-The bridge reads the server's origin from `OGMCP_BASE_URL` each time it
-starts. Without it, the bridge uses the hosted service. Set it to
-`PUBLIC_BASE_URL`: an origin with `https://`, or `http://` on a loopback
-address.
+The bridge uses the hosted service until its settings name another server.
+Set the server to `PUBLIC_BASE_URL`: an origin with `https://`, or `http://`
+on a loopback address. The bridge saves it in its settings file,
+`ogmcp-bridge/config.json` in the user's config folder, as `server_url`. The
+setting lasts across restarts and applies when the bridge starts at login.
 
-- Windows: run `setx OGMCP_BASE_URL https://ogmcp.example.com`, then quit the
-  bridge and start it again. `setx` stores the variable for the user, so it
-  lasts across restarts and reaches the bridge when it starts at login.
-- macOS: no setting reaches the app for good. Its start-at-login item sets no
-  environment, and `launchctl setenv` lasts only until logout, so a bridge
-  started at login uses the hosted service. Turn off start at login in the
-  bridge's menu, and start the bridge from a shell with the variable set,
-  after each login:
+- macOS and Windows: open the bridge's menu, choose **Server…**, enter the
+  URL, and confirm. An empty entry goes back to the hosted service.
+- macOS, from a shell: quit the bridge, then run
 
   ```sh
-  OGMCP_BASE_URL=https://ogmcp.example.com "/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge"
+  "/Applications/Open Gamer MCP.app/Contents/MacOS/ogmcp-bridge" server set https://ogmcp.example.com
   ```
+
+  `server reset` goes back to the hosted service, and `server` alone prints
+  the server in use.
+
+The bridge keeps a separate login for each server, in the keychain. A change
+stops the uploads to the old server and starts the bridge again against the
+new one. If the bridge holds no login for the new server, its menu shows
+**Log in…**. The login for the old server stays, so changing back needs no new
+login.
+
+`OGMCP_BASE_URL`, when set, overrides the setting. It is for development:
+the start-at-login item on macOS does not see it.
 
 The Get started page links to the bridge download when `BRIDGE_DOWNLOAD_URL`
 is set in `.env`.

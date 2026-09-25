@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 
 	"github.com/bttf/ogmcp/bridge/internal/adapter"
-	"github.com/bttf/ogmcp/bridge/internal/config"
 	"github.com/bttf/ogmcp/bridge/internal/kits"
 	"github.com/bttf/ogmcp/bridge/internal/locate"
 	"github.com/bttf/ogmcp/bridge/internal/process"
@@ -36,15 +35,11 @@ func syncAdapters(args []string) error {
 		}
 		prompter = folderFlag(dir)
 	}
-	client, base, err := newClient()
+	settings, _, err := loadSettings()
 	if err != nil {
 		return err
 	}
-	path, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-	settings, err := config.Load(path)
+	client, base, err := newClient(settings)
 	if err != nil {
 		return err
 	}
