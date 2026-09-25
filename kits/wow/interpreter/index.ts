@@ -5,6 +5,7 @@ import type { Interpreter, Parsed } from "@ogmcp/sdk";
 import type { z } from "zod";
 import { detect } from "./detect.js";
 import { clip, parseError, QUOTE_MAX } from "./errors.js";
+import { getHistory } from "./get-history.js";
 import { getState } from "./get-state.js";
 import { readSavedVariables, type ReadLimits } from "./lua.js";
 import { dbSchema, type WowState } from "./schema.js";
@@ -55,7 +56,7 @@ export function createInterpreter(limits: Partial<ParseLimits> = {}): Interprete
   };
   return {
     parse: (sourceId, bytes, options) => parse(sourceId, bytes, resolved, options?.now ?? new Date()),
-    tools: [getState],
+    tools: [getState, getHistory],
   };
 }
 
