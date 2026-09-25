@@ -157,15 +157,11 @@ author's name and email.
 
 ## Security
 
-The repo is **private for now and goes public at P9** (§5). Write every commit
-as though it were already public: no secret ever enters the repo, not in code,
-tests, fixtures, commit messages, or issue links. Secrets live in Railway env
-vars and in git-ignored local `.env` files. History is not rewritten before
-publication, so a leaked credential stays leaked.
-
-Going public is a release gate: Blizzard requires addon code to be public
-before distribution, so the whole repo goes public at the P9 listings. §20 and
-anything else private is removed first.
+The repo is **public** (since 2026-09-25, §5). Every commit is published: no
+secret ever enters the repo, not in code, tests, fixtures, commit messages, or
+issue links. Secrets live in Railway env vars, GitHub Actions secrets, and
+git-ignored local `.env` files. History is not rewritten, so a leaked
+credential stays leaked.
 
 CI runs gitleaks over the full history on every PR. `.gitleaks.toml` allowlists
 confirmed false positives only.

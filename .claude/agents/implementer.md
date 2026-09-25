@@ -29,8 +29,8 @@ choose silently.
 - Never merge your own PR. Never force-push.
 - Sign off every commit for the DCO: `git commit -s`.
 - No secret goes into the repo — not in code, tests, fixtures, or commit
-  messages. The repo is private today and public at P9 (§5); history is not
-  rewritten, so treat every commit as already published.
+  messages. The repo is public (§5), and history is not rewritten, so every
+  commit is published.
 - Match the surrounding code's style, naming, and comment density.
 - Keep tests lean: main path and real risks (security, data loss, contract
   changes) only.
