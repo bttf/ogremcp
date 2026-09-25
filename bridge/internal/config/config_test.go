@@ -10,7 +10,7 @@ import (
 func TestSaveAndLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ogmcp-bridge", "config.json")
 	f, err := Load(path)
-	if err != nil || f.Roots != nil || f.Interval() != DefaultRefreshInterval || f.DebounceDelay() != DefaultDebounce {
+	if err != nil || f.Roots != nil || f.Interval() != DefaultRefreshInterval || f.DebounceDelay() != DefaultDebounce || f.UploadCap() != DefaultMaxUploadBytes {
 		t.Fatalf("a missing file: %+v, %v", f, err)
 	}
 
@@ -25,7 +25,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Errorf("Load = %+v, %v", got, err)
 	}
 
-	for _, bad := range []string{`{"refresh_interval": "1s"}`, `{"debounce": "-1s"}`} {
+	for _, bad := range []string{`{"refresh_interval": "1s"}`, `{"debounce": "-1s"}`, `{"max_upload_bytes": -1}`} {
 		if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
 			t.Fatal(err)
 		}

@@ -1,14 +1,15 @@
 // Package config is the bridge's settings file on this device
 // (docs/architecture.md §6.1, §7). It holds each kit's game folder, as the
-// locate chain found it or the user picked it, the refresh interval, and the
-// debounce delay of the watcher. It holds no secret: the refresh token is in
-// the OS keychain (package keychain).
+// locate chain found it or the user picked it, the refresh interval, the
+// debounce delay of the watcher, and the upload cap. It holds no secret: the
+// refresh token is in the OS keychain (package keychain).
 //
 // The file is JSON, ogmcp-bridge/config.json in the user's config directory:
 //
 //	{
 //	  "refresh_interval": "5m",
 //	  "debounce": "2s",
+//	  "max_upload_bytes": 5242880,
 //	  "roots": { "wow": "/Applications/World of Warcraft" }
 //	}
 //
@@ -42,6 +43,11 @@ const MinRefreshInterval = time.Minute
 // (§7, proposed).
 const DefaultDebounce = 2 * time.Second
 
+// DefaultMaxUploadBytes is the most uncompressed bytes the bridge uploads of
+// one source instance, unless the file sets max_upload_bytes. It matches the
+// server's cap (§8.3), 5 MB.
+const DefaultMaxUploadBytes = 5 << 20
+
 // File is the settings file.
 type File struct {
 	// RefreshInterval is how often the bridge fetches the kits and resolves
@@ -50,6 +56,9 @@ type File struct {
 	// Debounce is how long a source instance's file must go without a write
 	// before the watcher reports the change. Zero means DefaultDebounce.
 	Debounce Duration `json:"debounce,omitempty"`
+	// MaxUploadBytes is the most uncompressed bytes the bridge uploads of one
+	// source instance. Zero means DefaultMaxUploadBytes.
+	MaxUploadBytes int64 `json:"max_upload_bytes,omitempty"`
 	// Roots maps each kit to its game folder.
 	Roots map[string]string `json:"roots,omitempty"`
 }
@@ -68,6 +77,14 @@ func (f File) DebounceDelay() time.Duration {
 		return DefaultDebounce
 	}
 	return time.Duration(f.Debounce)
+}
+
+// UploadCap is the upload cap, in uncompressed bytes.
+func (f File) UploadCap() int64 {
+	if f.MaxUploadBytes == 0 {
+		return DefaultMaxUploadBytes
+	}
+	return f.MaxUploadBytes
 }
 
 // Duration is a time.Duration written as a string, such as "5m".
@@ -113,6 +130,9 @@ func Load(path string) (File, error) {
 	}
 	if f.Debounce < 0 {
 		return File{}, fmt.Errorf("%s is not valid: debounce may not be negative", path)
+	}
+	if f.MaxUploadBytes < 0 {
+		return File{}, fmt.Errorf("%s is not valid: max_upload_bytes may not be negative", path)
 	}
 	return f, nil
 }

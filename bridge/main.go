@@ -1,5 +1,5 @@
 // Command bridge is the Open Gamer MCP bridge (docs/architecture.md §7).
-// Until the tray UI (P5), it has two development commands:
+// Until the tray UI (P5), it has three development commands:
 //
 //	bridge login    log in with the device flow (§8.1) and keep the refresh
 //	                token in the OS keychain
@@ -10,10 +10,14 @@
 //	    -watch      keep running, fetch and locate again every refresh
 //	                interval, and watch the kits' sources (§7): print each
 //	                settled change of a source instance
+//	bridge run      log in if the bridge is not, and then as bridge kits
+//	                -watch, but upload each settled change (§8.3) instead of
+//	                printing it. Takes -root. Logs in again when the server
+//	                ends the login
 //
 // The server is OGMCP_BASE_URL, or the development default below. The game
-// folders, the refresh interval, and the debounce delay are in the settings
-// file (package config).
+// folders, the refresh interval, the debounce delay, and the upload cap are
+// in the settings file (package config).
 package main
 
 import (
@@ -57,8 +61,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "bridge kits:", err)
 			os.Exit(1)
 		}
+	case "run":
+		if err := run(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bridge run:", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch]")
+		fmt.Fprintln(os.Stderr, "usage: bridge login | bridge kits [-root DIR] [-watch] | bridge run [-root DIR]")
 		os.Exit(2)
 	}
 }
@@ -84,10 +93,7 @@ func login() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	err = client.Login(ctx, func(code auth.Code) {
-		fmt.Printf("\nTo log in this bridge, open this page and sign in:\n\n    %s\n\nEnter the code %s and approve it.\nThe code expires in %d minutes. Waiting for approval...\n\n",
-			code.VerificationURI, code.UserCode, int(code.ExpiresIn.Minutes()+0.5))
-	})
+	err = client.Login(ctx, showCode)
 	if errors.Is(err, context.Canceled) {
 		return errors.New("interrupted")
 	}
@@ -96,6 +102,12 @@ func login() error {
 	}
 	fmt.Println("Logged in to", base+". The refresh token is in the OS keychain.")
 	return nil
+}
+
+// showCode shows the code of a login to the user.
+func showCode(code auth.Code) {
+	fmt.Printf("\nTo log in this bridge, open this page and sign in:\n\n    %s\n\nEnter the code %s and approve it.\nThe code expires in %d minutes. Waiting for approval...\n\n",
+		code.VerificationURI, code.UserCode, int(code.ExpiresIn.Minutes()+0.5))
 }
 
 // folderFlag answers the folder prompt with the -root flag.
