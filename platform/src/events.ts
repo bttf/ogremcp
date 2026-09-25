@@ -253,19 +253,22 @@ export const DEFAULT_VISIT_GAP_MINUTES = 30;
  *
  * Only the calls in `[$2, $3)` count, so a visit that spans `$2` or `$3` is
  * cut there: the part before `$2` and the part from `$3` on are left out.
- * `/admin` can use it as a subquery.
+ * `/admin` uses it as a subquery, and reads `succeeded_tools` too: the tools
+ * of the visit's calls that answered without an error, in name order, or an
+ * empty array.
  */
 export const VISITS_SQL = `
-select u.uuid as user_uuid, v.started_at, v.ended_at, v.calls, v.tools, v.agent_clients
+select u.uuid as user_uuid, v.started_at, v.ended_at, v.calls, v.tools, v.agent_clients, v.succeeded_tools
   from (
     select user_id, min(occurred_at) as started_at, max(occurred_at) as ended_at, count(*)::int as calls,
            array_agg(distinct tool order by tool) as tools,
-           array_agg(distinct agent_client order by agent_client) as agent_clients
+           array_agg(distinct agent_client order by agent_client) as agent_clients,
+           coalesce(array_agg(distinct tool order by tool) filter (where error is null), '{}') as succeeded_tools
       from (
-        select user_id, occurred_at, tool, agent_client,
+        select user_id, occurred_at, tool, agent_client, error,
                count(*) filter (where starts) over (partition by user_id order by occurred_at, id) as visit
           from (
-            select id, user_id, occurred_at, tool, agent_client,
+            select id, user_id, occurred_at, tool, agent_client, error,
                    coalesce(occurred_at - lag(occurred_at) over (partition by user_id order by occurred_at, id)
                               > make_interval(secs => $1), true) as starts
               from events
