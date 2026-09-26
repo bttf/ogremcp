@@ -24,15 +24,22 @@ import (
 	"github.com/bttf/ogremcp/bridge/internal/tray"
 )
 
-// relaunchWait is how long a bridge that an update started waits for the
-// version it replaced to quit and release the lock.
+// relaunchWait is how long a bridge that another one started as it quits, an
+// update or the move to ~/Applications, waits for that one to release the
+// lock.
 const relaunchWait = 30 * time.Second
+
+// envWaitForLock is set in the environment of an app that the move to
+// ~/Applications started (move_darwin.go). Like EnvUpdatedFrom, it makes the
+// new app wait for the lock, but it reports no update.
+const envWaitForLock = "OGREMCP_WAIT_FOR_LOCK"
 
 // runTray runs the bridge as a tray app (§7): an icon in the macOS menu bar or
 // the Windows notification area, with a menu that shows the status and offers
 // the login, the folder picker, the server (§13.3), and start at login. A
 // release build updates itself (§7). It logs to a file (package logfile), and
-// returns the exit status. On macOS it needs cgo; see tray_nocgo.go.
+// returns the exit status. On macOS it needs cgo; see tray_nocgo.go. On macOS
+// it first offers to move the app to ~/Applications (move_darwin.go).
 //
 // Adapted from bttf/wow-guide@df80260, bridge/cmd/tray/main.go: the log
 // setup, start at login, the shutdown, and the menu loop. Its pairing, config
@@ -59,10 +66,13 @@ func runTray() int {
 	// as the browser, do not inherit it.
 	updatedFrom := os.Getenv(selfupdate.EnvUpdatedFrom)
 	os.Unsetenv(selfupdate.EnvUpdatedFrom)
+	waitForLock := updatedFrom != "" || os.Getenv(envWaitForLock) != ""
+	os.Unsetenv(envWaitForLock)
 
 	held, err := acquireLock()
-	if errors.Is(err, lock.ErrLocked) && updatedFrom != "" {
-		// The version this one replaced started it, and now quits.
+	if errors.Is(err, lock.ErrLocked) && waitForLock {
+		// The bridge that started this one, the version it replaced or the
+		// copy it moved from, now quits.
 		held, err = waitLock(relaunchWait)
 	}
 	if errors.Is(err, lock.ErrLocked) {
@@ -76,6 +86,13 @@ func runTray() int {
 		return 1
 	}
 	defer held.Release()
+
+	// §7 Installer: the macOS app lives in ~/Applications. Opened from
+	// anywhere else, it offers to move itself there, and quits once the moved
+	// app starts.
+	if offerMove(logger, stderrLogPath(logPath)) {
+		return 0
+	}
 
 	settings, settingsPath, err := loadSettings()
 	if err != nil {
@@ -160,7 +177,7 @@ func runMenu(logger *slog.Logger, logPath string, ctl *tray.Controller) int {
 	if exe, err := executable(); err != nil {
 		logger.Warn("could not find this program's path; start at login is off", "error", err.Error())
 	} else {
-		m, err := autostart.New([]string{exe}, filepath.Join(filepath.Dir(logPath), "bridge.stderr.log"))
+		m, err := autostart.New([]string{exe}, stderrLogPath(logPath))
 		switch {
 		case err == nil:
 			ctl.Autostart = m
@@ -358,6 +375,12 @@ func setIcon(active bool) {
 	default:
 		systray.SetIcon(tray.Icon(active, 32))
 	}
+}
+
+// stderrLogPath is where the login item has launchd write the app's standard
+// error: beside the log file at logPath.
+func stderrLogPath(logPath string) string {
+	return filepath.Join(filepath.Dir(logPath), "bridge.stderr.log")
 }
 
 // executable is the path of this program with symbolic links resolved, so a

@@ -35,16 +35,24 @@ builds:
 universal_binaries:
   - ids: [bridge-darwin]
     replace: true
-    # App bundles are Pro-only, so a script wraps the universal binary in an
-    # .app and zips it. Every build that is not a snapshot is a release, and
-    # its app is Developer ID signed and notarized or the build fails (§7).
-    # Snapshots get an ad hoc signature only.
+    # App bundles and disk images are Pro-only, so scripts wrap the universal
+    # binary in an .app, zip it, and put it in a disk image. Every build that
+    # is not a snapshot is a release, and its app and disk image are Developer
+    # ID signed and notarized or the build fails (§7). Snapshots get an ad hoc
+    # signature only.
     hooks:
       post:
         - cmd: >-
             bash scripts/macos-app.sh "{{ .Path }}" "{{ .Env.BRIDGE_VERSION }}"
             "dist/Ogre MCP.app"
             "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.app.zip"
+            "{{ if .IsSnapshot }}adhoc{{ else }}developer-id{{ end }}"
+          output: true
+        # The disk image, the macOS download (§7 Installer), holds the app
+        # the hook above built. A release signs and notarizes it too, or fails.
+        - cmd: >-
+            bash scripts/macos-dmg.sh "dist/Ogre MCP.app"
+            "dist/{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_darwin_all.dmg"
             "{{ if .IsSnapshot }}adhoc{{ else }}developer-id{{ end }}"
           output: true
 
@@ -59,6 +67,7 @@ checksum:
   name_template: checksums.txt
   extra_files:
     - glob: dist/*.app.zip
+    - glob: dist/*.dmg
 
 # The detached Ed25519 signature of checksums.txt, checksums.txt.sig, which
 # each bridge verifies with its embedded public key before it updates itself
@@ -84,3 +93,4 @@ release:
   make_latest: '{{ if contains .Env.BRIDGE_VERSION "-" }}false{{ else }}true{{ end }}'
   extra_files:
     - glob: dist/*.app.zip
+    - glob: dist/*.dmg

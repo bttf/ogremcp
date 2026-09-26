@@ -7,7 +7,9 @@
 // not found (§6.1), and turns start at login on and off. It fetches the kits,
 // installs and updates the adapters, watches the sources, and uploads each
 // settled change, as bridge run and bridge adapter -watch do together. It
-// logs to a file (package logfile) and not to a terminal.
+// logs to a file (package logfile) and not to a terminal. On macOS, an app
+// opened from outside ~/Applications first offers to move itself there
+// (package macapp, §7 Installer).
 //
 // It also has these commands:
 //

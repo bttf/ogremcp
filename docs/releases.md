@@ -1,7 +1,7 @@
 # Releases
 
 Spec: §5 (Releases), §7. Decided in RED-287 (P0.7). RED-323 (P5.7),
-RED-344 (P9.3), and RED-343 (P9, self-update) build on this.
+RED-344 (P9.3), RED-343 (P9, self-update), and RED-342 build on this.
 
 ## Cutting a release
 
@@ -30,22 +30,29 @@ then runs "A tag build" (below). GoReleaser's `universal_binaries` post hook
 `bridge/scripts/macos-sign.sh` signs it with the Developer ID identity
 (hardened runtime, secure timestamp), notarizes it, and staples the ticket.
 The hook then zips the app and checks the app in the zip with Gatekeeper.
+A second post hook, `bridge/scripts/macos-dmg.sh`, checks that the app is
+notarized, puts it in a disk image, and has `macos-sign.sh` sign, notarize,
+and staple the image. It then checks the app in the image with Gatekeeper.
 Only after that does GoReleaser write `checksums.txt`, sign it with
 `bridge/scripts/sign` (the `signs` entry), and publish. The release, named
 "Bridge 1.2.3", holds:
 
 - `ogremcp-bridge_1.2.3_windows_amd64.exe`, unsigned (§7, D6)
-- `ogremcp-bridge_1.2.3_darwin_all.app.zip`, signed and notarized
+- `ogremcp-bridge_1.2.3_darwin_all.dmg`, the macOS download: the app in a
+  disk image, both signed and notarized ("macOS installer" below)
+- `ogremcp-bridge_1.2.3_darwin_all.app.zip`, signed and notarized, the app
+  that self-update installs (§7)
 - `checksums.txt`
 - `checksums.txt.sig`, the detached Ed25519 signature of `checksums.txt`,
   as base64 and a newline
 
-Every GoReleaser run that is not a snapshot signs the app and the checksums
-or fails: the hook passes `developer-id` unless `.IsSnapshot` is set
-(`bridge/.goreleaser.yaml`), `macos-sign.sh` has no unsigned fallback, and
-`scripts/sign` fails without its key. Snapshots (`make -C bridge dist`, the
-dev build, the dry run) get an ad hoc signature only, and run with
-`--skip=sign`, so they have no `checksums.txt.sig`.
+Every GoReleaser run that is not a snapshot signs the app, the disk image,
+and the checksums or fails: both hooks pass `developer-id` unless
+`.IsSnapshot` is set (`bridge/.goreleaser.yaml`), `macos-sign.sh` has no
+unsigned fallback, and `scripts/sign` fails without its key. Snapshots
+(`make -C bridge dist`, the dev build, the dry run) get an ad hoc signature
+only, their disk image is not signed, and they run with `--skip=sign`, so
+they have no `checksums.txt.sig`.
 
 The version is the tag without `bridge-v`, such as `1.2.3` or `1.2.3-rc.1`.
 The job fails on a tag with any other form. A version with a `-`, such as
@@ -96,7 +103,9 @@ A manual run runs only the `dry-run` job and never publishes, even on a tag.
 It builds a snapshot, as `make -C bridge dist` does, and lists the files a
 release would publish. It has a read-only token and no access to the
 `release` environment, so it neither signs nor checks the secrets. The first
-tag is the first run that uses them.
+tag is the first run that uses them. It is also the first run that
+notarizes and staples the disk image: the dry run and `make -C bridge dist`
+build it with the ad hoc app, unsigned.
 
 The `Bridge dev build` workflow runs on pushes to `main` that touch `bridge/`,
 not on PRs, to save macOS minutes. Start it for a branch with
@@ -322,7 +331,8 @@ OSS binary v2.18.2.
 - Unsigned dev builds are CI artifacts from `--snapshot`. The `Bridge dev
   build` workflow (`.github/workflows/bridge-dev-build.yml`) runs on pushes
   to `main` that touch `bridge/` and on `workflow_dispatch`. It uploads the
-  Windows binary and the zipped `.app` and publishes no release.
+  Windows binary, the zipped `.app`, and the disk image, and publishes no
+  release.
 
 ## How P9.3 (RED-344) uses it
 
@@ -337,7 +347,8 @@ OSS binary v2.18.2.
 - macOS signing and notarization run in the `universal_binaries` post hook,
   because GoReleaser's versions are Pro. `bridge/scripts/macos-sign.sh`
   signs, notarizes, and staples an `.app` or a `.dmg`, adapted from the
-  prototype's `bridge/scripts/macos-dmg.sh`. The `.dmg` (RED-342) reuses it.
+  prototype's `bridge/scripts/macos-dmg.sh`. The disk image (RED-342) reuses
+  it ("macOS installer" below).
 - `addon-v` tags do not use GoReleaser. `.github/workflows/addon-release.yml`
   zips `kits/wow/adapter` with `git archive` and publishes with
   `gh release create`.
@@ -382,6 +393,57 @@ Left for later issues:
 - The `.app` bundle in the zip must contain no symbolic links, such as an
   embedded framework's `Versions/Current`. The bridge rejects a zip with one,
   so every bridge released before the change would reject every later release.
+
+## macOS installer
+
+Spec: §7 (Installer, Signing). Built in RED-342.
+
+The macOS download is `ogremcp-bridge_<version>_darwin_all.dmg`, an HFS+
+disk image named "Ogre MCP" that holds `Ogre MCP.app` and nothing else.
+`bridge/scripts/macos-dmg.sh` builds it from the app that
+`bridge/scripts/macos-app.sh` built, adapted from the prototype's
+`bridge/scripts/macos-dmg.sh` (`bttf/wow-guide@df80260`). The prototype's
+link to `/Applications` is dropped: the app is installed per user in
+`~/Applications`, so that self-update never needs admin rights (§7).
+
+At each start from outside `~/Applications`, such as from the disk image or
+Downloads, the tray app asks whether to move itself there
+(`bridge/move_darwin.go`, `bridge/internal/macapp`). An app anywhere inside
+`~/Applications` counts as installed. The check compares folders as files,
+not path text, because on a case-insensitive disk or through a symbolic link
+one folder has more than one path. When the user accepts, the app:
+
+1. copies itself to `~/Applications/Ogre MCP.app`, creating the folder if
+   needed. The copy is staged in a hidden folder beside it and renamed into
+   place, replacing the copy there. The copy has no quarantine flag, so macOS
+   does not run the installed app from a temporary copy (App Translocation).
+2. points start at login at the new place, when it is on.
+3. starts the app from `~/Applications` as a new instance, the way
+   self-update does (`open -n`), with `OGREMCP_WAIT_FOR_LOCK` set, so that
+   it waits for this one to release the single-instance lock. When the new
+   app does not start, this one keeps running from where it is and removes
+   nothing.
+4. removes the app the user opened, and quits. On the read-only disk image,
+   or in a folder the user may not change, that app stays. The bridge never
+   removes a path that is the same file as `~/Applications/Ogre MCP.app`.
+
+When the user declines, the app keeps running from where it is and asks again
+at the next start. A binary that is not in an app bundle is never moved.
+
+When the copy in `~/Applications` has a newer `CFBundleShortVersionString`
+than the running app, nothing is replaced. The app asks whether to open that
+copy instead; if the user accepts, it starts that copy the same way and
+quits.
+
+macOS runs a quarantined app that was not moved in Finder, such as one opened
+from Downloads, from a read-only copy at a random path. To find the app the
+user opened, the bridge calls `SecTranslocateCreateOriginalPathForURL` in
+Security.framework, which is exported but not in the public headers. When the
+call fails, the bridge copies the running app and removes nothing.
+
+The dry run and snapshots build the disk image with an ad hoc app and do not
+sign it. The first `bridge-v` tag is the first run that signs, notarizes, and
+staples the image.
 
 ## Alternative considered
 

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/bttf/ogremcp/bridge/internal/macapp"
 )
 
 // assetName is the macOS asset: the universal binary in a zipped .app,
@@ -23,10 +25,8 @@ func installPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	macos := filepath.Dir(exe)
-	contents := filepath.Dir(macos)
-	app := filepath.Dir(contents)
-	if filepath.Base(macos) != "MacOS" || filepath.Base(contents) != "Contents" || !strings.HasSuffix(app, ".app") {
+	app, ok := macapp.Bundle(exe)
+	if !ok {
 		return "", fmt.Errorf("%s is not in an .app bundle", exe)
 	}
 	return app, nil
@@ -56,9 +56,5 @@ func verifyBundle(bundle string) error {
 // relaunch opens the bundle at app as a new instance, beside the running one,
 // which then quits.
 func relaunch(app, from string) error {
-	out, err := exec.Command("/usr/bin/open", "-n", "--env", EnvUpdatedFrom+"="+from, app).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("could not open %s: %w: %s", app, err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return macapp.Relaunch(app, EnvUpdatedFrom+"="+from)
 }

@@ -2,13 +2,14 @@
 # dist/, which is git-ignored.
 #
 #   make dist    unsigned dev builds: the Windows binary and the macOS
-#                universal binary as a zipped .app
+#                universal binary as a zipped .app and in a disk image
 #   make clean   remove dist/
 #
 # `make dist` needs GoReleaser v2 and a Mac with Xcode's command line tools:
-# the macOS build uses cgo, and scripts/macos-app.sh uses lipo, codesign, and
-# ditto. Nothing is signed with an identity or notarized, and checksums.txt
-# gets no signature (--skip=sign): only a release build does that
+# the macOS build uses cgo, scripts/macos-app.sh uses lipo, codesign, and
+# ditto, and scripts/macos-dmg.sh uses hdiutil. Nothing is signed with an
+# identity or notarized, and checksums.txt gets no signature (--skip=sign):
+# only a release build does that
 # (.github/workflows/bridge-release.yml, docs/releases.md).
 #
 # Adapted from bttf/wow-guide@df80260, bridge/Makefile. GoReleaser replaces
