@@ -331,6 +331,8 @@ jobs:
           if (-not (Test-Path -LiteralPath $lnk)) { throw "Setup did not add $lnk." }
           Write-Host "Installed $exe and $lnk."
 
+          # A new profile has no Run key. The tray creates it, as here.
+          if (-not (Test-Path -LiteralPath $run)) { New-Item -Path $run | Out-Null }
           New-ItemProperty -Path $run -Name OgreMCP -Value "`"$exe`"" -Force | Out-Null
           $p = Start-Process -FilePath (Join-Path $dir 'unins000.exe') -ArgumentList $silent -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "The uninstaller exited with code $($p.ExitCode)." }
