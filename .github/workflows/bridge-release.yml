@@ -226,16 +226,24 @@ jobs:
         with:
           persist-credentials: false
 
-      # The installer holds the file checksums.txt lists, the one self-update
-      # installs.
+      # No cache, as in the release job.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: bridge/go.mod
+          cache: false
+
+      # The installer holds the file self-update installs, checked as
+      # self-update checks it: checksums.txt.sig must verify with the key
+      # embedded in the bridge, and the binary must have the sha256 that
+      # checksums.txt lists (scripts/verify).
       - name: Download and check the Windows binary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           exe="ogremcp-bridge_${TAG#bridge-v}_windows_amd64.exe"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir build \
-            --pattern "$exe" --pattern checksums.txt
-          (cd build && awk -v f="$exe" '$2 == f' checksums.txt | sha256sum --check -)
+            --pattern "$exe" --pattern checksums.txt --pattern checksums.txt.sig
+          (cd bridge && go run ./scripts/verify ../build/checksums.txt "../build/${exe}")
           echo "EXE=build/${exe}" >> "$GITHUB_ENV"
 
       - name: Build the installer
@@ -326,9 +334,10 @@ jobs:
       - name: Build the installer
         run: pwsh -NoProfile -File bridge/scripts/windows-installer.ps1 -Exe build/*_windows_amd64.exe -OutDir build/installer
 
-      # A silent install does not start the bridge (skipifsilent). The Run
-      # value is the one the tray writes when start at login is on (package
-      # autostart); the uninstaller removes it.
+      # A silent install does not start the bridge (skipifsilent), so the step
+      # starts it. The Run value is the one the tray writes when start at login
+      # is on (package autostart). The uninstaller ends the bridge and removes
+      # the value.
       - name: Install and uninstall
         shell: pwsh
         run: |
@@ -349,6 +358,12 @@ jobs:
           # A new profile has no Run key. The tray creates it, as here.
           if (-not (Test-Path -LiteralPath $run)) { New-Item -Path $run | Out-Null }
           New-ItemProperty -Path $run -Name OgreMCP -Value "`"$exe`"" -Force | Out-Null
+          # A running bridge, which the uninstaller ends.
+          Start-Process -FilePath $exe
+          Start-Sleep -Seconds 5
+          if (-not (Get-Process -Name ogremcp-bridge -ErrorAction SilentlyContinue | Where-Object Path -eq $exe)) {
+            throw "The installed bridge did not keep running, so the uninstaller's stop is not tested."
+          }
           $p = Start-Process -FilePath (Join-Path $dir 'unins000.exe') -ArgumentList $silent -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "The uninstaller exited with code $($p.ExitCode)." }
           # The uninstaller finishes in a copy of itself, which removes the folder.
@@ -362,7 +377,8 @@ jobs:
           if ($null -ne (Get-ItemProperty -Path $run -Name OgreMCP -ErrorAction SilentlyContinue)) {
             throw "The uninstaller left the Run value OgreMCP."
           }
-          Write-Host "Uninstalled: the folder, the shortcut, and the Run value are gone."
+          if (Get-Process -Name ogremcp-bridge -ErrorAction SilentlyContinue) { throw "The uninstaller left the bridge running." }
+          Write-Host "Uninstalled: the bridge stopped, and the folder, the shortcut, and the Run value are gone."
 
       # Unzipped: the artifact is named after the installer.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

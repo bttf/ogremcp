@@ -99,6 +99,10 @@ func TestFetchVerifies(t *testing.T) {
 			if err == nil && !bytes.Equal(data, asset) {
 				t.Errorf("fetch = %q, want %q", data, asset)
 			}
+			// The release workflow's check (scripts/verify) agrees.
+			if err := verifyFile(pub, tc.sums, tc.sig, name, tc.file); !errors.Is(err, tc.wantErr) {
+				t.Errorf("verifyFile: %v, want %v", err, tc.wantErr)
+			}
 		})
 	}
 }

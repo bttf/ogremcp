@@ -59,9 +59,12 @@ Name: "{autoprograms}\{#BridgeName}"; Filename: "{app}\{#BridgeExeName}"
 Filename: "{app}\{#BridgeExeName}"; Description: "{cm:LaunchProgram,{#BridgeName}}"; Flags: nowait postinstall skipifsilent
 
 ; The uninstaller does not close running programs, so it ends the bridge
-; first. Otherwise Windows keeps the running program from being removed.
+; first. Otherwise Windows keeps the running program from being removed. It
+; ends only a bridge whose program is in the install folder, which is the
+; working folder here, so the folder's path needs no quoting. Another user's
+; bridge, or a bridge run from anywhere else, keeps running.
 [UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#BridgeExeName}"; Flags: runhidden; RunOnceId: "StopBridge"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -Command ""Get-Process -Name ogremcp-bridge -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -and (Split-Path -Parent $_.Path) -eq (Get-Location).Path } | Stop-Process -Force"""; WorkingDir: "{app}"; Flags: runhidden; RunOnceId: "StopBridge"
 
 ; What a self-update leaves beside the program until the bridge next starts:
 ; the new program before it is moved into place, and the old one after

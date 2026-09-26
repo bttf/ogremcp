@@ -77,14 +77,15 @@ rights (`PrivilegesRequired=lowest`), so self-update can replace the program
 in place. It adds a Start menu shortcut and starts the bridge when it
 finishes. An upgrade closes a running bridge first. Start at login stays the
 tray's setting, and the bridge installs the addon, so the installer does
-neither. The uninstaller ends a running bridge, then removes the program,
-the shortcut, the files a self-update leaves beside the program, and the
-tray's start-at-login value. It leaves the settings, the logs, and the
+neither. The uninstaller ends a bridge whose program is in the install
+folder, and no other, then removes the program, the shortcut, the files a
+self-update leaves beside the program, and the tray's start-at-login value. It leaves the settings, the logs, and the
 refresh token in Windows Credential Manager.
 
 The installer is unsigned (D6) and untested: nobody has run it, or the bridge
 it installs, on Windows 10 or 11 (RED-347). The dry run only installs and
-uninstalls it silently on a Windows Server runner. Windows SmartScreen warns
+uninstalls it silently on a Windows Server runner, with the bridge started
+in between. Windows SmartScreen warns
 on first run; choose More info, then Run anyway.
 
 `bridge/scripts/windows-installer.ps1` builds it on Windows, with Inno Setup
@@ -99,9 +100,11 @@ binary stays in each release too, because self-update downloads it (§7).
 Inno Setup runs only on Windows, and GoReleaser OSS publishes from the one
 macOS job. So the `windows-installer` job of the `Bridge release` workflow
 runs on a Windows runner after the `release` job passes. It downloads the
-published Windows binary and `checksums.txt`, checks the binary against
-them, builds the installer, and adds it to the release with
-`gh release upload`. It does not run when the `release` job fails, so it
+published Windows binary, `checksums.txt`, and `checksums.txt.sig`, and
+checks them as self-update does (`bridge/scripts/verify`): the signature
+must verify with the key embedded in the bridge (`selfupdate.PublicKey`),
+and the binary must have the sha256 that `checksums.txt` lists. Then it
+builds the installer and adds it to the release with `gh release upload`. It does not run when the `release` job fails, so it
 never adds to a release without the signed macOS app. Because the installer
 is added after publishing:
 

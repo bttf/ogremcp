@@ -144,17 +144,26 @@ func New(version string) (*Updater, error) {
 	if err != nil {
 		return nil, err
 	}
-	key, err := base64.StdEncoding.DecodeString(PublicKey)
-	if err != nil || len(key) != ed25519.PublicKeySize {
-		return nil, errors.New("the embedded update key is not an Ed25519 public key")
+	key, err := publicKey()
+	if err != nil {
+		return nil, err
 	}
 	return &Updater{
 		current: current,
 		api:     DefaultAPI,
 		http:    &http.Client{Timeout: 10 * time.Minute},
-		key:     ed25519.PublicKey(key),
+		key:     key,
 		path:    path,
 	}, nil
+}
+
+// publicKey decodes PublicKey.
+func publicKey() (ed25519.PublicKey, error) {
+	key, err := base64.StdEncoding.DecodeString(PublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("the embedded update key is not an Ed25519 public key")
+	}
+	return ed25519.PublicKey(key), nil
 }
 
 // ghRelease is a release as GET /repos/{owner}/{repo}/releases lists it.

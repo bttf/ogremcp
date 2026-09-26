@@ -4,13 +4,42 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
 )
 
 var hexSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// VerifyFile checks a release's file as Install does before it installs
+// one: sig, checksums.txt.sig, must be a signature of sums, checksums.txt, by
+// PublicKey (ErrSignature), and data, the file called name, must have the
+// sha256 that sums lists (ErrChecksum). The release workflow runs it through
+// scripts/verify before it builds the Windows installer.
+func VerifyFile(sums, sig []byte, name string, data []byte) error {
+	key, err := publicKey()
+	if err != nil {
+		return err
+	}
+	return verifyFile(key, sums, sig, name, data)
+}
+
+func verifyFile(key ed25519.PublicKey, sums, sig []byte, name string, data []byte) error {
+	if err := verify(key, sums, sig); err != nil {
+		return err
+	}
+	want, err := checksum(sums, name)
+	if err != nil {
+		return err
+	}
+	if sum := sha256.Sum256(data); hex.EncodeToString(sum[:]) != want {
+		return ErrChecksum
+	}
+	return nil
+}
 
 // verify checks that sig, checksums.txt.sig, is a signature of sums, the
 // bytes of checksums.txt, by key. The release job writes the 64-byte Ed25519
