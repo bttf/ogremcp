@@ -10,27 +10,53 @@ import (
 	"testing"
 )
 
-func TestBundleAndIn(t *testing.T) {
-	apps := "/Users/a/Applications"
-	exe := apps + "/Ogre MCP.app/Contents/MacOS/ogremcp-bridge"
-	if app, ok := Bundle(exe); !ok || app != apps+"/Ogre MCP.app" {
+func TestBundle(t *testing.T) {
+	exe := "/Users/a/Applications/Ogre MCP.app/Contents/MacOS/ogremcp-bridge"
+	if app, ok := Bundle(exe); !ok || app != "/Users/a/Applications/Ogre MCP.app" {
 		t.Errorf("Bundle(%s) = %s, %v", exe, app, ok)
 	}
 	if _, ok := Bundle("/Users/a/dev/ogremcp/bridge/bridge"); ok {
 		t.Error("a binary outside an app counts as an app")
 	}
-	cases := map[string]bool{
-		apps + "/Ogre MCP.app":           true,
-		apps + "/Games/Ogre MCP.app":     true,
-		"/Applications/Ogre MCP.app":     false,
-		"/Volumes/Ogre MCP/Ogre MCP.app": false,
-		"/Users/a/Applications2/X.app":   false,
-		apps:                             false,
+}
+
+// Another path to the installed app, through a symbolic link or in other
+// letter case on a case-insensitive disk, still counts as installed, and
+// Remove never takes it away.
+func TestInstalledAppUnderAnotherPath(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Applications")
+	installed := filepath.Join(dir, Name)
+	exe := filepath.Join(installed, "Contents", "MacOS", "ogremcp-bridge")
+	write(t, exe, "app", 0o755)
+	write(t, filepath.Join(dir, "Games", Name, "Contents", "Info.plist"), "plist", 0o644)
+	write(t, filepath.Join(root, "Applications2", Name, "Contents", "Info.plist"), "plist", 0o644)
+	if err := os.Symlink(dir, filepath.Join(root, "Apps")); err != nil {
+		t.Fatal(err)
 	}
-	for app, want := range cases {
-		if got := In(app, apps); got != want {
-			t.Errorf("In(%s) = %v, want %v", app, got, want)
+	aliases := []string{installed, filepath.Join(root, "Apps", Name)}
+	if lower := filepath.Join(root, "applications", "ogre mcp.app"); exists(lower) {
+		aliases = append(aliases, lower)
+	}
+	for _, app := range aliases {
+		if !Installed(app, dir) {
+			t.Errorf("%s does not count as installed", app)
 		}
+		if err := Remove(app, installed); err == nil {
+			t.Errorf("Remove(%s) removed the installed app", app)
+		}
+		if _, err := Install(app, dir); err == nil {
+			t.Errorf("Install(%s) replaced the installed app with itself", app)
+		}
+	}
+	if !Installed(filepath.Join(dir, "Games", Name), dir) {
+		t.Error("an app in a folder of Applications does not count as installed")
+	}
+	if Installed(filepath.Join(root, "Applications2", Name), dir) {
+		t.Error("an app in another folder counts as installed")
+	}
+	if data, err := os.ReadFile(exe); err != nil || string(data) != "app" {
+		t.Errorf("the installed app is not whole: %q, %v", data, err)
 	}
 }
 
@@ -72,7 +98,7 @@ func TestInstallReplacesAndRemoves(t *testing.T) {
 		t.Errorf("%s holds %d entries, want only the app", dir, len(entries))
 	}
 
-	if err := Remove(src); err != nil {
+	if err := Remove(src, dst); err != nil {
 		t.Fatal(err)
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(src)); len(entries) != 0 {
@@ -94,7 +120,9 @@ func TestRemoveLeavesAppOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(parent, 0o755) })
-	if err := Remove(app); err == nil {
+	installed := filepath.Join(t.TempDir(), Name)
+	write(t, filepath.Join(installed, "Contents", "Info.plist"), "plist", 0o644)
+	if err := Remove(app, installed); err == nil {
 		t.Error("Remove in a read-only folder succeeded")
 	}
 	if _, err := os.Stat(exe); err != nil {
@@ -110,4 +138,9 @@ func write(t *testing.T, path, data string, perm os.FileMode) {
 	if err := os.WriteFile(path, []byte(data), perm); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

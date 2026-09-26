@@ -367,19 +367,26 @@ link to `/Applications` is dropped: the app is installed per user in
 At each start from outside `~/Applications`, such as from the disk image or
 Downloads, the tray app asks whether to move itself there
 (`bridge/move_darwin.go`, `bridge/internal/macapp`). An app anywhere inside
-`~/Applications` counts as installed. When the user accepts, the app:
+`~/Applications` counts as installed. The check compares folders as files,
+not path text, because on a case-insensitive disk or through a symbolic link
+one folder has more than one path. When the user accepts, the app:
 
 1. copies itself to `~/Applications/Ogre MCP.app`, creating the folder if
    needed. The copy is staged in a hidden folder beside it and renamed into
-   place, replacing an older copy. The copy has no quarantine flag, so macOS
+   place, replacing the copy there. The copy has no quarantine flag, so macOS
    does not run the installed app from a temporary copy (App Translocation).
 2. removes the app the user opened. On the read-only disk image, or in a
-   folder the user may not change, that app stays.
+   folder the user may not change, that app stays. The bridge never removes
+   a path that is the same file as `~/Applications/Ogre MCP.app`.
 3. points start at login at the new place, when it is on.
 4. starts the app from `~/Applications` once it has quit, and quits.
 
 When the user declines, the app keeps running from where it is and asks again
 at the next start. A binary that is not in an app bundle is never moved.
+
+When the copy in `~/Applications` has a newer `CFBundleShortVersionString`
+than the running app, nothing is replaced. The app asks whether to open that
+copy instead; if the user accepts, it starts that copy and quits.
 
 macOS runs a quarantined app that was not moved in Finder, such as one opened
 from Downloads, from a read-only copy at a random path. To find the app the

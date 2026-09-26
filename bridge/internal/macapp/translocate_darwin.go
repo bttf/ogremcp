@@ -49,9 +49,6 @@ import (
 // Downloads, from a read-only copy at a random path (App Translocation), and
 // the running program sees only that copy. For an app that is not
 // translocated, Original returns app. It returns "" when it cannot tell.
-//
-// LetsMove and Electron's app.moveToApplicationsFolder look up the original
-// path the same way.
 func Original(app string) string {
 	path := C.CString(app)
 	defer C.free(unsafe.Pointer(path))

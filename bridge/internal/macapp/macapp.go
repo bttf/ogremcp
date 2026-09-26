@@ -14,7 +14,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Name is the app's name in ~/Applications, the name scripts/macos-app.sh
@@ -41,10 +40,42 @@ func Bundle(exe string) (string, bool) {
 	return app, true
 }
 
-// In reports whether app is inside dir, directly or in a folder of it.
-func In(app, dir string) bool {
-	rel, err := filepath.Rel(dir, app)
-	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+// Installed reports whether app is inside dir, directly or in a folder of
+// it. It compares folders as files, not path text: on a case-insensitive disk,
+// or through a symbolic link, one folder has more than one path.
+func Installed(app, dir string) bool {
+	want, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	path, err := filepath.EvalSymlinks(app)
+	if err != nil {
+		return false
+	}
+	for {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return false
+		}
+		path = parent
+		if info, err := os.Stat(path); err == nil && os.SameFile(info, want) {
+			return true
+		}
+	}
+}
+
+// same reports whether a and b are one file. It returns an error when either
+// cannot be read, so that a caller about to remove one of them does not.
+func same(a, b string) (bool, error) {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(ai, bi), nil
 }
 
 // Install copies app into dir, which it creates if needed, as Name, and
@@ -61,6 +92,14 @@ func Install(app, dir string) (string, error) {
 		return "", err
 	}
 	dst := filepath.Join(dir, Name)
+	// The older app is removed below, so app must not be that app.
+	if _, err := os.Stat(dst); err == nil {
+		if one, err := same(app, dst); err != nil {
+			return "", err
+		} else if one {
+			return "", fmt.Errorf("%s is the installed app", app)
+		}
+	}
 	tmp, err := os.MkdirTemp(dir, ".ogremcp-install-")
 	if err != nil {
 		return "", err
@@ -87,10 +126,16 @@ func Install(app, dir string) (string, error) {
 }
 
 // Remove removes app, the copy the user opened, once Install has put the app
-// in place. It renames app out of sight first, so that app is either gone or
-// left whole: a disk image is read-only, and a folder the user may not change
-// refuses the rename.
-func Remove(app string) error {
+// at installed. It never removes installed, whatever path names it, and fails
+// when it cannot tell. It renames app out of sight first, so that app is
+// either gone or left whole: a disk image is read-only, and a folder the user
+// may not change refuses the rename.
+func Remove(app, installed string) error {
+	if one, err := same(app, installed); err != nil {
+		return err
+	} else if one {
+		return fmt.Errorf("%s is the installed app", app)
+	}
 	tmp, err := os.MkdirTemp(filepath.Dir(app), ".ogremcp-remove-")
 	if err != nil {
 		return err
