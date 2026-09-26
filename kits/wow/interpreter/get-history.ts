@@ -15,6 +15,7 @@ import {
   hasDescriptions,
   type JsonObject,
   mostThatFit,
+  QUEST_TURN_INS_RULE,
   readInput,
   stateRules,
   trimNote,
@@ -42,9 +43,9 @@ export const HISTORY_DEFAULT_SECTIONS: readonly Section[] = ["character", "locat
 
 /**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the flight-point rule and the §10.5 behavior rules
- * that act on game state, like `wow_get_state`'s. Game text never goes here,
- * only into results (§10.5).
+ * the game and carries the flight-point and quest turn-in rules and the §10.5
+ * behavior rules that act on game state, like `wow_get_state`'s. Game text
+ * never goes here, only into results (§10.5).
  */
 export function describeGetHistory(experimental: readonly string[]): string {
   return [
@@ -52,6 +53,7 @@ export function describeGetHistory(experimental: readonly string[]): string {
     "`limit`, `flavor`, `character`, and `sections` narrow it; `sections` defaults to `character` and `location`.",
     "Each snapshot carries `snapshot_at` (when the game captured it), `flavor`, the realm's `rules`, and `character`; the result's own are the newest snapshot's.",
     FLIGHT_POINTS_RULE,
+    QUEST_TURN_INS_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }

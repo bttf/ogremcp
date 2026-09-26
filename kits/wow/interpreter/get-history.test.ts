@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogremcp/sdk";
 import { beforeAll, expect, it, vi } from "vitest";
 import { DEFAULT_HISTORY_LIMIT } from "./get-history.js";
-import { FLIGHT_POINTS_RULE } from "./get-state.js";
+import { FLIGHT_POINTS_RULE, QUEST_TURN_INS_RULE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { SECTIONS } from "./sections.js";
 
@@ -79,6 +79,7 @@ it("is described as §10.1 and §10.5 ask, and is paid only (§14)", () => {
   // flight_points can be asked for, and is not in the default (§10.4).
   expect(tool?.inputSchema.properties?.["sections"]?.["items"]).toEqual({ type: "string", enum: [...SECTIONS] });
   expect(tool?.description).toContain(FLIGHT_POINTS_RULE);
+  expect(tool?.description).toContain(QUEST_TURN_INS_RULE);
 });
 
 it("returns the snapshots newest first under the newest one's envelope, with character and location by default", async () => {

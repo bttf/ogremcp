@@ -22,10 +22,17 @@ export const FLIGHT_POINTS_RULE =
   "Before suggesting a flight, check `flight_points`. If the destination's flight point isn't known, route by hearth or on foot and suggest picking it up on arrival. If `flight_points` has `status: unknown` or the destination's continent isn't listed, say so and hedge.";
 
 /**
+ * The quest turn-in rule of both WoW tools' descriptions (§10.4, owner
+ * decision 2026-09-26, RED-372). It is not in the server instructions.
+ */
+export const QUEST_TURN_INS_RULE =
+  "When routing, turn in every completed quest whose turn-in NPC is on the way or at a stop, before any other step there. Turn-ins often unlock the next quest. Search the web for turn-in locations; the state doesn't include them.";
+
+/**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the flight-point rule and the §10.5 behavior rules
- * that act on game state (`stateRules`). Game text never goes here, only into
- * results (§10.5).
+ * the game and carries the flight-point and quest turn-in rules and the §10.5
+ * behavior rules that act on game state (`stateRules`). Game text never goes
+ * here, only into results (§10.5).
  */
 export function describeGetState(experimental: readonly string[]): string {
   return [
@@ -33,6 +40,7 @@ export function describeGetState(experimental: readonly string[]): string {
     "`flavor`, `character`, and `sections` narrow it.",
     "The result carries `snapshot_at` (when the game captured the state; /transmit in game saves a new snapshot), `flavor`, the realm's `rules`, and `character`.",
     FLIGHT_POINTS_RULE,
+    QUEST_TURN_INS_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }
