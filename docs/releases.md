@@ -1,7 +1,7 @@
 # Releases
 
-Spec: §5 (Releases), §7. Decided in RED-287 (P0.7). RED-323 (P5.7) and
-RED-344 (P9.3) build on this.
+Spec: §5 (Releases), §7. Decided in RED-287 (P0.7). RED-323 (P5.7),
+RED-344 (P9.3), and RED-273 (the Windows installer) build on this.
 
 ## Cutting a release
 
@@ -36,6 +36,12 @@ release, named "Bridge 1.2.3", holds:
 - `ogremcp-bridge_1.2.3_windows_amd64.exe`, unsigned (§7, D6)
 - `ogremcp-bridge_1.2.3_darwin_all.app.zip`, signed and notarized
 - `checksums.txt`
+- `ogremcp-bridge_1.2.3_windows_amd64_setup.exe`, the Windows installer,
+  unsigned and untested, added after publishing ("Windows installer" below)
+
+The release notes start with a note that the Windows build is unsigned and
+untested and that Windows SmartScreen warns on first run (`release.header`
+in `bridge/.goreleaser.yaml`).
 
 Every GoReleaser run that is not a snapshot signs the app or fails: the hook
 passes `developer-id` unless `.IsSnapshot` is set (`bridge/.goreleaser.yaml`),
@@ -53,6 +59,52 @@ runs and one waits cancels the waiting one. Push one `bridge-v` tag at a time.
 When the job fails, fix the cause and re-run it from the Actions tab. A
 failure during upload leaves a draft release, because GoReleaser publishes
 the release only after every upload. Delete that draft before the re-run.
+
+### Windows installer
+
+Spec: §7 (Installer, Signing), D6. Built in RED-273.
+
+`bridge/windows/ogremcp-bridge.iss` is the Inno Setup script. The installer
+installs the bridge only, for the current user, as
+`%LOCALAPPDATA%\Programs\Ogre MCP\ogremcp-bridge.exe`. It needs no admin
+rights (`PrivilegesRequired=lowest`), so self-update can replace the program
+in place. It adds a Start menu shortcut and starts the bridge when it
+finishes. An upgrade closes a running bridge first. Start at login stays the
+tray's setting, and the bridge installs the addon, so the installer does
+neither. The uninstaller ends a running bridge, then removes the program,
+the shortcut, the files a self-update leaves beside the program, and the
+tray's start-at-login value. It leaves the settings, the logs, and the
+refresh token in Windows Credential Manager.
+
+The installer is unsigned (D6) and untested: nobody has run it, or the bridge
+it installs, on Windows 10 or 11 (RED-347). The dry run only installs and
+uninstalls it silently on a Windows Server runner. Windows SmartScreen warns
+on first run; choose More info, then Run anyway.
+
+`bridge/scripts/windows-installer.ps1` builds it on Windows, with Inno Setup
+6.3 or later. GitHub's `windows-latest` image has it (6.7.1 in September
+2026). The script takes the version from the binary's name:
+
+    pwsh -File bridge/scripts/windows-installer.ps1 -Exe ogremcp-bridge_1.2.3_windows_amd64.exe -OutDir out
+
+That writes `out/ogremcp-bridge_1.2.3_windows_amd64_setup.exe`. The raw
+binary stays in each release too, because self-update downloads it (§7).
+
+Inno Setup runs only on Windows, and GoReleaser OSS publishes from the one
+macOS job. So the `windows-installer` job of the `Bridge release` workflow
+runs on a Windows runner after the `release` job passes. It downloads the
+published Windows binary and `checksums.txt`, checks the binary against
+them, builds the installer, and adds it to the release with
+`gh release upload`. It does not run when the `release` job fails, so it
+never adds to a release without the signed macOS app. Because the installer
+is added after publishing:
+
+- The release is public for a few minutes before the installer is added.
+- `checksums.txt` does not list the installer.
+- When the job fails, the release stays published without the installer. Fix
+  the cause and re-run the failed job from the Actions tab.
+- The repo's immutable releases setting must stay off (it is off). An
+  immutable release takes no new files after it is published.
 
 ### Addon
 
@@ -87,10 +139,13 @@ packagers (§7 Listings).
 
 Run the `Bridge release` workflow by hand on `main`: Actions, "Bridge
 release", "Run workflow", or `gh workflow run bridge-release.yml --ref main`.
-A manual run runs only the `dry-run` job and never publishes, even on a tag.
-It builds a snapshot, as `make -C bridge dist` does, and lists the files a
-release would publish. It has a read-only token and no access to the
-`release` environment, so it neither signs nor checks the secrets. The first
+A manual run runs only the dry-run jobs and never publishes, even on a tag.
+The `dry-run` job builds a snapshot, as `make -C bridge dist` does, and lists
+the files a release would publish. The `dry-run-windows-installer` job builds
+the Windows installer from the snapshot's Windows binary, installs and
+uninstalls it silently on a Windows runner, and keeps it as a workflow
+artifact for 14 days. Both have a read-only token and no access to the
+`release` environment, so they neither sign nor check the secrets. The first
 tag is the first run that uses them.
 
 The `Bridge dev build` workflow runs on pushes to `main` that touch `bridge/`,
@@ -332,9 +387,11 @@ Left for later issues:
   GitHub's `releases/latest` endpoint is not a safe source for it: it returns
   a release whatever its tag.
 - The Windows installer (RED-273) needs Windows, and OSS has no split and
-  merge. If it is built in a Windows job, run GoReleaser with
-  `--skip=publish`, build the installer, then write checksums, sign, and run
-  `gh release create "$TAG" --verify-tag` in a final job.
+  merge. A Windows job adds it after the release is published ("Windows
+  installer" above), so `checksums.txt` does not list it. To list it, run
+  GoReleaser with `--skip=publish`, build the installer, then write
+  checksums, sign, and run `gh release create "$TAG" --verify-tag` in a final
+  job.
 - Windows code signing is `[later]` (§7, D6). Azure Trusted Signing signs the
   `.exe` in place, so it would run from `hooks.post` on the `bridge-windows`
   build, which runs before the checksums are written. `binary_signs` does not

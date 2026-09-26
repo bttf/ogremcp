@@ -66,5 +66,10 @@ checksum:
 release:
   name_template: "Bridge {{ .Env.BRIDGE_VERSION }}"
   make_latest: '{{ if contains .Env.BRIDGE_VERSION "-" }}false{{ else }}true{{ end }}'
+  # §7, D6: Windows builds ship unsigned, and nobody has tested one on Windows
+  # yet. The windows-installer job adds the installer after publishing
+  # (bridge-release.yml).
+  header: |
+    **Windows:** the Windows build is unsigned and untested. Windows SmartScreen warns on first run: choose More info, then Run anyway. `{{ .ProjectName }}_{{ .Env.BRIDGE_VERSION }}_windows_amd64_setup.exe` installs the bridge for the current user, without admin rights.
   extra_files:
     - glob: dist/*.app.zip

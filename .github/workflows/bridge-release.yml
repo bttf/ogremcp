@@ -1,11 +1,14 @@
 # Bridge releases (§5 Releases, §7, docs/releases.md). Pushing a bridge-v tag
 # publishes: the release job builds the bridge with GoReleaser OSS, signs and
 # notarizes the macOS app, and publishes the Windows binary, the zipped .app,
-# and checksums.txt to the repo's Releases page as "Bridge X.Y.Z".
+# and checksums.txt to the repo's Releases page as "Bridge X.Y.Z". Then the
+# windows-installer job builds the Windows installer from the published binary
+# and adds it to the same release.
 #
-# A manual run (workflow_dispatch) runs only the dry-run job: a snapshot build,
+# A manual run (workflow_dispatch) runs only the dry-run jobs: a snapshot build,
 # as `make -C bridge dist` does, with an ad hoc signature, no secrets, and a
-# read-only token. It publishes nothing.
+# read-only token, and the Windows installer built from it. It publishes
+# nothing.
 #
 # The release job reads the signing secrets from the `release` environment, so
 # every action is pinned by commit SHA and the Go cache is off. The
@@ -186,6 +189,48 @@ jobs:
           fi
           rm -f "${RUNNER_TEMP}/cert.p12" "${RUNNER_TEMP}/AuthKey.p8"
 
+  # §7 Installer: the Inno Setup installer, built from the Windows binary the
+  # release job published and added to the same release. Inno Setup runs only
+  # on Windows, and GoReleaser OSS publishes from the one macOS job, so this
+  # job runs after the release is out (docs/releases.md). It runs only when the
+  # release job passed, so it never adds to a release without the signed macOS
+  # app. The installer is unsigned (§7, D6).
+  windows-installer:
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # The installer holds the file checksums.txt lists, the one self-update
+      # installs.
+      - name: Download and check the Windows binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          exe="ogremcp-bridge_${TAG#bridge-v}_windows_amd64.exe"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir build \
+            --pattern "$exe" --pattern checksums.txt
+          (cd build && awk -v f="$exe" '$2 == f' checksums.txt | sha256sum --check -)
+          echo "EXE=build/${exe}" >> "$GITHUB_ENV"
+
+      - name: Build the installer
+        run: pwsh -NoProfile -File bridge/scripts/windows-installer.ps1 -Exe "$EXE" -OutDir build/installer
+
+      - name: Add the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" build/installer/*_setup.exe --repo "$GITHUB_REPOSITORY"
+
   # A snapshot build with the release's toolchain. No environment, no secrets,
   # and a read-only token.
   dry-run:
@@ -221,3 +266,91 @@ jobs:
           grep -q '_darwin_all\.app\.zip$' checksums.txt
           echo "A release publishes checksums.txt and the files it lists:"
           cat checksums.txt
+
+      # The binary archive format names a binary only when GoReleaser uploads
+      # it, so copy the Windows binary to that name for the installer job.
+      - name: Name the Windows binary
+        working-directory: bridge
+        run: |
+          jq -r '.[] | select(.extra.Format == "binary" and .goos == "windows") | [.path, .name] | @tsv' dist/artifacts.json > windows.tsv
+          test "$(wc -l < windows.tsv)" -eq 1
+          IFS=$'\t' read -r path name < windows.tsv
+          rm windows.tsv
+          cp "$path" "dist/${name}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-binary
+          path: bridge/dist/*_windows_amd64.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  # The Windows installer built from the dry run's binary, as the
+  # windows-installer job builds it, then installed and uninstalled on the
+  # runner. Nothing is published. The installer is kept as a workflow artifact
+  # for testing on Windows.
+  dry-run-windows-installer:
+    needs: dry-run
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-binary
+          path: build
+
+      - name: Build the installer
+        run: pwsh -NoProfile -File bridge/scripts/windows-installer.ps1 -Exe build/*_windows_amd64.exe -OutDir build/installer
+
+      # A silent install does not start the bridge (skipifsilent). The Run
+      # value is the one the tray writes when start at login is on (package
+      # autostart); the uninstaller removes it.
+      - name: Install and uninstall
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem build/installer -Filter '*_setup.exe')
+          if ($setup.Count -ne 1) { throw "Expected one installer, found $($setup.Count)." }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Ogre MCP'
+          $exe = Join-Path $dir 'ogremcp-bridge.exe'
+          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ogre MCP.lnk'
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          $silent = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+
+          $p = Start-Process -FilePath $setup[0].FullName -ArgumentList $silent -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Setup exited with code $($p.ExitCode)." }
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Setup did not install $exe." }
+          if (-not (Test-Path -LiteralPath $lnk)) { throw "Setup did not add $lnk." }
+          Write-Host "Installed $exe and $lnk."
+
+          New-ItemProperty -Path $run -Name OgreMCP -Value "`"$exe`"" -Force | Out-Null
+          $p = Start-Process -FilePath (Join-Path $dir 'unins000.exe') -ArgumentList $silent -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The uninstaller exited with code $($p.ExitCode)." }
+          # The uninstaller finishes in a copy of itself, which removes the folder.
+          $deadline = (Get-Date).AddMinutes(1)
+          while ((Test-Path -LiteralPath $dir) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Seconds 1 }
+          if (Test-Path -LiteralPath $dir) {
+            Get-ChildItem -Force -LiteralPath $dir
+            throw "The uninstaller left $dir."
+          }
+          if (Test-Path -LiteralPath $lnk) { throw "The uninstaller left $lnk." }
+          if ($null -ne (Get-ItemProperty -Path $run -Name OgreMCP -ErrorAction SilentlyContinue)) {
+            throw "The uninstaller left the Run value OgreMCP."
+          }
+          Write-Host "Uninstalled: the folder, the shortcut, and the Run value are gone."
+
+      # Unzipped: the artifact is named after the installer.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/installer/*_setup.exe
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
