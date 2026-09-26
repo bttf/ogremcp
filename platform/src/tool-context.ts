@@ -59,8 +59,6 @@ export interface ToolContextSettings {
   maxResultBytes: number;
   /** `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns per game (§10.3). */
   listGamesCharacters: number;
-  /** `FETCH_PAGE_MAX_CHARS`: the most characters of a page's markdown `fetch_game_page` returns (§10.3). */
-  fetchPageMaxChars: number;
   /** `REPORT_ISSUE_MAX_PER_DAY`: the most reports `report_issue` records per user in 24 hours (§16.2). */
   reportIssueMaxPerDay: number;
   /** `REPORT_ISSUE_CALLS`: the most recent tool calls of the visit a report attaches (§16.2). */
@@ -71,7 +69,6 @@ export const DEFAULT_TOOL_CONTEXT: ToolContextSettings = {
   maxHistoryLimit: 100,
   maxResultBytes: 40 * 1024,
   listGamesCharacters: 5,
-  fetchPageMaxChars: 20_000,
   reportIssueMaxPerDay: 10,
   reportIssueCalls: 20,
 };

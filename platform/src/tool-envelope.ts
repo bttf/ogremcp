@@ -14,8 +14,9 @@ import { UserFacingError } from "./tool-context.js";
  *   code `NO_ENVELOPE_FIELD`.
  * - A kit tool's result that is not an error also gets the top-level field
  *   `grounding`, `GROUNDING_REMINDER`, added here for every kit, because
- *   agents read results when they answer. It is platform text, never game
- *   text: it replaces any `grounding` the kit set.
+ *   agents read results when they answer. It is a short form of the §10.5
+ *   grounding rule. It is platform text, never game text: it replaces any
+ *   `grounding` the kit set.
  * - Its text block is the JSON of its `structuredContent`, made here, so the
  *   two copies are the same whatever the handler put in `content`.
  * - One copy of the JSON is at most `maxResultBytes` (`TOOL_RESULT_MAX_BYTES`,
@@ -28,9 +29,8 @@ import { UserFacingError } from "./tool-context.js";
  *   `UserFacingError`, such as `ToolContext`'s for an unknown character, and
  *   a call to a tool of a game the user has turned off (`gameOffResult`),
  *   which a client can still list until a new chat (§10.2). So are a free
- *   user's call of a paid-only tool (`paidOnlyResult`, §10.2, §14), cap
- *   reached (`capReachedResult` in `usage.ts`, §14), no sources, and search
- *   unavailable (§12).
+ *   user's call of a paid-only tool (`paidOnlyResult`, §10.2, §14), and cap
+ *   reached (`capReachedResult` in `usage.ts`, §14).
  * - Any other error becomes `TOOL_FAILED_MESSAGE`, and a log line with the
  *   tool's name and the error's code alone: its message can hold user data.
  *
@@ -50,9 +50,12 @@ export const TOO_LARGE_MESSAGE = "The result is too large to send in one call. C
 /** The fields of every kit tool result (§10.5). */
 export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] as const;
 
-/** The `grounding` line of every kit tool result that is not an error (§10.5). Platform text only. */
+/**
+ * The `grounding` line of every kit tool result that is not an error: a short
+ * form of the §10.5 grounding rule (§12). Platform text only.
+ */
 export const GROUNDING_REMINDER =
-  "Before you state where to go, who to see, where something is, or where an item comes from beyond the quest text, call search_game_info.";
+  "Before you state where to go, who to see, where something is, or where an item comes from beyond the quest text, search the web with your own tools, preferring sources for this flavor. Never answer from memory alone. If your research is inconclusive, sources disagree, or you can't search, tell the user and say how sure you are.";
 
 /** The UTF-8 bytes `grounding` adds to a kit tool result's JSON. */
 const GROUNDING_BYTES = utf8Length(`,"grounding":${JSON.stringify(GROUNDING_REMINDER)}`);
@@ -71,11 +74,6 @@ export function kitResultBytes(maxResultBytes: number): number {
  * - `too_large`: a kit tool result over the size cap.
  * - `no_envelope_field`: a kit tool result without an envelope field.
  * - `failed`: the handler threw an error that is not user-facing.
- * - `no_sources` and `search_unavailable`: search_game_info's and
- *   fetch_game_page's (§12).
- * - `out_of_scope`: fetch_game_page's URL, or the page's final URL, is
- *   outside the game's scopes (§12, §16.1 scope misses).
- * - `not_found`: fetch_game_page's page is a 404.
  * - `cap_reached`: the user's daily tool calls reached the tier's cap, and
  *   the tool did not run (§14, §16.1 cap hits).
  * - `paid_only`: a free user called a paid-only tool, which did not run: an
@@ -87,10 +85,6 @@ export type ToolCallError =
   | "too_large"
   | "no_envelope_field"
   | "failed"
-  | "no_sources"
-  | "search_unavailable"
-  | "out_of_scope"
-  | "not_found"
   | "cap_reached"
   | "paid_only";
 

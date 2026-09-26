@@ -62,7 +62,7 @@ it("enables Approve once the page has been focused for a while, and waits again 
     return buttons;
   });
   expect(container.querySelector("bdi")?.textContent).toBe("Claude");
-  expect(container.textContent).toContain("Read your game state and search game info");
+  expect(container.textContent).toContain("Read your game state");
   expect(container.textContent).toContain("Its name comes from claude.ai.");
   expect(approve?.disabled).toBe(true);
   expect(deny?.disabled).toBe(false);

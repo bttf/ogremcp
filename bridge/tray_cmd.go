@@ -20,15 +20,19 @@ import (
 	"github.com/bttf/ogremcp/bridge/internal/config"
 	"github.com/bttf/ogremcp/bridge/internal/lock"
 	"github.com/bttf/ogremcp/bridge/internal/logfile"
+	"github.com/bttf/ogremcp/bridge/internal/selfupdate"
 	"github.com/bttf/ogremcp/bridge/internal/tray"
 )
 
+// relaunchWait is how long a bridge that an update started waits for the
+// version it replaced to quit and release the lock.
+const relaunchWait = 30 * time.Second
+
 // runTray runs the bridge as a tray app (§7): an icon in the macOS menu bar or
 // the Windows notification area, with a menu that shows the status and offers
-// the login, the folder picker, the server (§13.3), and start at login. It
-// logs to a file
-// (package logfile), and returns the exit status. On macOS it needs cgo; see
-// tray_nocgo.go.
+// the login, the folder picker, the server (§13.3), and start at login. A
+// release build updates itself (§7). It logs to a file (package logfile), and
+// returns the exit status. On macOS it needs cgo; see tray_nocgo.go.
 //
 // Adapted from bttf/wow-guide@df80260, bridge/cmd/tray/main.go: the log
 // setup, start at login, the shutdown, and the menu loop. Its pairing, config
@@ -51,7 +55,16 @@ func runTray() int {
 	slog.SetDefault(logger)
 	defer tray.Recover(logger)
 
+	// Set when an update started this bridge. Programs this one starts, such
+	// as the browser, do not inherit it.
+	updatedFrom := os.Getenv(selfupdate.EnvUpdatedFrom)
+	os.Unsetenv(selfupdate.EnvUpdatedFrom)
+
 	held, err := acquireLock()
+	if errors.Is(err, lock.ErrLocked) && updatedFrom != "" {
+		// The version this one replaced started it, and now quits.
+		held, err = waitLock(relaunchWait)
+	}
 	if errors.Is(err, lock.ErrLocked) {
 		logger.Info("another bridge runs for this user; quitting")
 		alert("Ogre MCP is already running. Its icon is in " + trayPlace() + ".")
@@ -86,7 +99,7 @@ func runTray() int {
 		alert(msg)
 		return 1
 	}
-	return runMenu(logger, logPath, &tray.Controller{
+	ctl := &tray.Controller{
 		Base:    base,
 		Version: version,
 		Auth:    client,
@@ -104,7 +117,42 @@ func runTray() int {
 		Open:         openBrowser,
 		PickFolder:   pickFolder,
 		AskServer:    askServer,
-	})
+		Updater:      newUpdater(logger),
+		Quit:         systray.Quit,
+	}
+	if updatedFrom != "" {
+		logger.Info("the bridge was updated", "from", updatedFrom, "to", version)
+		ctl.Model.SetUpdate(tray.UpdateDone, version)
+	}
+	return runMenu(logger, logPath, ctl)
+}
+
+// waitLock takes the lock (acquireLock), and tries again while another
+// process holds it, until wait has passed.
+func waitLock(wait time.Duration) (*lock.Lock, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		held, err := acquireLock()
+		if !errors.Is(err, lock.ErrLocked) || time.Now().After(deadline) {
+			return held, err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// newUpdater returns the bridge's self-updater (§7), or nil. Only a release
+// build updates itself.
+func newUpdater(logger *slog.Logger) tray.Updater {
+	if release != "true" {
+		logger.Info("self-update is off: this is not a release build", "version", version)
+		return nil
+	}
+	u, err := selfupdate.New(version)
+	if err != nil {
+		logger.Warn("self-update is off", "reason", err.Error())
+		return nil
+	}
+	return u
 }
 
 // runMenu sets up start at login, and runs the tray until the user quits.
@@ -137,9 +185,9 @@ func runMenu(logger *slog.Logger, logPath string, ctl *tray.Controller) int {
 		logger.Info("quitting on a signal", "signal", sig.String())
 		systray.Quit()
 	}()
-	// The bridge stops before the process ends. The tray library calls
-	// onExit on Windows and when macOS ends the app; after Quit on macOS, Run
-	// just returns.
+	// The bridge stops before the process ends, and an update that swaps the
+	// files finishes. The tray library calls onExit on Windows and when macOS
+	// ends the app; after Quit on macOS, Run just returns.
 	shutdown := sync.OnceFunc(func() {
 		cancel()
 		select {
@@ -166,6 +214,7 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 	for range tray.MaxAdapterLines {
 		ui.adapters = append(ui.adapters, line())
 	}
+	ui.update = line()
 	systray.AddSeparator()
 	ui.login = systray.AddMenuItem("", "")
 	ui.login.Hide()
@@ -217,9 +266,15 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 			}
 		}
 	}()
+	var parts sync.WaitGroup
+	for _, run := range []func(context.Context){ctl.Run, ctl.RunUpdates} {
+		parts.Go(func() {
+			defer tray.Recover(logger)
+			run(ctx)
+		})
+	}
 	go func() {
-		defer tray.Recover(logger)
-		ctl.Run(ctx)
+		parts.Wait()
 		close(stopped)
 	}()
 }
@@ -234,10 +289,10 @@ func line() *systray.MenuItem {
 }
 
 type menu struct {
-	status, note, err        *systray.MenuItem
-	adapters                 []*systray.MenuItem
-	login, folder, autostart *systray.MenuItem
-	icon                     *bool
+	status, note, err, update *systray.MenuItem
+	adapters                  []*systray.MenuItem
+	login, folder, autostart  *systray.MenuItem
+	icon                      *bool
 }
 
 func (m *menu) apply(v tray.View) {
@@ -257,6 +312,7 @@ func (m *menu) apply(v tray.View) {
 		}
 		show(item, text)
 	}
+	show(m.update, v.Update)
 	show(m.login, v.Login)
 	enable(m.login, v.LoginEnabled)
 	if v.ChooseFolder {

@@ -11,22 +11,20 @@ import type { ToolCallError } from "./tool-envelope.js";
  *
  * The tool registry (`tools.ts`) counts each call of a tool the user may call
  * before the tool runs. Every MCP tool counts the same, `list_games` and
- * `report_issue` included, and searches are not counted apart: capping search
- * would cap answers (§12, §14). The count is per user and UTC day.
+ * `report_issue` included (§14). The count is per user and UTC day.
  *
  * - The cap is the user's tier's (`users.tier`): `TOOL_CALLS_PER_DAY_FREE` or
  *   `TOOL_CALLS_PER_DAY_PAID`. Unset is no cap. §14 says the numbers are
  *   measured, then set, so both start unset, and the calls are counted
  *   whether or not a cap is set.
- * - At the cap, the call does not run, so it costs no search, and it is not
- *   counted. The agent gets `capReachedResult`: an `isError` result that says
- *   when the count resets, at the next midnight UTC (§10.5).
- * - A call that fails through the service's fault does not count (owner
- *   decision, 2026-09-25): once it has its answer, `refund` takes it back
- *   from the day it was counted on, never below zero. Those are the
- *   `REFUNDED_ERRORS`. A call that ends in any other error still counts: a
- *   bad argument, no snapshot yet, `no_sources`, a page not found or out of
- *   scope.
+ * - At the cap, the call does not run, and it is not counted. The agent
+ *   gets `capReachedResult`: an `isError` result that says when the count
+ *   resets, at the next midnight UTC (§10.5).
+ * - A call that fails through the service's fault, an internal error, does
+ *   not count (owner decision, 2026-09-25): once it has its answer, `refund`
+ *   takes it back from the day it was counted on, never below zero. Those
+ *   are the `REFUNDED_ERRORS`. A call that ends in any other error still
+ *   counts, such as a bad argument or no snapshot yet.
  * - The check and the count are one upsert on the user's row for the day,
  *   which Postgres runs under the row's lock. Concurrent calls of one user
  *   take turns on it, so a burst never passes the cap: the bound is exact. A
@@ -46,11 +44,11 @@ export type ToolCallCaps = { readonly [tier in ToolUser["tier"]]: number | null 
 export const NO_TOOL_CALL_CAPS: ToolCallCaps = { free: null, paid: null };
 
 /**
- * The errors of a call that failed through the service's fault, which
- * `refund` takes back: search is unavailable, the handler threw, or a kit
- * tool's result is over the size cap or lacks an envelope field.
+ * The errors of a call that failed through the service's fault, an internal
+ * error, which `refund` takes back (§14): the handler threw, or a kit tool's
+ * result is over the size cap or lacks an envelope field.
  */
-export const REFUNDED_ERRORS: ReadonlySet<ToolCallError> = new Set(["search_unavailable", "failed", "too_large", "no_envelope_field"]);
+export const REFUNDED_ERRORS: ReadonlySet<ToolCallError> = new Set(["failed", "too_large", "no_envelope_field"]);
 
 /** A call `count` counted, and the UTC date it counted on. */
 export interface CountedCall {

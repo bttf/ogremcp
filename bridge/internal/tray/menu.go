@@ -79,7 +79,30 @@ type State struct {
 	// AutostartBlocked, when set, replaces the title of the start at login
 	// item, which is then disabled: it says what the user must do first.
 	AutostartBlocked string
+	// Update is the state of the bridge's own update, and UpdateVersion the
+	// release it is about (§7).
+	Update        Update
+	UpdateVersion string
 }
+
+// Update is the state of the bridge's own update (§7).
+type Update int
+
+const (
+	// UpdateNone: nothing to show.
+	UpdateNone Update = iota
+	// UpdateInstalling: the release is downloaded and installed. The bridge
+	// then starts it and quits.
+	UpdateInstalling
+	// UpdateSkipped: the release is not installed, because the app's folder
+	// is read-only (selfupdate.ErrReadOnly).
+	UpdateSkipped
+	// UpdateRestart: the release is installed, but did not start.
+	UpdateRestart
+	// UpdateDone: this bridge is the release, which an update installed and
+	// started.
+	UpdateDone
+)
 
 // View is the text and state of each menu item.
 type View struct {
@@ -92,6 +115,8 @@ type View struct {
 	Error string
 	// Adapters are the adapter lines, at most MaxAdapterLines.
 	Adapters []string
+	// Update is the line about the bridge's own update, hidden when "".
+	Update string
 	// Active selects the icon of a logged-in bridge.
 	Active bool
 
@@ -166,6 +191,16 @@ func Render(s State, now time.Time) View {
 		if s.Login == LoginUnsaved {
 			v.Note = "Logged in, but the keychain did not save the login. Retrying; until then, quitting logs you out."
 		}
+	}
+	switch s.Update {
+	case UpdateInstalling:
+		v.Update = "Updating Ogre MCP to " + s.UpdateVersion + "…"
+	case UpdateSkipped:
+		v.Update = "Update to " + s.UpdateVersion + " skipped: the app's folder is read-only"
+	case UpdateRestart:
+		v.Update = "Quit and open Ogre MCP again to finish updating to " + s.UpdateVersion
+	case UpdateDone:
+		v.Update = "Updated to " + s.UpdateVersion
 	}
 	if s.Error != "" {
 		v.Error = "Error at " + clock(s.ErrorAt, now) + ": " + shorten(s.Error, maxErrorRunes)
@@ -400,10 +435,13 @@ func (m *Model) LoginKnown() {
 
 // NewServer forgets what belongs to the old server when the server changes:
 // the login, the last upload, the errors, the kits, and their adapters. Start
-// at login stays.
+// at login and the bridge's own update stay.
 func (m *Model) NewServer() {
 	m.update(func(s *State) []string {
-		*s = State{Autostart: s.Autostart, AutostartAvailable: s.AutostartAvailable, AutostartBlocked: s.AutostartBlocked}
+		*s = State{
+			Autostart: s.Autostart, AutostartAvailable: s.AutostartAvailable, AutostartBlocked: s.AutostartBlocked,
+			Update: s.Update, UpdateVersion: s.UpdateVersion,
+		}
 		m.errs = nil
 		return nil
 	})
@@ -484,6 +522,14 @@ func (m *Model) SetAutostart(on, available bool) {
 func (m *Model) SetAutostartBlocked(title string) {
 	m.update(func(s *State) []string {
 		s.AutostartBlocked = title
+		return nil
+	})
+}
+
+// SetUpdate records the state of the bridge's own update to version.
+func (m *Model) SetUpdate(u Update, version string) {
+	m.update(func(s *State) []string {
+		s.Update, s.UpdateVersion = u, version
 		return nil
 	})
 }

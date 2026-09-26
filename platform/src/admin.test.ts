@@ -20,7 +20,6 @@ const ISSUER = "http://localhost:4790";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CIMD_CLIENT = "https://agent.example/oauth/client-metadata.json";
 const DCR_CLIENT = "dcr-client-0123456789";
-const LONG_QUERY = `where is ${"the ".repeat(40)}trainer`;
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres (§13.2, §16.1)", () => {
   const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
@@ -87,22 +86,17 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     await event({ ...ingest, ...client, occurred_at: at(-270), status: "unsupported_flavor", parse_status: "rejected", adapter_schema: 1, flavor: "tbc_classic" });
     await event({ ...ingest, occurred_at: at(-10 * 24 * 60), status: "stored", parse_status: "parsed", bridge_version: "0.0.9", os: "darwin" });
 
-    // A visit of the CIMD agent that read state and searched.
+    // Tool calls of the CIMD agent, and of the DCR agent, which reached the cap.
     const snapshotUuid = randomUUID();
     ids.push(snapshotUuid);
     const call = { user_id: player.id, kind: "tool_call", latency_ms: 50 };
     const cimd = { ...call, agent_client: CIMD_CLIENT };
     await event({ ...cimd, occurred_at: at(-180), tool: "wow_get_state", sections: ["quests", "location"], snapshot_age_seconds: 100, snapshot_uuid: snapshotUuid });
-    await event({ ...cimd, occurred_at: at(-179), tool: "search_game_info", query: "mage trainer", cache_hit: false, search_credits: 2 });
-    await event({ ...cimd, occurred_at: at(-178), tool: "search_game_info", query: "mage trainer", cache_hit: true });
-    await event({ ...cimd, occurred_at: at(-177), tool: "search_game_info", query: LONG_QUERY, cache_hit: false, search_credits: 2 });
-    await event({ ...cimd, occurred_at: at(-176), tool: "fetch_game_page", error: "out_of_scope" });
-    // A visit of the DCR agent that read state, whose one search failed, and that reached the cap.
+    await event({ ...cimd, occurred_at: at(-179), tool: "list_games" });
     const dcr = { ...call, agent_client: DCR_CLIENT };
     await event({ ...dcr, occurred_at: at(-60), tool: "wow_get_state", snapshot_age_seconds: 200 });
     await event({ ...dcr, occurred_at: at(-59), tool: "list_games", error: "cap_reached" });
-    await event({ ...dcr, occurred_at: at(-58), tool: "search_game_info", query: "mage trainer", error: "search_unavailable" });
-    // Another user's visit of the CIMD agent, whose one kit tool call failed: it read no state.
+    // Another user's call of a game they turned off.
     await event({ ...cimd, user_id: owner.id, occurred_at: at(-30), tool: "wow_get_state", error: "game_off" });
 
     await pool.query(
@@ -155,6 +149,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
     for (const id of ids) expect(text).not.toContain(id);
     const metrics = JSON.parse(text) as AdminMetrics;
 
+    expect(Object.keys(metrics)).toEqual(["window", "bridges", "parses", "unsupported_flavors", "snapshot_age", "tools", "sections", "issues", "cap_hits", "storage"]);
     expect(metrics.window.days).toBe(7);
     expect(metrics.bridges).toEqual([
       { bridge_version: "0.1.0", os: "windows", devices: 1, requests: 5, errors: { upload_failed: 2, locate_failed: 1 } },
@@ -171,33 +166,12 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the Admin API against Postgres
       { tool: "wow_get_state", reads: 2, p50: expect.closeTo(150), p90: expect.closeTo(190), p99: expect.closeTo(199) },
     ]);
     expect(metrics.tools).toEqual([
-      { tool: "fetch_game_page", calls: 1, errors: 1, with_sections: 0 },
-      { tool: "list_games", calls: 1, errors: 1, with_sections: 0 },
-      { tool: "search_game_info", calls: 4, errors: 1, with_sections: 0 },
+      { tool: "list_games", calls: 2, errors: 1, with_sections: 0 },
       { tool: "wow_get_state", calls: 3, errors: 1, with_sections: 1 },
     ]);
     expect(metrics.sections).toEqual([
       { tool: "wow_get_state", section: "location", calls: 1 },
       { tool: "wow_get_state", section: "quests", calls: 1 },
-    ]);
-    expect([...metrics.grounding].sort((a, b) => a.agent_client.localeCompare(b.agent_client))).toEqual([
-      { agent_client: "DCR: Test agent", visits: 1, read_state: 1, read_state_no_search: 1 },
-      { agent_client: CIMD_CLIENT, visits: 2, read_state: 1, read_state_no_search: 0 },
-    ]);
-    expect(metrics.search).toEqual({
-      active_users: 2,
-      lookups: 3,
-      hits: 1,
-      credits: 4,
-      scope_misses: 1,
-      tools: [
-        { tool: "fetch_game_page", lookups: 0, hits: 0, credits: 0, scope_misses: 1 },
-        { tool: "search_game_info", lookups: 3, hits: 1, credits: 4, scope_misses: 0 },
-      ],
-    });
-    expect([...metrics.uncached_queries].sort((a, b) => a.query.localeCompare(b.query))).toEqual([
-      { query: "mage trainer", searches: 1, users: 1 },
-      { query: LONG_QUERY.slice(0, 120), searches: 1, users: 1 },
     ]);
     expect(metrics.issues).toEqual({
       total: 1,

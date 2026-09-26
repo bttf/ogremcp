@@ -2,10 +2,6 @@
 // After a schema change, regenerate with: pnpm --filter @ogremcp/sdk test -u
 
 export type LocateEntry = LocatePath | LocatePrompt;
-/**
- * An https URL prefix: a host, then a path that starts and ends with `/`, with no query or fragment (§12).
- */
-export type UrlPrefix = string;
 
 /**
  * A kit manifest. It tells the generic bridge what to read and where to find it (docs/architecture.md §6.1).
@@ -114,12 +110,4 @@ export interface Flavor {
    * `supported` (play-tested) or `experimental` (the agent caveats its answers).
    */
   status: "supported" | "experimental";
-  /**
-   * The flavor's search scope (§12). Each entry is an https URL prefix, not a bare domain: a host, then a path that starts and ends with `/`, with no query or fragment, e.g. `https://www.wowhead.com/classic/`. The final `/` keeps `/classic/` from admitting `/classic-ptr/`. Empty means no vetted sources yet.
-   */
-  search: UrlPrefix[];
-  /**
-   * The `search` prefixes whose pages cover several game versions on the same page, such as a wiki that mixes retail and Classic. Each must also be in `search`, which the platform checks. Results from them carry `mixed_versions: true` (§12).
-   */
-  mixed?: UrlPrefix[];
 }

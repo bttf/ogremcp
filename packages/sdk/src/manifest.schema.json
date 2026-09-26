@@ -149,29 +149,14 @@
       "title": "Flavor",
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "search"],
+      "required": ["status"],
       "properties": {
         "status": {
           "description": "`supported` (play-tested) or `experimental` (the agent caveats its answers).",
           "type": "string",
           "enum": ["supported", "experimental"]
-        },
-        "search": {
-          "description": "The flavor's search scope (§12). Each entry is an https URL prefix, not a bare domain: a host, then a path that starts and ends with `/`, with no query or fragment, e.g. `https://www.wowhead.com/classic/`. The final `/` keeps `/classic/` from admitting `/classic-ptr/`. Empty means no vetted sources yet.",
-          "type": "array",
-          "items": { "$ref": "#/$defs/urlPrefix" }
-        },
-        "mixed": {
-          "description": "The `search` prefixes whose pages cover several game versions on the same page, such as a wiki that mixes retail and Classic. Each must also be in `search`, which the platform checks. Results from them carry `mixed_versions: true` (§12).",
-          "type": "array",
-          "items": { "$ref": "#/$defs/urlPrefix" }
         }
       }
-    },
-    "urlPrefix": {
-      "description": "An https URL prefix: a host, then a path that starts and ends with `/`, with no query or fragment (§12).",
-      "type": "string",
-      "pattern": "^https://[^/?#\\s]+/([^?#\\s]*/)?$"
     },
     "relativePath": {
       "description": "A path relative to root. Globs allowed. No variables, so no `{` or `}`. It may not leave root: no leading `/` or `\\`, no drive letter, and no `..` segment.",

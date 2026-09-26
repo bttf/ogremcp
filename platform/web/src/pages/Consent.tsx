@@ -21,7 +21,7 @@ export interface ConsentDetails {
  * are oidc-provider's own. A scope without words here is shown by its name.
  */
 const SCOPE_WORDS: Readonly<Record<string, string>> = {
-  read: "Read your game state and search game info",
+  read: "Read your game state",
   ingest: "Send your game state to Ogre MCP",
   openid: "See your Ogre MCP account ID",
   offline_access: "Stay connected until you revoke access",

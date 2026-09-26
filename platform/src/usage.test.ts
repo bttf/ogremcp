@@ -124,12 +124,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("daily tool-call caps (§14)", 
     expect(runs.count).toBe(3);
   });
 
-  it("takes back a call that failed through the service's fault, such as search_unavailable", async () => {
-    const unavailable: PlatformTool["handler"] = async (_args, ctx) => {
-      ctx.event.error = "search_unavailable";
-      return userError("Search is unavailable.");
+  it("takes back a call that failed through the service's fault, an internal error", async () => {
+    const failing: PlatformTool["handler"] = async () => {
+      throw new Error("the database is down");
     };
-    const { tools, runs } = registry({ free: 1, paid: null }, new Date("2026-09-25T13:45:00Z"), unavailable);
+    const { tools, runs } = registry({ free: 1, paid: null }, new Date("2026-09-25T13:45:00Z"), failing);
     const user = await newUser();
     const caller = { userUuid: user.uuid, clientId: "test-agent" };
 
