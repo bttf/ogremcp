@@ -379,6 +379,9 @@ Left for later issues:
   `checksums.txt.sig`, `ogremcp-bridge_<v>_windows_amd64.exe`, and
   `ogremcp-bridge_<v>_darwin_all.app.zip`. Renaming any of them stops
   self-update for every bridge released before the change.
+- The `.app` bundle in the zip must contain no symbolic links, such as an
+  embedded framework's `Versions/Current`. The bridge rejects a zip with one,
+  so every bridge released before the change would reject every later release.
 
 ## Alternative considered
 

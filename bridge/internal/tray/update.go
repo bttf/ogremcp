@@ -55,6 +55,8 @@ func (c *Controller) update(ctx context.Context) bool {
 		return false
 	}
 	if r == nil {
+		// Up to date: an earlier update's error no longer holds.
+		c.showErrors("update", nil)
 		return false
 	}
 	v := r.Version.String()
