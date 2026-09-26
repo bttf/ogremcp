@@ -9,6 +9,9 @@ import { PLATFORM_TOOLS } from "./tools.js";
  * The repo's own budgets, not spec values: clients truncate long text, and
  * it goes out with every request. The WoW tools' descriptions carry the
  * flight-point and quest turn-in rules too (§10.4), so their budget is larger.
+ * Claude Code truncates an MCP tool description at 2,048 characters by
+ * default, so the description budget stays under 2048, or the end of the
+ * description, the §10.5 rules, is cut.
  */
 const MAX_INSTRUCTIONS_CHARS = 1400;
 const MAX_DESCRIPTION_CHARS = 2000;
