@@ -245,13 +245,14 @@ interface ToolContext<State> {
     captured_at = 1790000000,   -- GetServerTime(), stamped on PLAYER_LOGOUT
     state = {
       character = {}, location = {}, quests = {},
-      inventory = {}, skills = {}, recent_path = {},
+      inventory = {}, skills = {}, recent_path = {}, flight_points = {},
     },
   }
   ```
 
 - **Character key** is the player GUID; `name`/`realm` are for display and tool arguments.
 - **Sections** carry what the prototype's tools returned, plus three fields that had no home: `character` holds `in_combat` and `resting`, and `location` holds `hearth` (the hearthstone bind point).
+- **`flight_points`** holds the flight points the character knows, per continent. It follows the MissingFlightPaths addon: on `TAXIMAP_OPENED`, the adapter reads `C_TaxiMap.GetAllTaxiNodes`, and a node is known when its state is current or reachable. It merges the names into a per-character cache in a second SavedVariables table (`## SavedVariablesPerCharacter`), one entry per continent: `{ known, continent, updated_at }`. The account-wide file carries only the current character's entries. The section is `unknown` until the character opens a taxi map. A continent missing from the cache has not been observed. There is no discovery detection outside the taxi map. Owner decision, 2026-09-26 (RED-371).
 - The adapter never decides the flavor. It stamps raw facts and the interpreter maps them (§6.3.1), so a mapping fix ships server-side and applies to old uploads on re-parse.
 - **At `PLAYER_LOGOUT`** (which also fires on reload), the adapter re-collects every section, then stamps `captured_at`, so state and stamp both match the moment SavedVariables flush. Without this, polled values such as position would lag by up to one poll interval. If a collector fails at logout, keep its last polled value.
 - `recent_path` is a bounded breadcrumb recorded during play (zone/subzone changes with timestamps, last N). It lives inside the snapshot, so it works without history tools and on the free tier. On Forever it covers only the time since the last reload (§6.3.1).
@@ -295,7 +296,7 @@ The interpreter maps `client` facts to a flavor key and rules. Seasonal realms r
 
 Then record a golden SavedVariables fixture (§6.4).
 
-**Forever SavedVariables bug:** in builds 69893 and 69913, the client writes SavedVariables but doesn't read them back after a reload, so `OgreMCPDB` starts empty each time. Every section except `recent_path` must be rebuilt from live APIs, never carried over in SavedVariables, so only `recent_path` is affected: on Forever it covers only the time since the last reload. `wow_get_state` says so for Forever snapshots (§10.4), and the `experimental` caveat covers the rest. Re-test on each new Forever build and drop the note once it's fixed.
+**Forever SavedVariables bug:** in builds 69893 and 69913, the client writes SavedVariables but doesn't read them back after a reload, so `OgreMCPDB` starts empty each time. Every section except `recent_path` and `flight_points` must be rebuilt from live APIs, never carried over in SavedVariables, so only those two are affected: on Forever, `recent_path` covers only the time since the last reload, and `flight_points` is `unknown` until the taxi map opens after each reload. `wow_get_state` says so for Forever snapshots (§10.4), and the `experimental` caveat covers the rest. Re-test on each new Forever build and drop the note once it's fixed.
 
 ### 6.4 Flavors `[v1]` for Classic Era
 
@@ -458,8 +459,10 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 | Tool | Purpose |
 |---|---|
-| `wow_get_state(sections?, flavor?, character?)` | Latest snapshot. By default, whatever the player last played. `flavor` returns the latest for that flavor; `character` (name or `Name-Realm`) narrows to a specific alt. `sections`: `character`, `location`, `quests`, `inventory`, `skills`, `recent_path` (default: all). For Forever snapshots, notes that `recent_path` covers only the time since the last reload (§6.3.1). |
+| `wow_get_state(sections?, flavor?, character?)` | Latest snapshot. By default, whatever the player last played. `flavor` returns the latest for that flavor; `character` (name or `Name-Realm`) narrows to a specific alt. `sections`: `character`, `location`, `quests`, `inventory`, `skills`, `recent_path`, `flight_points` (default: all). For Forever snapshots, notes that `recent_path` covers only the time since the last reload (§6.3.1). |
 | `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). `sections` defaults to `character` and `location`, because all sections for 20 snapshots would not fit the result cap. **Paid** (§14). |
+
+- **Flight points:** both tool descriptions tell the agent to check `flight_points` before suggesting a flight. If the destination isn't known, it routes by hearth or on foot and suggests picking up the flight point on arrival. If the section is `unknown`, or the destination's continent isn't in it, it says so and hedges. This rule is in the WoW tool descriptions only, not the server `instructions`. Owner decision, 2026-09-26 (RED-371).
 
 ### 10.5 Responses and behavior
 
@@ -469,7 +472,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Annotations:** `readOnlyHint: true` on every tool except `report_issue`. Clients use these to decide when to ask the user for confirmation.
 - **User-facing conditions** (cap reached, paid-only, no snapshot yet) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which a client can keep listing until a new chat (§10.2): the message says the game is turned off on the Games page. An unknown tool name is a protocol error. The `isError` rule applies to tools that need a snapshot. `list_games` is the orientation call, so it answers "no snapshot yet" and "no game enabled" with a normal result that carries the setup steps.
 - **Tool descriptions name the game explicitly.** Together with the prefix and `list_games`, that's how the agent picks the right tool.
-- **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules:
+- **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules. The WoW tools' flight-point rule is in §10.4:
   - Friend-style, spoiler-free guidance ("head north, you'll know you're close when you see water"), not coordinates and kill counts.
   - Call `list_games` when unsure what the user is playing.
   - For `experimental` flavors, caveat answers: sources may be thin or out of date.
@@ -650,6 +653,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 - Community kit loading on hosted Ogre MCP (§6.5).
 - Server → bridge messaging (§8.4).
 - Platform search and page-fetch tools, until a game-data corpus we hold exists (§12, §12.1).
+- Flight times, flight costs, and route optimization (§10.4).
 
 ## 18. v1 build plan
 
