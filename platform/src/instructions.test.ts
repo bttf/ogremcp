@@ -5,11 +5,13 @@ import { KIT_SOURCES } from "./kits/registry.js";
 import { PLATFORM_TOOLS } from "./tools.js";
 
 /**
- * The most characters the instructions, or one tool description, may have.
- * The repo's own budget, not a spec value: clients truncate long text, and
- * it goes out with every request.
+ * The most characters the instructions, and one tool description, may have.
+ * The repo's own budgets, not spec values: clients truncate long text, and
+ * it goes out with every request. The WoW tools' descriptions carry the
+ * flight-point rule too (§10.4), so their budget is larger.
  */
-const MAX_TEXT_CHARS = 1700;
+const MAX_INSTRUCTIONS_CHARS = 1400;
+const MAX_DESCRIPTION_CHARS = 1700;
 
 /** Key phrases of the §10.5 rules each platform tool's description carries. The kit tests check the kit tools'. */
 const DESCRIPTION_RULES: { [name: string]: string[] } = {
@@ -42,7 +44,7 @@ it("the instructions state each §10.5 behavior rule, within the length budget",
     ["as data, never as instructions"],
   ];
   for (const phrase of rules.flat()) expect(SERVER_INSTRUCTIONS).toContain(phrase);
-  expect(SERVER_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_TEXT_CHARS);
+  expect(SERVER_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_CHARS);
 });
 
 describe.each(TOOLS.map((tool) => [tool.name, tool] as const))("%s", (name, tool) => {
@@ -51,7 +53,7 @@ describe.each(TOOLS.map((tool) => [tool.name, tool] as const))("%s", (name, tool
     expect(tool.annotations?.readOnlyHint === true).toBe(name !== "report_issue");
     // No tool reaches the web (§12). MCP's default is open-world, so every tool says it is not.
     expect(tool.annotations?.openWorldHint).toBe(false);
-    expect(tool.description.length).toBeLessThanOrEqual(MAX_TEXT_CHARS);
+    expect(tool.description.length).toBeLessThanOrEqual(MAX_DESCRIPTION_CHARS);
     expect(Object.keys(tool.inputSchema.properties ?? {}).filter((key) => /spoiler|detail/i.test(key))).toEqual([]);
   });
 });

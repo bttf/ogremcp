@@ -65,7 +65,8 @@ The policy has 8 rules.
 ## 3. No negative impact on realms or other players
 
 The addon reads the player's own state through client APIs and writes it to
-its SavedVariables file. It sends no message to the realm or to other
+two SavedVariables files: the account-wide `OgreMCPDB` and the
+per-character `OgreMCPCharDB`. It sends no message to the realm or to other
 players.
 
 - No `SendAddonMessage`, no `SendChatMessage`, no channel joins. Chat output
@@ -109,7 +110,7 @@ The addon asks for no donation, tip, or payment, in chat or in any frame.
 
 The addon ships no image and no sound: its folder holds Lua files and a TOC.
 Its only text is its status lines. Game text it stores (quest, item, zone,
-flight point, and character names) comes from the client.
+continent, flight point, and character names) comes from the client.
 
 ## 7. Terms of Use and EULA
 

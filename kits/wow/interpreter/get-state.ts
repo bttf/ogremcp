@@ -19,7 +19,7 @@ export const EXPERIMENTAL_FLAVORS: readonly string[] = ["forever"];
  * decision 2026-09-26, RED-371). It is not in the server instructions.
  */
 export const FLIGHT_POINTS_RULE =
-  "Before suggesting a flight, check `flight_points`. If the destination's flight point isn't known, route by hearth or on foot and suggest picking it up on arrival. If its `status` is `unknown` or the destination's continent isn't listed, say so and hedge.";
+  "Before suggesting a flight, check `flight_points`. If the destination's flight point isn't known, route by hearth or on foot and suggest picking it up on arrival. If `flight_points` has `status: unknown` or the destination's continent isn't listed, say so and hedge.";
 
 /**
  * The description, with `experimental` as the experimental flavors. It names
