@@ -8,10 +8,10 @@ import { PLATFORM_TOOLS } from "./tools.js";
  * The most characters the instructions, and one tool description, may have.
  * The repo's own budgets, not spec values: clients truncate long text, and
  * it goes out with every request. The WoW tools' descriptions carry the
- * flight-point rule too (§10.4), so their budget is larger.
+ * flight-point and quest turn-in rules too (§10.4), so their budget is larger.
  */
 const MAX_INSTRUCTIONS_CHARS = 1400;
-const MAX_DESCRIPTION_CHARS = 1700;
+const MAX_DESCRIPTION_CHARS = 2000;
 
 /** Key phrases of the §10.5 rules each platform tool's description carries. The kit tests check the kit tools'. */
 const DESCRIPTION_RULES: { [name: string]: string[] } = {

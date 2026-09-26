@@ -16,6 +16,7 @@ import {
   FOREVER_FLIGHT_POINTS_NOTE,
   FOREVER_PATH_NOTE,
   NO_SNAPSHOT_MESSAGE,
+  QUEST_TURN_INS_RULE,
 } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
@@ -81,6 +82,7 @@ it("is described as §10.1 and §10.5 ask", () => {
   expect(tool?.inputSchema.properties?.["sections"]?.["items"]).toEqual({ type: "string", enum: [...SECTIONS] });
   expect(SECTIONS).toContain("flight_points");
   expect(tool?.description).toContain(FLIGHT_POINTS_RULE);
+  expect(tool?.description).toContain(QUEST_TURN_INS_RULE);
 });
 
 it("by default returns every section of the latest snapshot of any flavor", async () => {
