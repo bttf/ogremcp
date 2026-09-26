@@ -10,7 +10,8 @@ import {
   cutBags,
   envelope,
   EXPERIMENTAL_FLAVORS,
-  FOREVER_PATH_NOTE,
+  FLIGHT_POINTS_RULE,
+  foreverNotes,
   hasDescriptions,
   type JsonObject,
   mostThatFit,
@@ -41,14 +42,16 @@ export const HISTORY_DEFAULT_SECTIONS: readonly Section[] = ["character", "locat
 
 /**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the §10.5 behavior rules that act on game state, like
- * `wow_get_state`'s. Game text never goes here, only into results (§10.5).
+ * the game and carries the flight-point rule and the §10.5 behavior rules
+ * that act on game state, like `wow_get_state`'s. Game text never goes here,
+ * only into results (§10.5).
  */
 export function describeGetHistory(experimental: readonly string[]): string {
   return [
     "World of Warcraft: the player's past game states, newest first, from the snapshots their game saved from `since` on. For the latest state, call wow_get_state.",
     "`limit`, `flavor`, `character`, and `sections` narrow it; `sections` defaults to `character` and `location`.",
     "Each snapshot carries `snapshot_at` (when the game captured it), `flavor`, the realm's `rules`, and `character`; the result's own are the newest snapshot's.",
+    FLIGHT_POINTS_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }
@@ -148,8 +151,7 @@ interface Entry {
 function historyResult(snapshots: readonly Snapshot<WowState>[], sections: readonly Section[], maxBytes: number): JsonObject {
   const [newest] = snapshots;
   if (newest === undefined) throw new Error("historyResult needs a snapshot.");
-  const forever = sections.includes("recent_path") && snapshots.some((snapshot) => snapshot.flavor === "forever");
-  const notes = forever ? [FOREVER_PATH_NOTE] : [];
+  const notes = snapshots.some((snapshot) => snapshot.flavor === "forever") ? foreverNotes(sections) : [];
   const result = (entries: readonly Entry[], trimNote: string | null): JsonObject => {
     const all = trimNote === null ? notes : [...notes, trimNote];
     return {

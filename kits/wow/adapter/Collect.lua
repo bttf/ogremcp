@@ -28,6 +28,7 @@ local COLLECT_PARTS = {
 	{ key = "quests", fn = ns.CollectQuests },
 	{ key = "inventory", fn = ns.CollectInventory },
 	{ key = "skills", fn = ns.CollectSkills },
+	{ key = "flight_points", fn = ns.CollectFlightPoints },
 }
 
 local collecting = false

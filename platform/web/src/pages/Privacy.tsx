@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ContactSection, LegalPage } from "./Legal.js";
 
 /** The day the text below last changed. Change it with the text. */
-export const PRIVACY_UPDATED = "September 25, 2026";
+export const PRIVACY_UPDATED = "September 26, 2026";
 
 /**
  * The Privacy page (§13.2). It describes the hosted service, with the default
@@ -44,6 +44,10 @@ export function Privacy() {
           Where it is: zone, subzone, position on the map, facing, whether it is in an instance, and where its hearthstone is set.
         </li>
         <li>Up to 20 places it visited recently, with times.</li>
+        <li>
+          The flight points it knows on each continent, read when you open a flight master's map. The addon also keeps this list in a
+          file for each character, which the bridge does not send.
+        </li>
         <li>The quests in its quest log: title, level, text, and objective progress.</li>
         <li>Its bags and equipped items: names, counts, and item details such as quality, level, and stats.</li>
         <li>The lines of its Skills tab, such as professions and weapon skills, with their ranks.</li>

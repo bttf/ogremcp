@@ -11,12 +11,13 @@
 // buildPath) and cloud/src/mcpSkills.ts (buildSkills), without the detail
 // levels (§10.5) and the text rendering: the text block is the result's JSON
 // (§10.5). Without the detail levels, the quests section is the snapshot's as
-// it is. Fields are snake_case, like the snapshot's.
+// it is. flight_points is new (RED-371). Fields are snake_case, like the
+// snapshot's.
 import { type GearComparison, summariseGear } from "./gear.js";
 import { SKILL_CATEGORIES, type WowState } from "./schema.js";
 
 /** The sections, in the order a result lists them (§10.4). */
-export const SECTIONS = ["character", "location", "quests", "inventory", "skills", "recent_path"] as const;
+export const SECTIONS = ["character", "location", "quests", "inventory", "skills", "recent_path", "flight_points"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 type Character = NonNullable<WowState["character"]>;
@@ -25,6 +26,7 @@ type Inventory = NonNullable<WowState["inventory"]>;
 type Skills = NonNullable<WowState["skills"]>;
 type Skill = Skills["lines"][number];
 type RecentPath = NonNullable<WowState["recent_path"]>;
+type FlightPoints = NonNullable<WowState["flight_points"]>;
 
 /**
  * The `sections` of `state`, each built for the agent, keyed by section. A
@@ -43,6 +45,8 @@ const BUILDERS = {
   inventory: ({ inventory, character }) => inventory && buildInventory(inventory, character?.level ?? null),
   skills: ({ skills }, flavor) => skills && buildSkills(skills, flavor),
   recent_path: ({ recent_path }) => recent_path && buildRecentPath(recent_path),
+  // A snapshot stored before the section existed has no key for it.
+  flight_points: ({ flight_points }) => buildFlightPoints(flight_points ?? null),
 } satisfies { [S in Section]: (state: WowState, flavor: string) => unknown };
 
 /** What `buildSections` returns: each requested section, as its builder makes it. */
@@ -240,6 +244,25 @@ function buildRecentPath(path: RecentPath) {
       };
     })
     .reverse();
+}
+
+/**
+ * `unknown` until the character has opened a taxi map that the adapter saw:
+ * the section is missing, as from an adapter before 0.3.0, or lists no
+ * continent. Otherwise the flight points known per continent, with
+ * `updated_at` as an ISO 8601 instant. A continent missing from the list has
+ * not been observed (§6.3).
+ */
+function buildFlightPoints(flightPoints: FlightPoints | null) {
+  if (flightPoints === null || flightPoints.continents.length === 0) return { status: "unknown" as const };
+  return {
+    status: "observed" as const,
+    continents: flightPoints.continents.map(({ continent, known, updated_at }) => ({
+      continent,
+      known,
+      updated_at: updated_at === null ? null : isoTime(updated_at),
+    })),
+  };
 }
 
 /** Unix seconds as an ISO 8601 instant, or null out of a Date's range, where `toISOString` throws. */

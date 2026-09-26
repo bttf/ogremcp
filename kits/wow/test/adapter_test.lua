@@ -34,8 +34,8 @@ end
 
 -- SavedVariables ---------------------------------------------------------------
 
--- WriteSavedVariables writes OgreMCPDB the way both clients were seen to
--- write a SavedVariables file: an empty first line, CRLF line endings, one
+-- WriteSavedVariables writes the SavedVariables table name, OgreMCPDB by
+-- default, the way both clients were seen to write a SavedVariables file: an empty first line, CRLF line endings, one
 -- entry per line with no indentation and no index comments, and strings in
 -- double quotes with backslash, double quote, newline, and carriage return
 -- escaped. Object keys are sorted here so the output is stable; the client
@@ -84,9 +84,10 @@ local function WriteValue(v, out, path)
 	end
 end
 
-local function WriteSavedVariables()
-	local out = { "\r\nOgreMCPDB = " }
-	WriteValue(OgreMCPDB, out, "OgreMCPDB")
+local function WriteSavedVariables(name)
+	name = name or "OgreMCPDB"
+	local out = { "\r\n" .. name .. " = " }
+	WriteValue(_G[name], out, name)
 	out[#out + 1] = "\r\n"
 	return table.concat(out)
 end
@@ -273,6 +274,13 @@ local function DefaultWorld()
 			{ name = "Maces", skillID = 54, categoryID = 6, rank = 58, maxRank = 60, modifier = 0 },
 			{ name = "Defense", skillID = 95, categoryID = 6, rank = 60, maxRank = 60, modifier = 3 },
 		},
+		-- The fourth return of UnitPosition("player"): 0 is the instance of
+		-- Test Continent.
+		instanceID = 0,
+		-- The taxi map. worldMapID is what WorldMapFrame:GetMapID() returns,
+		-- nodes what C_TaxiMap.GetAllTaxiNodes returns, and readMapID the map
+		-- ID that GetAllTaxiNodes was called with.
+		taxi = { worldMapID = 1415, nodes = {} },
 		timers = {},
 		frames = {},
 		chat = {},
@@ -494,6 +502,20 @@ local function InstallStubs()
 				return nil
 			end
 			return { mapID = mapID, name = map.name, mapType = map.mapType, parentMapID = map.parentMapID }
+		end,
+	}
+	G.UnitPosition = function()
+		return 1234.5, -567.8, 0, w.instanceID
+	end
+	G.WorldMapFrame = {
+		GetMapID = function()
+			return w.taxi.worldMapID
+		end,
+	}
+	G.C_TaxiMap = {
+		GetAllTaxiNodes = function(mapID)
+			w.taxi.readMapID = mapID
+			return w.taxi.nodes
 		end,
 	}
 	G.GetRealZoneText = function()
@@ -790,6 +812,7 @@ local function Start(setup, saved)
 		setup(world)
 	end
 	OgreMCPDB = nil
+	OgreMCPCharDB = nil
 	SLASH_OGREMCPTRANSMIT1 = nil
 	InstallStubs()
 	if saved then
@@ -836,9 +859,10 @@ end
 
 -- Tests ----------------------------------------------------------------------
 
-test("the TOC names the addon, both interface versions, and OgreMCPDB", function()
+test("the TOC names the addon, both interface versions, OgreMCPDB, and OgreMCPCharDB", function()
 	eq(TOC_META.Interface, "11509, 16001", "interface versions")
 	eq(TOC_META.SavedVariables, "OgreMCPDB", "SavedVariables")
+	eq(TOC_META.SavedVariablesPerCharacter, "OgreMCPCharDB", "SavedVariablesPerCharacter")
 	eq(TOC_META.Title, "Ogre MCP", "title")
 end)
 
@@ -856,8 +880,14 @@ for _, client in ipairs({ "forever", "era" }) do
 		-- collection at PLAYER_LOGOUT.
 		world.loc.x = 0.5
 		world.state.combat = true
-		local db = Logout(client)
 		local era = client == "era"
+		if era then
+			-- A flight master's map, so the era file has flight points and the
+			-- forever file has none.
+			world.taxi.nodes = { { name = "Test Village", state = 0 }, { name = "Test Keep", state = 2 } }
+			Fire("TAXIMAP_OPENED")
+		end
+		local db = Logout(client)
 
 		eq(Keys(db), "addon_version,captured_at,character,client,schema,state", "top-level keys")
 		eq(db.schema, 1, "schema")
@@ -875,7 +905,13 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(db.character.realm, "Testrealm", "realm")
 
 		local state = db.state
-		eq(Keys(state), "character,inventory,location,quests,recent_path,skills", "sections")
+		eq(Keys(state), "character,flight_points,inventory,location,quests,recent_path,skills", "sections")
+		local continents = state.flight_points.continents
+		eq(#continents, era and 1 or 0, "flight_points continents")
+		if era then
+			eq(Keys(continents[1]), "continent,instance_id,known,updated_at", "flight_points entry")
+			eq(table.concat(continents[1].known, ","), "Test Village", "known flight points")
+		end
 		eq(#state.recent_path, 1, "recent_path: the place of the first collection")
 		local place = state.recent_path[1]
 		eq(Keys(place), "captured_at,in_instance,map_id,subzone,x,y,zone", "recent_path entry")
@@ -1087,6 +1123,56 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(path[2].captured_at, world.serverTime + 55, "the entry the short visit left")
 	end)
 end
+
+test("flight_points keeps the taxi map's known nodes per continent and merges each read", function()
+	Start(Era())
+	EnterWorld()
+	-- Without a current node the nodes are not ready, and the read is skipped.
+	world.taxi.nodes = { { name = "Test Harbor", state = 1 } }
+	Fire("TAXIMAP_OPENED")
+	eq(#Logout().state.flight_points.continents, 0, "no current node")
+
+	world.taxi.nodes = {
+		{ name = "Test Village", state = 0 },
+		{ name = "Test Harbor", state = 1 },
+		{ name = "Test Keep", state = 2 },
+		{ name = Secret(), state = 1 },
+	}
+	Fire("TAXIMAP_OPENED")
+	eq(world.taxi.readMapID, 1415, "the world map's map ID")
+	-- WriteSavedVariables raises on a secret stub, so this also checks that
+	-- none reached either table.
+	local first = Logout().state.flight_points.continents
+	eq(#first, 1, "continents")
+	eq(first[1].instance_id, 0, "instance_id")
+	eq(first[1].continent, "Test Continent", "continent")
+	eq(table.concat(first[1].known, ","), "Test Harbor,Test Village", "current and reachable only")
+	local saved = WriteSavedVariables() .. WriteSavedVariables("OgreMCPCharDB")
+
+	-- The next session loads the cache back. A taxi map on another
+	-- continent, then one more known node on the first.
+	Start(Era(function(w)
+		w.maps[1440] = { name = "Test Shore", mapType = 3, parentMapID = 1414 }
+		w.maps[1414] = { name = "Other Continent", mapType = 2, parentMapID = 0 }
+		w.loc.mapID, w.instanceID = 1440, 1
+		w.taxi.worldMapID = nil
+	end), saved)
+	EnterWorld()
+	world.taxi.nodes = { { name = "Test Port", state = 0 } }
+	Fire("TAXIMAP_OPENED")
+	eq(world.taxi.readMapID, 1440, "the player's map when the world map has none")
+	Advance(10)
+	world.loc.mapID, world.instanceID = 1429, 0
+	world.taxi.nodes = { { name = "Test Keep", state = 0 }, { name = "Test Village", state = 1 } }
+	Fire("TAXIMAP_OPENED")
+	local continents = Logout().state.flight_points.continents
+	eq(#continents, 2, "continents")
+	eq(table.concat(continents[1].known, ","), "Test Harbor,Test Keep,Test Village", "the union, sorted")
+	eq(continents[1].updated_at, GetServerTime(), "updated at the last read")
+	eq(continents[2].continent, "Other Continent", "the other continent")
+	eq(table.concat(continents[2].known, ","), "Test Port", "its known node")
+	eq(continents[2].updated_at, GetServerTime() - 10, "untouched by the later read")
+end)
 
 test("location takes the zone above a micro map, and the zone text on a continent map", function()
 	local ns = Start(function(w)

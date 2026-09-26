@@ -336,6 +336,31 @@ export const recentPathEntrySchema = z.object({
 });
 
 /**
+ * The flight points the character knows on one continent (§6.3, RED-371):
+ * the names of the nodes that its taxi maps showed as current or reachable,
+ * merged over every read there (kits/wow/adapter/FlightPoints.lua).
+ */
+export const flightPointsContinentSchema = z.object({
+  /** The fourth return of `UnitPosition("player")` at the read. The adapter's key for the continent. */
+  instance_id: z.number().int().nonnegative(),
+  /** The name of the continent map above the player's map (`C_Map.GetMapInfo`). */
+  continent: nilable(z.string().min(1)),
+  /** Node names, sorted. */
+  known: list(z.string().min(1)),
+  /** `GetServerTime()` at the latest read on the continent, in Unix seconds. */
+  updated_at: nilable(z.number().int().nonnegative()),
+});
+
+export const flightPointsSchema = z.object({
+  /**
+   * One entry per continent where the character opened a taxi map, by
+   * instance ID. Empty until the first. A continent missing from the list has
+   * not been observed.
+   */
+  continents: list(flightPointsContinentSchema),
+});
+
+/**
  * The sections (§6.3, §10.4). The adapter leaves out a section whose collector
  * failed with no earlier value to keep, so every section is `nilable`.
  */
@@ -350,6 +375,8 @@ export const stateSchema = z.object({
    * (RED-290), so the list has no bound here beyond the reader's value limit.
    */
   recent_path: nilable(list(recentPathEntrySchema)),
+  /** Absent from the files of adapters before 0.3.0. */
+  flight_points: nilable(flightPointsSchema),
 });
 
 /** OgreMCPDB. `schema` is checked before the rest (index.ts). */

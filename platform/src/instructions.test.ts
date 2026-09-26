@@ -9,7 +9,7 @@ import { PLATFORM_TOOLS } from "./tools.js";
  * The repo's own budget, not a spec value: clients truncate long text, and
  * it goes out with every request.
  */
-const MAX_TEXT_CHARS = 1400;
+const MAX_TEXT_CHARS = 1700;
 
 /** Key phrases of the §10.5 rules each platform tool's description carries. The kit tests check the kit tools'. */
 const DESCRIPTION_RULES: { [name: string]: string[] } = {

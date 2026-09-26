@@ -12,11 +12,13 @@
 --   character       guid, name, realm
 --   captured_at     GetServerTime() when the table was written
 --   state           the sections: character, location, quests, inventory,
---                   skills, recent_path
+--                   skills, recent_path, flight_points
 --
 -- Write replaces the whole table. Only recent_path is read back
--- (RecentPath.lua). Every other part is rebuilt from live APIs, because WoW
--- Forever does not load SavedVariables after a reload (§6.3.1).
+-- (RecentPath.lua), and flight_points is copied from the per-character table
+-- OgreMCPCharDB (FlightPoints.lua). Every other part is rebuilt from live
+-- APIs, because WoW Forever does not load SavedVariables after a reload
+-- (§6.3.1).
 
 local addonName, ns = ...
 

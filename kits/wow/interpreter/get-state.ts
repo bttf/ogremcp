@@ -15,15 +15,24 @@ import { buildSections, type BuiltSections, type Section, SECTIONS } from "./sec
 export const EXPERIMENTAL_FLAVORS: readonly string[] = ["forever"];
 
 /**
+ * The flight-point rule of both WoW tools' descriptions (§10.4, owner
+ * decision 2026-09-26, RED-371). It is not in the server instructions.
+ */
+export const FLIGHT_POINTS_RULE =
+  "Before suggesting a flight, check `flight_points`. If the destination's flight point isn't known, route by hearth or on foot and suggest picking it up on arrival. If its `status` is `unknown` or the destination's continent isn't listed, say so and hedge.";
+
+/**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the §10.5 behavior rules that act on game state
- * (`stateRules`). Game text never goes here, only into results (§10.5).
+ * the game and carries the flight-point rule and the §10.5 behavior rules
+ * that act on game state (`stateRules`). Game text never goes here, only into
+ * results (§10.5).
  */
 export function describeGetState(experimental: readonly string[]): string {
   return [
     "World of Warcraft: the player's game state, from the latest snapshot their game saved, by default of whatever they last played.",
     "`flavor`, `character`, and `sections` narrow it.",
     "The result carries `snapshot_at` (when the game captured the state; /transmit in game saves a new snapshot), `flavor`, the realm's `rules`, and `character`.",
+    FLIGHT_POINTS_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }
@@ -58,11 +67,21 @@ const NO_SNAPSHOT_IN_FLAVOR_MESSAGE =
 
 /**
  * WoW Forever does not read SavedVariables back after a reload, so its
- * recent_path starts at the reload (§6.3.1). Drop the note once a Forever
- * build fixes it.
+ * recent_path starts at the reload, and its flight_points holds only the taxi
+ * maps opened since (§6.3.1). Drop the notes once a Forever build fixes it.
  */
 export const FOREVER_PATH_NOTE =
   "On WoW Forever, recent_path covers only the time since the last reload: the Forever client does not read its saved data back after a reload.";
+export const FOREVER_FLIGHT_POINTS_NOTE =
+  "On WoW Forever, flight_points covers only the flight masters' maps opened since the last reload, and is unknown until one opens: the Forever client does not read its saved data back after a reload.";
+
+/** The notes of a Forever snapshot with `sections` (§6.3.1). */
+export function foreverNotes(sections: readonly Section[]): string[] {
+  return [
+    ...(sections.includes("recent_path") ? [FOREVER_PATH_NOTE] : []),
+    ...(sections.includes("flight_points") ? [FOREVER_FLIGHT_POINTS_NOTE] : []),
+  ];
+}
 
 /** The arguments `wow_get_state` and `wow_get_history` share. */
 export interface Input {
@@ -160,7 +179,7 @@ export function envelope({ snapshotAt, flavor, rules, character }: Snapshot<WowS
 /** The envelope, the notes, and the sections, trimmed to at most `maxBytes` of JSON (`trim`). */
 function stateResult(snapshot: Snapshot<WowState>, sections: readonly Section[], maxBytes: number): JsonObject {
   const { flavor } = snapshot;
-  const notes = flavor === "forever" && sections.includes("recent_path") ? [FOREVER_PATH_NOTE] : [];
+  const notes = flavor === "forever" ? foreverNotes(sections) : [];
   const result = (state: JsonObject, trimNote: string | null): JsonObject => {
     const all = trimNote === null ? notes : [...notes, trimNote];
     return { ...envelope(snapshot), ...(all.length > 0 && { notes: all }), state };
