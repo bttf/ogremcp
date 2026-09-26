@@ -38,8 +38,8 @@ type Auth interface {
 
 // Controller runs the bridge for the tray app and reports through Model. Run
 // does what the dev commands `bridge run` and `bridge adapter -watch` do
-// together. The menu calls Login, ChooseFolder, ChangeServer, and
-// ToggleAutostart.
+// together, and RunUpdates updates the bridge itself. The menu calls Login,
+// ChooseFolder, ChangeServer, and ToggleAutostart.
 type Controller struct {
 	// Base is the server's base URL, Auth its login, and Version the
 	// bridge's. Run replaces Base and Auth when the server changes
@@ -74,6 +74,11 @@ type Controller struct {
 	// SaveRetry is how often a login the keychain did not save is saved
 	// again. Zero means DefaultSaveRetry.
 	SaveRetry time.Duration
+	// Updater updates the bridge itself (RunUpdates). It is nil in a dev or
+	// snapshot build, which never updates itself (§7).
+	Updater Updater
+	// Quit ends the tray app. RunUpdates calls it once the new version runs.
+	Quit func()
 
 	// settingsMu guards Settings and its saves.
 	settingsMu sync.Mutex
