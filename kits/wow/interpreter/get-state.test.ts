@@ -9,7 +9,14 @@ import { fileURLToPath } from "node:url";
 import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogremcp/sdk";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json" with { type: "json" };
-import { describeGetState, EXPERIMENTAL_FLAVORS, FOREVER_PATH_NOTE, NO_SNAPSHOT_MESSAGE } from "./get-state.js";
+import {
+  describeGetState,
+  EXPERIMENTAL_FLAVORS,
+  FLIGHT_POINTS_RULE,
+  FOREVER_FLIGHT_POINTS_NOTE,
+  FOREVER_PATH_NOTE,
+  NO_SNAPSHOT_MESSAGE,
+} from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
 
@@ -71,6 +78,9 @@ it("is described as §10.1 and §10.5 ask", () => {
   expect(tool?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
   expect(tool?.inputSchema.type).toBe("object");
   expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(["sections", "flavor", "character"]);
+  expect(tool?.inputSchema.properties?.["sections"]?.["items"]).toEqual({ type: "string", enum: [...SECTIONS] });
+  expect(SECTIONS).toContain("flight_points");
+  expect(tool?.description).toContain(FLIGHT_POINTS_RULE);
 });
 
 it("by default returns every section of the latest snapshot of any flavor", async () => {
@@ -97,7 +107,19 @@ it("by default returns every section of the latest snapshot of any flavor", asyn
     },
     skills: { training_due: [] },
     recent_path: [{ captured_at: expect.any(String), zone: "Test Forest", x_percent: 43.1, moved: null }],
+    flight_points: { status: "observed", continents: [{ continent: "Test Continent", known: ["Test Village"], updated_at: expect.any(String) }] },
   });
+});
+
+it("reports flight_points as unknown when no taxi map was opened, or the snapshot has no such section", async () => {
+  const stored = structuredClone(snapshots.era);
+  // A snapshot stored before the section existed.
+  delete (stored.state as Partial<WowState>).flight_points;
+
+  for (const snapshot of [snapshots.forever, stored]) {
+    const data = content((await call({ sections: ["flight_points"] }, snapshot)).result);
+    expect(data.state).toEqual({ flight_points: { status: "unknown" } });
+  }
 });
 
 it("returns only the named sections", async () => {
@@ -115,13 +137,13 @@ it("passes flavor and character to ToolContext", async () => {
 });
 
 describe("on a forever snapshot", () => {
-  it("notes that recent_path covers only the time since the last reload", async () => {
+  it("notes that recent_path and flight_points cover only the time since the last reload", async () => {
     const data = content((await call({}, snapshots.forever)).result);
 
-    expect(data).toMatchObject({ flavor: "forever", notes: [FOREVER_PATH_NOTE] });
+    expect(data).toMatchObject({ flavor: "forever", notes: [FOREVER_PATH_NOTE, FOREVER_FLIGHT_POINTS_NOTE] });
   });
 
-  it("leaves the note out without recent_path", async () => {
+  it("leaves the notes out without recent_path and flight_points", async () => {
     const data = content((await call({ sections: ["character"] }, snapshots.forever)).result);
 
     expect(data).not.toHaveProperty("notes");

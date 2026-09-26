@@ -9,7 +9,7 @@ Policy. Source:
 
 The addon is the adapter of the WoW kit, in `kits/wow/adapter/`. Players
 install it as the folder `OgreMCP` (`OgreMCP.toc`). This doc was checked
-against adapter version 0.2.0.
+against adapter version 0.3.0.
 
 The policy has 8 rules.
 
@@ -65,7 +65,8 @@ The policy has 8 rules.
 ## 3. No negative impact on realms or other players
 
 The addon reads the player's own state through client APIs and writes it to
-its SavedVariables file. It sends no message to the realm or to other
+two SavedVariables files: the account-wide `OgreMCPDB` and the
+per-character `OgreMCPCharDB`. It sends no message to the realm or to other
 players.
 
 - No `SendAddonMessage`, no `SendChatMessage`, no channel joins. Chat output
@@ -89,6 +90,10 @@ players.
 - SavedVariables hold the current character's state only. Each write replaces
   the whole table (`Storage.lua`), so the file does not grow with play time.
   `recent_path` keeps at most 20 entries (`RecentPath.lua`).
+- The per-character table `OgreMCPCharDB` holds the names of the flight
+  points the character knows, per continent (`FlightPoints.lua`). It grows
+  only with the flight points the game has. The addon reads the taxi nodes
+  only when the player opens a flight master's map (`TAXIMAP_OPENED`).
 
 ## 4. No advertisements
 
@@ -105,7 +110,7 @@ The addon asks for no donation, tip, or payment, in chat or in any frame.
 
 The addon ships no image and no sound: its folder holds Lua files and a TOC.
 Its only text is its status lines. Game text it stores (quest, item, zone,
-and character names) comes from the client.
+continent, flight point, and character names) comes from the client.
 
 ## 7. Terms of Use and EULA
 

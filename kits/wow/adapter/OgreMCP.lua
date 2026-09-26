@@ -11,6 +11,8 @@
 --   Items.lua         item details and the inventory section
 --   RecentPath.lua    the recent_path section, the one section carried across
 --                     reloads
+--   FlightPoints.lua  the flight_points section, read when the taxi map opens
+--                     and kept in the per-character table OgreMCPCharDB
 --   Storage.lua       the client facts, the secret-value guard, and the
 --                     OgreMCPDB write
 --   Collect.lua       collection, its scheduling, and the write at PLAYER_LOGOUT

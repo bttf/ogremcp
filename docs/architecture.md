@@ -459,8 +459,8 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 | Tool | Purpose |
 |---|---|
-| `wow_get_state(sections?, flavor?, character?)` | Latest snapshot. By default, whatever the player last played. `flavor` returns the latest for that flavor; `character` (name or `Name-Realm`) narrows to a specific alt. `sections`: `character`, `location`, `quests`, `inventory`, `skills`, `recent_path`, `flight_points` (default: all). For Forever snapshots, notes that `recent_path` covers only the time since the last reload (§6.3.1). |
-| `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). `sections` defaults to `character` and `location`, because all sections for 20 snapshots would not fit the result cap. **Paid** (§14). |
+| `wow_get_state(sections?, flavor?, character?)` | Latest snapshot. By default, whatever the player last played. `flavor` returns the latest for that flavor; `character` (name or `Name-Realm`) narrows to a specific alt. `sections`: `character`, `location`, `quests`, `inventory`, `skills`, `recent_path`, `flight_points` (default: all). For Forever snapshots, notes that `recent_path` and `flight_points` cover only the time since the last reload (§6.3.1). |
+| `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). `sections` defaults to `character` and `location`, because all sections for 20 snapshots would not fit the result cap. With a Forever snapshot, notes the same about `recent_path` and `flight_points`. **Paid** (§14). |
 
 - **Flight points:** both tool descriptions tell the agent to check `flight_points` before suggesting a flight. If the destination isn't known, it routes by hearth or on foot and suggests picking up the flight point on arrival. If the section is `unknown`, or the destination's continent isn't in it, it says so and hedges. This rule is in the WoW tool descriptions only, not the server `instructions`. Owner decision, 2026-09-26 (RED-371).
 

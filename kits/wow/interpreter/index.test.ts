@@ -72,6 +72,11 @@ describe.each(["era", "forever"] as const)("the %s stub world's file", (client) 
     expect(state.inventory?.equipped[1]?.stats).toEqual({ dps: 5.3, min_damage: 7, max_damage: 11, speed: 1.7 });
     expect(state.skills?.lines.map((line) => line.category)).toEqual(["profession", "weapon", "defense"]);
     expect(Array.isArray(state.recent_path)).toBe(true);
+    // The era run opened a taxi map; the forever run did not.
+    expect(state.flight_points).toEqual({
+      continents:
+        client === "era" ? [{ instance_id: 0, continent: "Test Continent", known: ["Test Village"], updated_at: expect.any(Number) }] : [],
+    });
     // Snapshots store the state as jsonb (§11).
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
   });
@@ -86,7 +91,11 @@ it("parses the Classic Era golden fixture (§6.4)", () => {
     capturedAt: expect.any(Date),
     adapterSchema: 1,
   });
-  for (const section of SECTIONS) expect(parsed.state[section], section).not.toBeNull();
+  for (const section of SECTIONS) {
+    if (section !== "flight_points") expect(parsed.state[section], section).not.toBeNull();
+  }
+  // Addon 0.1.1 wrote no flight_points, so the section parses as null.
+  expect(parsed.state.flight_points).toBeNull();
   expect(parsed.state.recent_path).toContainEqual(expect.objectContaining({ zone: "Redridge Mountains" }));
 });
 
