@@ -1,10 +1,10 @@
 # Bridge releases (§5 Releases, §7, docs/releases.md). Pushing a bridge-v tag
 # publishes: the release job builds the bridge with GoReleaser OSS, signs and
-# notarizes the macOS app, signs checksums.txt for self-update (§7), and
-# publishes the Windows binary, the zipped .app, checksums.txt, and its
-# signature to the repo's Releases page as "Bridge X.Y.Z". Then the
-# windows-installer job builds the Windows installer from the published binary
-# and adds it to the same release.
+# notarizes the macOS app and its disk image, signs checksums.txt for
+# self-update (§7), and publishes the Windows binary, the zipped .app, the
+# disk image, checksums.txt, and its signature to the repo's Releases page as
+# "Bridge X.Y.Z". Then the windows-installer job builds the Windows installer
+# from the published binary and adds it to the same release.
 #
 # A manual run (workflow_dispatch) runs only the dry-run jobs: a snapshot build,
 # as `make -C bridge dist` does, with an ad hoc signature, no checksum
@@ -30,7 +30,9 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     # The macOS build uses cgo, and signing uses Apple's tools.
     runs-on: macos-latest
-    timeout-minutes: 60
+    # Two notarizations, the app's and the disk image's, may each wait up to
+    # 30 minutes (scripts/macos-sign.sh).
+    timeout-minutes: 90
     # Holds the signing secrets. The owner limits it to bridge-v tags
     # (docs/releases.md, "Signing secrets").
     environment: release
@@ -154,10 +156,11 @@ jobs:
 
       # docs/releases.md, "A tag build". --skip=validate also turns off
       # GoReleaser's checks that the tree is clean and that HEAD is the tagged
-      # commit, so this step runs both. The universal_binaries post hook signs
-      # and notarizes the app before the checksums are written, and
-      # scripts/sign signs the checksums before anything is uploaded
-      # (.goreleaser.yaml, scripts/macos-app.sh).
+      # commit, so this step runs both. The universal_binaries post hooks sign
+      # and notarize the app and then the disk image before the checksums are
+      # written, and scripts/sign signs the checksums before anything is
+      # uploaded (.goreleaser.yaml, scripts/macos-app.sh,
+      # scripts/macos-dmg.sh).
       - name: Build, sign, and publish
         working-directory: bridge
         env:
@@ -287,6 +290,7 @@ jobs:
         run: |
           grep -q '_windows_amd64\.exe$' checksums.txt
           grep -q '_darwin_all\.app\.zip$' checksums.txt
+          grep -q '_darwin_all\.dmg$' checksums.txt
           echo "A release publishes checksums.txt, its signature checksums.txt.sig, and the files it lists:"
           cat checksums.txt
 
