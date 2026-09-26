@@ -463,6 +463,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | `wow_get_history(since, sections?, flavor?, character?, limit?)` | Past snapshots, newest first. `since` is an ISO-8601 timestamp; `limit` defaults to 20 (proposed). `sections` defaults to `character` and `location`, because all sections for 20 snapshots would not fit the result cap. With a Forever snapshot, notes the same about `recent_path` and `flight_points`. **Paid** (§14). |
 
 - **Flight points:** both tool descriptions tell the agent to check `flight_points` before suggesting a flight. If the destination isn't known, it routes by hearth or on foot and suggests picking up the flight point on arrival. If the section is `unknown`, or the destination's continent isn't in it, it says so and hedges. This rule is in the WoW tool descriptions only, not the server `instructions`. Owner decision, 2026-09-26 (RED-371).
+- **Quest turn-ins:** both tool descriptions tell the agent, when routing, to turn in every completed quest whose turn-in NPC is on the way or at a stop, before any other step there, because turn-ins often unlock the next quest. The state doesn't include turn-in locations, so the agent finds them with a web search. This rule is in the WoW tool descriptions only, not the server `instructions`. Owner decision, 2026-09-26 (RED-372).
 
 ### 10.5 Responses and behavior
 
@@ -472,7 +473,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Annotations:** `readOnlyHint: true` on every tool except `report_issue`. Clients use these to decide when to ask the user for confirmation.
 - **User-facing conditions** (cap reached, paid-only, no snapshot yet) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which a client can keep listing until a new chat (§10.2): the message says the game is turned off on the Games page. An unknown tool name is a protocol error. The `isError` rule applies to tools that need a snapshot. `list_games` is the orientation call, so it answers "no snapshot yet" and "no game enabled" with a normal result that carries the setup steps.
 - **Tool descriptions name the game explicitly.** Together with the prefix and `list_games`, that's how the agent picks the right tool.
-- **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules. The WoW tools' flight-point rule is in §10.4:
+- **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules. The WoW tools' flight-point and quest turn-in rules are in §10.4:
   - Friend-style, spoiler-free guidance ("head north, you'll know you're close when you see water"), not coordinates and kill counts.
   - Call `list_games` when unsure what the user is playing.
   - For `experimental` flavors, caveat answers: sources may be thin or out of date.
