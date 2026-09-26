@@ -1,7 +1,7 @@
 # Releases
 
 Spec: §5 (Releases), §7. Decided in RED-287 (P0.7). RED-323 (P5.7),
-RED-344 (P9.3), and RED-342 build on this.
+RED-344 (P9.3), RED-343 (P9, self-update), and RED-342 build on this.
 
 ## Cutting a release
 
@@ -12,7 +12,7 @@ go to the repo's one Releases page (§5).
 
 ### Bridge
 
-1. Check that the six signing secrets are set in the `release` environment
+1. Check that the seven signing secrets are set in the `release` environment
    ("Signing secrets" below). Without them the job fails at its first step,
    and nothing is published.
 2. Optionally, run the dry run on `main` (below).
@@ -33,8 +33,9 @@ The hook then zips the app and checks the app in the zip with Gatekeeper.
 A second post hook, `bridge/scripts/macos-dmg.sh`, checks that the app is
 notarized, puts it in a disk image, and has `macos-sign.sh` sign, notarize,
 and staple the image. It then checks the app in the image with Gatekeeper.
-Only after that does GoReleaser write `checksums.txt` and publish. The
-release, named "Bridge 1.2.3", holds:
+Only after that does GoReleaser write `checksums.txt`, sign it with
+`bridge/scripts/sign` (the `signs` entry), and publish. The release, named
+"Bridge 1.2.3", holds:
 
 - `ogremcp-bridge_1.2.3_windows_amd64.exe`, unsigned (§7, D6)
 - `ogremcp-bridge_1.2.3_darwin_all.dmg`, the macOS download: the app in a
@@ -42,12 +43,16 @@ release, named "Bridge 1.2.3", holds:
 - `ogremcp-bridge_1.2.3_darwin_all.app.zip`, signed and notarized, the app
   that self-update installs (§7)
 - `checksums.txt`
+- `checksums.txt.sig`, the detached Ed25519 signature of `checksums.txt`,
+  as base64 and a newline
 
-Every GoReleaser run that is not a snapshot signs the app and the disk image
-or fails: both hooks pass `developer-id` unless `.IsSnapshot` is set
-(`bridge/.goreleaser.yaml`), and `macos-sign.sh` has no unsigned fallback.
-Snapshots (`make -C bridge dist`, the dev build, the dry run) get an ad hoc
-signature only, and their disk image is not signed.
+Every GoReleaser run that is not a snapshot signs the app, the disk image,
+and the checksums or fails: both hooks pass `developer-id` unless
+`.IsSnapshot` is set (`bridge/.goreleaser.yaml`), `macos-sign.sh` has no
+unsigned fallback, and `scripts/sign` fails without its key. Snapshots
+(`make -C bridge dist`, the dev build, the dry run) get an ad hoc signature
+only, their disk image is not signed, and they run with `--skip=sign`, so
+they have no `checksums.txt.sig`.
 
 The version is the tag without `bridge-v`, such as `1.2.3` or `1.2.3-rc.1`.
 The job fails on a tag with any other form. A version with a `-`, such as
@@ -108,9 +113,10 @@ not on PRs, to save macOS minutes. Start it for a branch with
 
 ### Signing secrets
 
-D6: macOS builds are Developer ID signed and notarized. The bridge release
-job reads six secrets from a GitHub environment named `release`. Only that
-job uses the environment. The dry run does not.
+D6: macOS builds are Developer ID signed and notarized. §7: each release's
+`checksums.txt` is signed for self-update. The bridge release job reads
+seven secrets from a GitHub environment named `release`. Only that job uses
+the environment. The dry run does not.
 
 The owner creates the environment once and limits it to `bridge-v*` tags, so
 no other branch or tag can deploy to it or read its secrets: Settings,
@@ -138,6 +144,7 @@ reads the value from standard input.
 | `APPLE_API_KEY_ID` | The App Store Connect API key's ID. |
 | `APPLE_API_ISSUER_ID` | The App Store Connect API issuer ID (a UUID). |
 | `APPLE_API_KEY_P8_BASE64` | The API key's `.p8` file, base64-encoded. |
+| `BRIDGE_UPDATE_SIGNING_KEY` | The Ed25519 private key that signs `checksums.txt`, as PKCS#8 PEM. |
 
 To obtain them (this needs the Apple Developer Program; creating the
 certificate needs the Account Holder role):
@@ -167,7 +174,19 @@ certificate needs the Account Holder role):
 Keep the `.p12` and `.p8` files outside the repo, and delete them once they
 are stored somewhere safe. `.gitignore` lists both extensions.
 
-The job writes the certificate and the key under `RUNNER_TEMP` and deletes
+- **Update signing key.** `BRIDGE_UPDATE_SIGNING_KEY` was set on 2026-09-25,
+  with the owner's approval. The owner keeps the only other copy, in their
+  password manager. Its public half is not secret: `PublicKey` in
+  `bridge/internal/selfupdate/selfupdate.go`, raw and base64. Every bridge
+  verifies `checksums.txt.sig` with that key before it updates itself, and
+  refuses a release whose signature does not verify.
+- **Rotating it.** Generate a new key pair, put the new public key in
+  `PublicKey`, and release that bridge, still signed with the old key. Then
+  set the new private key as the secret. A bridge that has not updated to
+  that release by then cannot verify later releases, and needs a manual
+  install.
+
+The job writes the certificate and the keys under `RUNNER_TEMP` and deletes
 them and the keychain at the end, whether it passes or fails. It prints no
 secret. Its actions are pinned by commit SHA, and it builds without the Go
 cache.
@@ -212,7 +231,7 @@ large version:
 ```sh
 BRIDGE_VERSION=$(git describe --tags --match 'bridge-v*' --dirty 2>/dev/null | sed 's/^bridge-v//' | grep . \
   || echo "0.0.0-$(git describe --always --dirty --exclude '*')") \
-  goreleaser release --snapshot --clean
+  goreleaser release --snapshot --clean --skip=sign
 ```
 
 The config lives in `bridge/.goreleaser.yaml` and runs from `bridge/`. The core
@@ -336,12 +355,6 @@ OSS binary v2.18.2.
 
 Left for later issues:
 
-- The detached signature (RED-343) is a `signs` entry over `checksums.txt`.
-  It runs any command, so the §7 ed25519 signer fits. Key material comes from
-  CI secrets.
-- Self-update (RED-343) lists releases and keeps `bridge-v` tags (§7).
-  GitHub's `releases/latest` endpoint is not a safe source for it: it returns
-  a release whatever its tag.
 - The Windows installer (RED-273) needs Windows, and OSS has no split and
   merge. If it is built in a Windows job, run GoReleaser with
   `--skip=publish`, build the installer, then write checksums, sign, and run
@@ -351,6 +364,35 @@ Left for later issues:
   build, which runs before the checksums are written. `binary_signs` does not
   fit: it expects a detached signature file (`${artifact}.sig`), an in-place
   signer writes none, and the upload of that missing file then fails.
+
+## How P9 (RED-343) uses it
+
+- The detached signature is a `signs` entry over `checksums.txt`. It runs
+  `go run ./scripts/sign`, a Go program in `bridge/` that is not part of the
+  bridge binary. It reads the key from the file `BRIDGE_UPDATE_SIGNING_KEY_PATH`
+  names, which the release job writes from the secret. The runner's
+  `/usr/bin/openssl` is LibreSSL, so it is not used for Ed25519.
+- The release build sets `main.release` to `true` through ldflags
+  (`{{ not .IsSnapshot }}`). Only such a build updates itself. A dev or
+  snapshot build never does, even when its version is a release's.
+- The tray app (`bridge/internal/selfupdate`) lists the newest 100 releases
+  through the GitHub API at start and every `update_interval` (default 6
+  hours, in the settings file). GitHub's `releases/latest` endpoint is not
+  used: it returns a release whatever its tag. The bridge keeps published,
+  stable `bridge-v` releases (no drafts, no pre-releases) and installs the
+  newest one only when it is newer than itself.
+- It verifies `checksums.txt.sig` with the embedded public key, then the
+  asset's sha256 against `checksums.txt`, then installs without asking and
+  starts the new version. Windows: the `.exe` is swapped by rename. macOS:
+  the whole `.app` is replaced, beside the running one; when that folder is
+  read-only, as in a mounted disk image, the tray says the update is skipped.
+- The bridge downloads the assets by name: `checksums.txt`,
+  `checksums.txt.sig`, `ogremcp-bridge_<v>_windows_amd64.exe`, and
+  `ogremcp-bridge_<v>_darwin_all.app.zip`. Renaming any of them stops
+  self-update for every bridge released before the change.
+- The `.app` bundle in the zip must contain no symbolic links, such as an
+  embedded framework's `Versions/Current`. The bridge rejects a zip with one,
+  so every bridge released before the change would reject every later release.
 
 ## macOS installer
 
@@ -375,18 +417,23 @@ one folder has more than one path. When the user accepts, the app:
    needed. The copy is staged in a hidden folder beside it and renamed into
    place, replacing the copy there. The copy has no quarantine flag, so macOS
    does not run the installed app from a temporary copy (App Translocation).
-2. removes the app the user opened. On the read-only disk image, or in a
-   folder the user may not change, that app stays. The bridge never removes
-   a path that is the same file as `~/Applications/Ogre MCP.app`.
-3. points start at login at the new place, when it is on.
-4. starts the app from `~/Applications` once it has quit, and quits.
+2. points start at login at the new place, when it is on.
+3. starts the app from `~/Applications` as a new instance, the way
+   self-update does (`open -n`), with `OGREMCP_WAIT_FOR_LOCK` set, so that
+   it waits for this one to release the single-instance lock. When the new
+   app does not start, this one keeps running from where it is and removes
+   nothing.
+4. removes the app the user opened, and quits. On the read-only disk image,
+   or in a folder the user may not change, that app stays. The bridge never
+   removes a path that is the same file as `~/Applications/Ogre MCP.app`.
 
 When the user declines, the app keeps running from where it is and asks again
 at the next start. A binary that is not in an app bundle is never moved.
 
 When the copy in `~/Applications` has a newer `CFBundleShortVersionString`
 than the running app, nothing is replaced. The app asks whether to open that
-copy instead; if the user accepts, it starts that copy and quits.
+copy instead; if the user accepts, it starts that copy the same way and
+quits.
 
 macOS runs a quarantined app that was not moved in Finder, such as one opened
 from Downloads, from a read-only copy at a random path. To find the app the

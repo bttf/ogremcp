@@ -205,8 +205,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Delete my data and Delete acco
       [user.id, uploads[0]?.id],
     );
     await pool.query(
-      `insert into events (user_id, occurred_at, kind, latency_ms, agent_client, tool, query)
-       values ($1, now(), 'tool_call', 5, $2, 'search_game_info', 'where is hogger')`,
+      `insert into events (user_id, occurred_at, kind, latency_ms, agent_client, tool)
+       values ($1, now(), 'tool_call', 5, $2, 'list_games')`,
       [user.id, AGENT_CLIENT_ID],
     );
     await pool.query(

@@ -9,9 +9,7 @@ import { parseUpload, writeSnapshot } from "./ingest.js";
 import { KIT_SOURCES, type Kit, type KitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { migrate } from "./migrations.js";
-import { NOTE_MAX_CHARS, overLimitMessage } from "./report-issue.js";
-import type { ScopedSearch } from "./search.js";
-import { NOT_ENABLED_MESSAGE } from "./search-game-info.js";
+import { NOT_ENABLED_MESSAGE, NOTE_MAX_CHARS, overLimitMessage } from "./report-issue.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
 
@@ -35,9 +33,6 @@ const SAVED_VARIABLES = `OgreMCPDB = {
   ["state"] = { ["location"] = { ["zone"] = "Elwynn Forest" } },
 }
 `;
-
-/** A `ScopedSearch` that finds nothing. */
-const search: ScopedSearch = async () => [];
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => {
   const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
@@ -105,7 +100,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => 
   }
 
   it("records the note with the current visit's calls and the snapshot the agent read, and no other user's calls", async () => {
-    const tools = createToolRegistry({ pool, kits: KITS, search, events });
+    const tools = createToolRegistry({ pool, kits: KITS, events });
     const user = await player(true);
     const other = await player(true);
     // A call of an earlier visit: more than 30 minutes before the next one.
@@ -114,8 +109,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => 
       CLIENT_ID,
     ]);
     await tools.call(user.caller, "wow_get_state", { sections: ["location"] });
-    await tools.call(user.caller, "search_game_info", { game: "wow", query: "Hogger" });
-    await tools.call(other.caller, "search_game_info", { game: "wow", query: "someone else's query" });
+    await tools.call(user.caller, "list_games", {});
+    await tools.call(other.caller, "wow_get_state", { sections: ["quests"] });
     await recorded(user.id, 3);
     await recorded(other.id, 1);
 
@@ -133,11 +128,11 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("report_issue (§16.2)", () => 
       snapshot_uuid: snapshots[0]?.uuid,
       snapshot_at: CAPTURED_AT,
       calls: [
-        { tool: "wow_get_state", sections: ["location"], flavor: null, query: null, error: null, occurred_at: expect.any(String) },
-        { tool: "search_game_info", sections: null, flavor: null, query: "hogger", error: null, occurred_at: expect.any(String) },
+        { tool: "wow_get_state", sections: ["location"], flavor: null, error: null, occurred_at: expect.any(String) },
+        { tool: "list_games", sections: null, flavor: null, error: null, occurred_at: expect.any(String) },
       ],
     });
-    expect(JSON.stringify(issue)).not.toContain("someone else");
+    expect(JSON.stringify(issue)).not.toContain("quests");
   });
 
   it("refuses a game that is not enabled, and an empty, oversized, or NUL note", async () => {

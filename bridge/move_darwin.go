@@ -22,11 +22,12 @@ import (
 // anywhere else, such as the disk image or Downloads (§7 Installer). It asks
 // at every start from outside ~/Applications, because the bridge updates
 // itself only where it may replace the app. When the user accepts, it copies
-// the app there, replacing the copy there, removes the app the user opened
-// when it can, points start at login at the new place, and starts the app
-// from there. When the copy there is newer, it offers to open that copy
+// the app there, replacing the copy there, points start at login at the new
+// place, starts the app from there, and then removes the app the user opened
+// when it can. When the copy there is newer, it offers to open that copy
 // instead. It returns true when the app starts from ~/Applications, and the
-// caller quits.
+// caller quits. It is called with the lock held, and the app it starts waits
+// for the lock (envWaitForLock).
 // A binary that is not in an app bundle, such as a dev build run from a
 // terminal, is never moved.
 func offerMove(logger *slog.Logger, stderrPath string) bool {
@@ -83,12 +84,6 @@ func offerMove(logger *slog.Logger, stderrPath string) bool {
 		return false
 	}
 	logger.Info("the app is in ~/Applications", "app", installed, "from", where)
-	// The app on a disk image, which is read-only, stays.
-	if original != "" && !readOnly(original) {
-		if err := macapp.Remove(original, installed); err != nil {
-			logger.Info("left the app where it was opened", "app", original, "reason", err.Error())
-		}
-	}
 
 	// The new process rewrites a login item that points elsewhere, too
 	// (Controller.Run), but only once it has started.
@@ -105,9 +100,18 @@ func offerMove(logger *slog.Logger, stderrPath string) bool {
 		}
 	}
 
-	if err := macapp.Relaunch(installed); err != nil {
+	// The app the user opened is removed only once the moved app has
+	// started, so that this one can keep running when it does not.
+	if err := macapp.Relaunch(installed, envWaitForLock+"=1"); err != nil {
 		logger.Error("could not start the moved app", "app", installed, "error", err.Error())
-		alert("Ogre MCP moved to " + installed + ". Open it from there.")
+		alert("Ogre MCP is in ~/Applications now, but could not start from there: " + err.Error() + "\n\nIt keeps running from where it is.")
+		return false
+	}
+	// The app on a disk image, which is read-only, stays.
+	if original != "" && !readOnly(original) {
+		if err := macapp.Remove(original, installed); err != nil {
+			logger.Info("left the app where it was opened", "app", original, "reason", err.Error())
+		}
 	}
 	return true
 }
@@ -132,7 +136,7 @@ func offerInstalled(logger *slog.Logger, installed, have, running string) bool {
 		logger.Info("the app runs from where it is; ~/Applications holds a newer one", "installed", have, "running", running)
 		return false
 	}
-	if err := macapp.Relaunch(installed); err != nil {
+	if err := macapp.Relaunch(installed, envWaitForLock+"=1"); err != nil {
 		logger.Error("could not start the app in ~/Applications", "app", installed, "error", err.Error())
 		return false
 	}

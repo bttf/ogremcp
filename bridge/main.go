@@ -37,6 +37,12 @@
 //	    reset       remove the server from the settings file, so the bridge
 //	                uses the hosted service
 //
+// The tray app of a release build updates itself (package selfupdate, §7). It
+// checks the bridge-v releases at start and every update interval, installs a
+// newer one without asking, starts it, and quits. The new version waits for
+// the old one's lock, finds OGREMCP_UPDATED_FROM set, and its menu says it
+// was updated. A dev or snapshot build never updates itself.
+//
 // One bridge process runs per OS user (package lock): the tray app and each
 // command hold a lock while they run, and a second one exits. bridge server
 // takes it only to change the server.
@@ -44,8 +50,9 @@
 // The server is OGREMCP_BASE_URL when it is set, for development, or else the
 // settings file's server_url, or else the hosted service
 // (config.File.Server). The tray's Server… item and bridge server set change
-// server_url. The game folders, the refresh interval, the debounce delay, and
-// the upload cap are in the settings file too (package config).
+// server_url. The game folders, the refresh interval, the debounce delay, the
+// upload cap, and the update interval are in the settings file too (package
+// config).
 package main
 
 import (
@@ -71,6 +78,11 @@ import (
 // version is set by the build's ldflags: the bridge-v tag without its prefix,
 // or a commit hash for a dev build (docs/releases.md).
 var version = "dev"
+
+// release is "true" in a build of the release job, which the build's ldflags
+// set (.goreleaser.yaml). Only such a build updates itself (§7). A dev or
+// snapshot build never does, whatever its version says.
+var release = "false"
 
 func main() {
 	// Finder on old macOS versions passes -psn_0_NNNN to an app.

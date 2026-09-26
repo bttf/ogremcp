@@ -2,6 +2,8 @@
 # `make dist` runs a snapshot build. A pushed bridge-v tag runs a release
 # (.github/workflows/bridge-release.yml).
 # Templates use BRIDGE_VERSION, not .Version, which keeps the bridge-v prefix.
+# main.release is true in a release build only: a snapshot never updates
+# itself (§7, main.go).
 version: 2
 project_name: ogremcp-bridge
 
@@ -21,14 +23,14 @@ builds:
       - CGO_CFLAGS=-O2 -g -mmacosx-version-min=13.0
       - CGO_LDFLAGS=-O2 -g -mmacosx-version-min=13.0
     flags: [-trimpath]
-    ldflags: ["-s -w -X main.version={{ .Env.BRIDGE_VERSION }}"]
+    ldflags: ["-s -w -X main.version={{ .Env.BRIDGE_VERSION }} -X main.release={{ not .IsSnapshot }}"]
   # -H windowsgui keeps Windows from opening a console window.
   - id: bridge-windows
     goos: [windows]
     goarch: [amd64]
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
-    ldflags: ["-s -w -H windowsgui -X main.version={{ .Env.BRIDGE_VERSION }}"]
+    ldflags: ["-s -w -H windowsgui -X main.version={{ .Env.BRIDGE_VERSION }} -X main.release={{ not .IsSnapshot }}"]
 
 universal_binaries:
   - ids: [bridge-darwin]
@@ -66,6 +68,20 @@ checksum:
   extra_files:
     - glob: dist/*.app.zip
     - glob: dist/*.dmg
+
+# The detached Ed25519 signature of checksums.txt, checksums.txt.sig, which
+# each bridge verifies with its embedded public key before it updates itself
+# (§7). scripts/sign reads the private key from the file that
+# BRIDGE_UPDATE_SIGNING_KEY_PATH names (bridge-release.yml) and fails without
+# it. It runs before anything is published. Snapshots skip it: `make dist`
+# passes --skip=sign.
+signs:
+  - id: update
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./scripts/sign", "${artifact}", "${signature}"]
+    signature: "${artifact}.sig"
+    output: true
 
 # The repo's one Releases page also holds the addon-v releases (§5). A
 # pre-release version, such as 1.2.3-rc.1, is never marked Latest. The

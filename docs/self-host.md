@@ -20,7 +20,6 @@ the commit it was built from (§6.5). It has no way to load other kits.
   served by a reverse proxy in front of the service. Hosted agents, such as
   Claude and ChatGPT, reach the MCP URL from the internet. The bridge accepts
   `http://` only on a loopback address.
-- Optional: a Firecrawl API key.
 
 ## Set up
 
@@ -45,9 +44,7 @@ the commit it was built from (§6.5). It has no way to load other kits.
    redirect URI with the provider:
    - Google: `<PUBLIC_BASE_URL>/auth/google/callback`
    - Discord: `<PUBLIC_BASE_URL>/auth/discord/callback`
-5. Optional: set `FIRECRAWL_API_KEY`. Without it, `search_game_info` and
-   `fetch_game_page` answer `search_unavailable`.
-6. Generate the OAuth server's keys. These commands build the image and
+5. Generate the OAuth server's keys. These commands build the image and
    append `OIDC_JWKS` and `OIDC_COOKIE_KEYS` to `.env`:
 
    ```sh

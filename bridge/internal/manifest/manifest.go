@@ -119,14 +119,12 @@ type Source struct {
 
 // Flavor is one flavor's config.
 type Flavor struct {
-	Status string   `json:"status"`
-	Search []string `json:"search"`
+	Status string `json:"status"`
 }
 
 var (
 	snakeCase = regexp.MustCompile(`^[a-z0-9]+(_[a-z0-9]+)*$`)
 	semver    = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$`)
-	urlPrefix = regexp.MustCompile(`^https?://[^/?#\s]+/\S*$`)
 )
 
 // Parse reads a manifest and checks it.
@@ -233,11 +231,6 @@ func (m *Manifest) Validate() error {
 		}
 		if f.Status != "supported" && f.Status != "experimental" {
 			bad("flavors.%s.status %q is not supported or experimental", name, f.Status)
-		}
-		for _, prefix := range f.Search {
-			if !urlPrefix.MatchString(prefix) {
-				bad("flavors.%s.search entry %q is not a URL prefix with a path", name, prefix)
-			}
 		}
 	}
 

@@ -10,14 +10,12 @@ import {
   DEFAULT_WEB_SESSION_RENEW_WITHIN_DAYS,
   loadConfig,
 } from "./config.js";
-import { DEFAULT_FIRECRAWL_TIMEOUT_MS } from "./firecrawl.js";
 import { DEFAULT_INGEST } from "./ingest.js";
 import { MCP_CLIENT_ORIGINS } from "./mcp.js";
 import { formatOidcKeys, generateOidcKeys, resolveOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES } from "./oidc-tokens.js";
 import { DEFAULT_RETENTION } from "./retention.js";
-import { DEFAULT_SEARCH_CACHE } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT } from "./tool-context.js";
 import { NO_TOOL_CALL_CAPS } from "./usage.js";
 
@@ -45,8 +43,6 @@ describe("loadConfig", () => {
       deviceCodeMisses: DEFAULT_MISSES,
       ingest: DEFAULT_INGEST,
       toolContext: DEFAULT_TOOL_CONTEXT,
-      firecrawl: { apiKey: null, timeoutMs: DEFAULT_FIRECRAWL_TIMEOUT_MS },
-      searchCache: DEFAULT_SEARCH_CACHE,
       toolCallCaps: NO_TOOL_CALL_CAPS,
       retention: DEFAULT_RETENTION,
       bridgeDownloadUrl: null,

@@ -13,9 +13,7 @@ import type { KitRegistry } from "./kits/registry.js";
 import { logger, requestLog } from "./log.js";
 import { mcpRouter } from "./mcp.js";
 import { mountOidc } from "./oidc.js";
-import type { PageFetch } from "./pages.js";
 import { DEFAULT_RETENTION, type RetentionSettings } from "./retention.js";
-import type { ScopedSearch } from "./search.js";
 import { securityHeaders } from "./security-headers.js";
 import type { ToolContextSettings } from "./tool-context.js";
 import { createToolRegistry } from "./tools.js";
@@ -46,13 +44,9 @@ export interface AppOptions {
   kits?: KitRegistry;
   /**
    * The tool call limits (`HISTORY_MAX_SNAPSHOTS`, `TOOL_RESULT_MAX_BYTES`, `LIST_GAMES_CHARACTERS`,
-   * `FETCH_PAGE_MAX_CHARS`, `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
+   * `REPORT_ISSUE_MAX_PER_DAY`, `REPORT_ISSUE_CALLS`). Default: `DEFAULT_TOOL_CONTEXT`.
    */
   toolContext?: ToolContextSettings;
-  /** Game-scoped search for `search_game_info` (§12), or null without `FIRECRAWL_API_KEY`. Default: null. */
-  search?: ScopedSearch | null;
-  /** Page fetches for `fetch_game_page` (§12), or null without `FIRECRAWL_API_KEY`. Default: null. */
-  fetchPage?: PageFetch | null;
   /** `BRIDGE_DOWNLOAD_URL`, for `auth`'s web UI (§13.2). Default: none. */
   bridgeDownloadUrl?: string | null;
   /** `CONTACT_EMAIL`, for `auth`'s web UI (§13.2). Default: none. */
@@ -109,8 +103,6 @@ export function createApp({
   webRoot,
   kits,
   toolContext,
-  search,
-  fetchPage,
   bridgeDownloadUrl,
   contactEmail,
   ingest,
@@ -136,7 +128,7 @@ export function createApp({
   if (auth !== undefined && oidc !== undefined) {
     // The registry checks the platform tools' names: a bad one stops the start (§10.1).
     const usage = createUsageMeter({ pool: auth.pool, caps: toolCallCaps, log });
-    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, search, fetchPage, log, events, usage });
+    const tools = createToolRegistry({ pool: auth.pool, kits, settings: toolContext, log, events, usage });
     app.use(mcpRouter({ publicBaseUrl: auth.publicBaseUrl, provider: oidc, allowedOrigins: mcpAllowedOrigins, tools, log }));
     // The bridge's routes take an access token, not a web session (§8.1).
     if (kits !== undefined) {

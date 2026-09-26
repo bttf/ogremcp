@@ -45,6 +45,22 @@ func TestParseWoWManifest(t *testing.T) {
 	}
 }
 
+// A manifest from a platform that still lists a flavor's search scope
+// parses: the field was removed (§6.1, §12), and unknown fields are ignored.
+func TestParseIgnoresRemovedSearchField(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "kits", "wow", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(raw), `{ "status": "supported" }`, `{ "status": "supported", "search": ["https://www.wowhead.com/classic/"] }`, 1)
+	if old == string(raw) {
+		t.Fatal("the WoW manifest has no classic_era flavor to add search to")
+	}
+	if _, err := Parse([]byte(old)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseRejectsLocateEntryShape(t *testing.T) {
 	for _, entry := range []string{`{"path": "/a", "prompt": "b"}`, `{"steam": "123"}`} {
 		raw := `{"kit": "wow", "root": {"locate": [` + entry + `], "verify": "x"}}`

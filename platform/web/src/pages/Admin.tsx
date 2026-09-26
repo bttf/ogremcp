@@ -20,19 +20,9 @@ export interface AdminMetrics {
   snapshot_age: { tool: string; reads: number; p50: number; p90: number; p99: number }[];
   tools: { tool: string; calls: number; errors: number; with_sections: number }[];
   sections: { tool: string; section: string; calls: number }[];
-  grounding: { agent_client: string; visits: number; read_state: number; read_state_no_search: number }[];
-  search: SearchCounts & { active_users: number; tools: (SearchCounts & { tool: string })[] };
-  uncached_queries: { query: string; searches: number; users: number }[];
   issues: { total: number; notes: { created_at: string; kit: string; agent_client: string; note: string }[] };
   cap_hits: { day: string; tier: string; hits: number; users: number }[];
   storage: { database_bytes: number; tables: { table: string; bytes: number; rows: number }[] };
-}
-
-interface SearchCounts {
-  lookups: number;
-  hits: number;
-  credits: number;
-  scope_misses: number;
 }
 
 /** The windows the page offers, in days. `MAX_ADMIN_WINDOW_DAYS` in `platform/src/admin.ts` is the longest. */
@@ -161,7 +151,7 @@ export function Admin() {
 }
 
 function Metrics({ metrics }: { metrics: AdminMetrics }) {
-  const { search, issues, storage } = metrics;
+  const { issues, storage } = metrics;
   return (
     <>
       <p className="og-hint">
@@ -222,47 +212,6 @@ function Metrics({ metrics }: { metrics: AdminMetrics }) {
       <h2>Calls per section</h2>
       <p className="og-hint">A call that names two sections counts for each.</p>
       <Table head={["Tool", "Section", "Calls"]} rows={metrics.sections.map((row) => [row.tool, row.section, row.calls])} />
-
-      <h2>Grounding</h2>
-      <p className="og-hint">
-        Visits by agent client. Read state: a call of a game&apos;s tool succeeded. Searched: a call of search_game_info or
-        fetch_game_page succeeded.
-      </p>
-      <Table
-        head={["Agent client", "Visits", "Read state", "Read state, never searched", "Share"]}
-        rows={metrics.grounding.map((row) => [
-          row.agent_client,
-          row.visits,
-          row.read_state,
-          row.read_state_no_search,
-          percent(row.read_state_no_search, row.read_state),
-        ])}
-      />
-
-      <h2>Search</h2>
-      <dl className="og-facts">
-        <dt>Cache hit rate</dt>
-        <dd>{percent(search.hits, search.lookups)}</dd>
-        <dt>Firecrawl credits</dt>
-        <dd>{search.credits.toLocaleString()}</dd>
-        <dt>Active users</dt>
-        <dd>{search.active_users.toLocaleString()}</dd>
-        <dt>Credits per active user</dt>
-        <dd>{search.active_users === 0 ? "–" : (search.credits / search.active_users).toFixed(1)}</dd>
-        <dt>Scope misses</dt>
-        <dd>{search.scope_misses.toLocaleString()}</dd>
-      </dl>
-      <Table
-        head={["Tool", "Lookups", "Hits", "Hit rate", "Credits", "Scope misses"]}
-        rows={search.tools.map((row) => [row.tool, row.lookups, row.hits, percent(row.hits, row.lookups), row.credits, row.scope_misses])}
-      />
-
-      <h2>Top uncached queries</h2>
-      <p className="og-hint">User data. Each query is cut to 120 characters.</p>
-      <Table
-        head={["Query", "Searches", "Users"]}
-        rows={metrics.uncached_queries.map((row) => [row.query, row.searches, row.users])}
-      />
 
       <h2>Reported issues</h2>
       <p className="og-hint">{issues.total.toLocaleString()} in this window. The newest notes, which are user data.</p>

@@ -26,9 +26,6 @@ const METRICS: AdminMetrics = {
   snapshot_age: [{ tool: "wow_get_state", reads: 40, p50: 90, p90: 1800, p99: 7200 }],
   tools: [],
   sections: [],
-  grounding: [],
-  search: { active_users: 2, lookups: 10, hits: 4, credits: 12, scope_misses: 1, tools: [] },
-  uncached_queries: [{ query: "mage trainer", searches: 3, users: 2 }],
   issues: { total: 1, notes: [{ created_at: "2026-09-24T12:00:00.000Z", kit: "wow", agent_client: "DCR: Test agent", note: "Wrong trainer." }] },
   cap_hits: [],
   storage: { database_bytes: 8_000_000, tables: [{ table: "events", bytes: 2_000_000, rows: 5000 }] },
@@ -67,7 +64,7 @@ it("shows an admin the metrics of the window, and loads another window", async (
   await vi.waitFor(() => expect(container.querySelector("h1")?.textContent).toBe("Admin"));
   expect(requests).toContain("/api/v1/admin/metrics?days=7");
   const text = container.textContent ?? "";
-  for (const shown of ["upload_failed 2", "30.0 min", "40.0%", "mage trainer", "Wrong trainer.", "DCR: Test agent", "7.6 MB"]) {
+  for (const shown of ["upload_failed 2", "30.0 min", "Wrong trainer.", "DCR: Test agent", "7.6 MB"]) {
     expect(text).toContain(shown);
   }
 

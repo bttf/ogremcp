@@ -8,7 +8,8 @@
 # `make dist` needs GoReleaser v2 and a Mac with Xcode's command line tools:
 # the macOS build uses cgo, scripts/macos-app.sh uses lipo, codesign, and
 # ditto, and scripts/macos-dmg.sh uses hdiutil. Nothing is signed with an
-# identity or notarized: only a release build does that
+# identity or notarized, and checksums.txt gets no signature (--skip=sign):
+# only a release build does that
 # (.github/workflows/bridge-release.yml, docs/releases.md).
 #
 # Adapted from bttf/wow-guide@df80260, bridge/Makefile. GoReleaser replaces
@@ -27,7 +28,7 @@ export BRIDGE_VERSION
 .PHONY: dist clean
 
 dist:
-	$(GORELEASER) release --snapshot --clean
+	$(GORELEASER) release --snapshot --clean --skip=sign
 
 clean:
 	rm -rf dist

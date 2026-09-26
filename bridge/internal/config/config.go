@@ -1,8 +1,8 @@
 // Package config is the bridge's settings file on this device
 // (docs/architecture.md §6.1, §7, §13.3). It holds the server, each kit's
 // game folder, as the locate chain found it or the user picked it, the
-// refresh interval, the debounce delay of the watcher, and the upload cap. It
-// holds no secret: the refresh token is in the OS keychain (package
+// refresh interval, the debounce delay of the watcher, the upload cap, and
+// how often the bridge checks for a release of itself. It holds no secret: the refresh token is in the OS keychain (package
 // keychain).
 //
 // The file is JSON, ogremcp-bridge/config.json in the user's config directory:
@@ -12,6 +12,7 @@
 //	  "refresh_interval": "5m",
 //	  "debounce": "2s",
 //	  "max_upload_bytes": 5242880,
+//	  "update_interval": "6h",
 //	  "roots": { "wow": "/Applications/World of Warcraft" }
 //	}
 //
@@ -60,6 +61,14 @@ const DefaultDebounce = 2 * time.Second
 // server's cap (§8.3), 5 MB.
 const DefaultMaxUploadBytes = 5 << 20
 
+// DefaultUpdateInterval is how often the tray app checks for a newer release
+// of the bridge, unless the file sets update_interval (§7).
+const DefaultUpdateInterval = 6 * time.Hour
+
+// MinUpdateInterval is the shortest update_interval the file may set. GitHub
+// allows 60 calls an hour from one IP address without a token.
+const MinUpdateInterval = time.Hour
+
 // File is the settings file.
 type File struct {
 	// ServerURL is the base URL of a self-hosted server (§13.3), or "" for
@@ -74,6 +83,9 @@ type File struct {
 	// MaxUploadBytes is the most uncompressed bytes the bridge uploads of one
 	// source instance. Zero means DefaultMaxUploadBytes.
 	MaxUploadBytes int64 `json:"max_upload_bytes,omitempty"`
+	// UpdateInterval is how often the tray app checks for a newer release of
+	// the bridge. Zero means DefaultUpdateInterval.
+	UpdateInterval Duration `json:"update_interval,omitempty"`
 	// Roots maps each kit to its game folder.
 	Roots map[string]string `json:"roots,omitempty"`
 }
@@ -124,6 +136,14 @@ func (f File) UploadCap() int64 {
 	return f.MaxUploadBytes
 }
 
+// UpdateEvery is how often the tray app checks for a newer release.
+func (f File) UpdateEvery() time.Duration {
+	if f.UpdateInterval == 0 {
+		return DefaultUpdateInterval
+	}
+	return time.Duration(f.UpdateInterval)
+}
+
 // Duration is a time.Duration written as a string, such as "5m".
 type Duration time.Duration
 
@@ -170,6 +190,9 @@ func Load(path string) (File, error) {
 	}
 	if f.MaxUploadBytes < 0 {
 		return File{}, fmt.Errorf("%s is not valid: max_upload_bytes may not be negative", path)
+	}
+	if f.UpdateInterval != 0 && time.Duration(f.UpdateInterval) < MinUpdateInterval {
+		return File{}, fmt.Errorf("%s is not valid: update_interval must be at least %s", path, MinUpdateInterval)
 	}
 	return f, nil
 }

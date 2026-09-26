@@ -3,23 +3,21 @@
 package macapp
 
 import (
-	"os"
+	"fmt"
 	"os/exec"
-	"strconv"
-	"syscall"
+	"strings"
 )
 
-// Relaunch opens app once this process has exited, and returns without
-// waiting. The caller then quits. The new process would otherwise find the
-// single-instance lock taken (package lock), and macOS could bring this
-// process forward instead of starting the app. A shell waits for this
-// process to exit and then runs open.
-func Relaunch(app string) error {
-	const script = `while /bin/kill -0 "$1" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open "$2"`
-	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), app)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
+// Relaunch opens the app at app as a new instance, beside the running one,
+// with env (NAME=value) in its environment, and the caller then quits. The
+// new instance finds the single-instance lock (package lock) held until the
+// caller quits, and env tells it to wait for the lock. When open fails,
+// nothing has started, and the caller keeps running. Self-update (package
+// selfupdate) and the move to ~/Applications both start the app this way.
+func Relaunch(app, env string) error {
+	out, err := exec.Command("/usr/bin/open", "-n", "--env", env, app).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("could not open %s: %w: %s", app, err, strings.TrimSpace(string(out)))
 	}
-	return cmd.Process.Release()
+	return nil
 }
