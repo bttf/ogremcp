@@ -1,6 +1,5 @@
 import { type CimdFetchLimits, DEFAULT_CIMD_FETCH_LIMITS } from "./cimd.js";
 import { DEFAULT_MISSES, type MissSettings } from "./devices.js";
-import { DEFAULT_FIRECRAWL_TIMEOUT_MS } from "./firecrawl.js";
 import { DEFAULT_INGEST, type IngestSettings } from "./ingest.js";
 import { DEFAULT_LOG_LEVEL, isLogLevel, type LogLevel } from "./log.js";
 import { defaultMcpAllowedOrigins } from "./mcp.js";
@@ -8,7 +7,6 @@ import { type OidcKeys, parseOidcKeys } from "./oidc-keys.js";
 import { DEFAULT_REGISTRATION, parseAddressRanges, type RegistrationSettings } from "./oidc-registration.js";
 import { DEFAULT_TOKEN_LIFETIMES, type TokenLifetimes } from "./oidc-tokens.js";
 import { DEFAULT_RETENTION, type RetentionSettings } from "./retention.js";
-import { DEFAULT_SEARCH_CACHE, type SearchCacheSettings } from "./search-cache.js";
 import { DEFAULT_TOOL_CONTEXT, type ToolContextSettings } from "./tool-context.js";
 import type { ToolCallCaps } from "./usage.js";
 
@@ -84,29 +82,12 @@ export interface Config {
    * returns (§6.2, `tool-context.ts`). `TOOL_RESULT_MAX_BYTES`: the cap on
    * one copy of a kit tool result's JSON (§10.5, `tool-envelope.ts`).
    * `LIST_GAMES_CHARACTERS`: the most recent characters `list_games` returns
-   * per game (§10.3, `list-games.ts`). `FETCH_PAGE_MAX_CHARS`: the most
-   * characters of a page `fetch_game_page` returns (§10.3,
-   * `fetch-game-page.ts`). `REPORT_ISSUE_MAX_PER_DAY`: the most reports
-   * `report_issue` records per user in 24 hours, and `REPORT_ISSUE_CALLS`:
-   * the most recent tool calls a report attaches (§16.2, `report-issue.ts`).
-   * Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
+   * per game (§10.3, `list-games.ts`). `REPORT_ISSUE_MAX_PER_DAY`: the most
+   * reports `report_issue` records per user in 24 hours, and
+   * `REPORT_ISSUE_CALLS`: the most recent tool calls a report attaches
+   * (§16.2, `report-issue.ts`). Each one unset is `DEFAULT_TOOL_CONTEXT`'s.
    */
   toolContext: ToolContextSettings;
-  /**
-   * `FIRECRAWL_API_KEY`, the search provider's key (§12), or null when it is
-   * unset: `search_game_info` and `fetch_game_page` then answer
-   * `search_unavailable`. Never logged or repeated. `FIRECRAWL_TIMEOUT_MS`:
-   * the most time one Firecrawl request takes. Unset,
-   * `DEFAULT_FIRECRAWL_TIMEOUT_MS`.
-   */
-  firecrawl: { apiKey: string | null; timeoutMs: number };
-  /**
-   * `SEARCH_CACHE_TTL_DAYS` and `SEARCH_CACHE_EMPTY_TTL_MINUTES`, in
-   * milliseconds: how long the shared cache keeps a search or page, and an
-   * empty answer (§12, `search-cache.ts`). Each one unset is
-   * `DEFAULT_SEARCH_CACHE`'s.
-   */
-  searchCache: SearchCacheSettings;
   /**
    * `TOOL_CALLS_PER_DAY_FREE` and `TOOL_CALLS_PER_DAY_PAID`: the most MCP
    * tool calls a user of each tier makes per UTC day (§14, `usage.ts`). Each
@@ -497,18 +478,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       maxHistoryLimit: positiveInt("HISTORY_MAX_SNAPSHOTS", env["HISTORY_MAX_SNAPSHOTS"], DEFAULT_TOOL_CONTEXT.maxHistoryLimit),
       maxResultBytes: positiveInt("TOOL_RESULT_MAX_BYTES", env["TOOL_RESULT_MAX_BYTES"], DEFAULT_TOOL_CONTEXT.maxResultBytes),
       listGamesCharacters: positiveInt("LIST_GAMES_CHARACTERS", env["LIST_GAMES_CHARACTERS"], DEFAULT_TOOL_CONTEXT.listGamesCharacters),
-      fetchPageMaxChars: positiveInt("FETCH_PAGE_MAX_CHARS", env["FETCH_PAGE_MAX_CHARS"], DEFAULT_TOOL_CONTEXT.fetchPageMaxChars),
       reportIssueMaxPerDay: positiveInt("REPORT_ISSUE_MAX_PER_DAY", env["REPORT_ISSUE_MAX_PER_DAY"], DEFAULT_TOOL_CONTEXT.reportIssueMaxPerDay),
       reportIssueCalls: positiveInt("REPORT_ISSUE_CALLS", env["REPORT_ISSUE_CALLS"], DEFAULT_TOOL_CONTEXT.reportIssueCalls),
-    },
-    firecrawl: {
-      apiKey: (env["FIRECRAWL_API_KEY"] ?? "").trim() || null,
-      timeoutMs: positiveInt("FIRECRAWL_TIMEOUT_MS", env["FIRECRAWL_TIMEOUT_MS"], DEFAULT_FIRECRAWL_TIMEOUT_MS),
-    },
-    searchCache: {
-      ttlMs: positiveInt("SEARCH_CACHE_TTL_DAYS", env["SEARCH_CACHE_TTL_DAYS"], DEFAULT_SEARCH_CACHE.ttlMs / DAY_MS) * DAY_MS,
-      emptyTtlMs:
-        positiveInt("SEARCH_CACHE_EMPTY_TTL_MINUTES", env["SEARCH_CACHE_EMPTY_TTL_MINUTES"], DEFAULT_SEARCH_CACHE.emptyTtlMs / MINUTE_MS) * MINUTE_MS,
     },
     toolCallCaps: {
       free: optionalPositiveInt("TOOL_CALLS_PER_DAY_FREE", env["TOOL_CALLS_PER_DAY_FREE"]),

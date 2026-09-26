@@ -10,8 +10,7 @@ import { KIT_SOURCES, type Kit, type KitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
 import { listGames } from "./list-games.js";
 import { migrate } from "./migrations.js";
-import type { ScopedSearch } from "./search.js";
-import { searchGameInfo } from "./search-game-info.js";
+import { reportIssue } from "./report-issue.js";
 import { createToolRegistry, type PlatformTool } from "./tools.js";
 
 // Ingest's events rows: ingest.test.ts.
@@ -36,12 +35,6 @@ const SAVED_VARIABLES = `OgreMCPDB = {
   ["state"] = { ["location"] = { ["zone"] = "Elwynn Forest" } },
 }
 `;
-
-/** A `ScopedSearch` that finds nothing, for 2 credits. */
-const search: ScopedSearch = async (_scope, _query, usage) => {
-  if (usage !== undefined) usage.searchCredits = 2;
-  return [];
-};
 
 describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
   const name = `ogremcp_test_${randomBytes(6).toString("hex")}`;
@@ -110,12 +103,12 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
     });
   }
 
-  it("writes one row per tool call, with the args summary and no free text but the query", async () => {
-    const tools = createToolRegistry({ pool, kits: KITS, search, events });
+  it("writes one row per tool call, with the args summary and no free text", async () => {
+    const tools = createToolRegistry({ pool, kits: KITS, events });
     const user = await player({ wow: true, snapshot: true });
     const caller = { userUuid: user.uuid, clientId: CLIENT_ID };
 
-    await tools.call(caller, "search_game_info", { game: "wow", query: "  Where is  HOGGER ", flavor: "classic_era" });
+    await tools.call(caller, "report_issue", { game: "wow", note: "Zoela was sent the wrong way." });
     const refused = await tools.call(caller, "wow_get_state", { sections: ["location", "zoela's bags"], flavor: "tbc_classic", character: "Zoela" });
     expect(refused?.isError).toBe(true);
     const state = await tools.call(caller, "wow_get_state", { sections: ["location"], flavor: "classic_era", character: "Zoela" });
@@ -127,26 +120,18 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
       kind: "tool_call",
       agent_client: CLIENT_ID,
       latency_ms: expect.any(Number),
-      cache_hit: null,
       device_id: null,
       status: null,
       client_errors: null,
     };
     const age = (row: Record<string, unknown>) => Math.round(((row["occurred_at"] as Date).getTime() - CAPTURED_AT.getTime()) / 1000);
-    expect(rows[0]).toMatchObject({
-      ...common,
-      tool: "search_game_info",
-      sections: null,
-      flavor: "classic_era",
-      query: "where is hogger",
-      error: null,
-      snapshot_age_seconds: null,
-      search_credits: 2,
-    });
+    expect(rows[0]).toMatchObject({ ...common, tool: "report_issue", sections: null, flavor: null, error: null, snapshot_age_seconds: null });
+    // The search columns were dropped with the search tools (§12).
+    for (const column of ["query", "cache_hit", "search_credits"]) expect(rows[0]).not.toHaveProperty(column);
     // Only the sections the schema names, and only a kit's flavor key.
-    expect(rows[1]).toMatchObject({ ...common, tool: "wow_get_state", sections: ["location"], flavor: null, query: null, error: "user_error" });
+    expect(rows[1]).toMatchObject({ ...common, tool: "wow_get_state", sections: ["location"], flavor: null, error: "user_error" });
     expect(rows[1]?.["snapshot_age_seconds"]).toBeNull();
-    expect(rows[2]).toMatchObject({ ...common, tool: "wow_get_state", sections: ["location"], flavor: "classic_era", error: null, search_credits: null });
+    expect(rows[2]).toMatchObject({ ...common, tool: "wow_get_state", sections: ["location"], flavor: "classic_era", error: null });
     expect(rows[2]?.["snapshot_age_seconds"]).toBe(age(rows[2]!));
     expect(rows[3]).toMatchObject({ ...common, tool: "list_games", sections: null, flavor: null, error: null });
     expect(rows[3]?.["snapshot_age_seconds"]).toBe(age(rows[3]!));
@@ -163,22 +148,18 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
         throw Object.assign(new Error("duplicate key value: (Zoela)"), { code: "23505" });
       },
     };
-    const tools = createToolRegistry({ pool, kits: KITS, platformTools: [listGames, searchGameInfo, broken], log: () => {}, events });
+    const tools = createToolRegistry({ pool, kits: KITS, platformTools: [listGames, reportIssue, broken], log: () => {}, events });
     const user = await player({ wow: false, snapshot: true });
     const caller = { userUuid: user.uuid, clientId: CLIENT_ID };
 
     await tools.call(caller, "break_things", {});
     await tools.call(caller, "wow_get_state", {});
-    await tools.call(caller, "search_game_info", { game: "wow", query: "hogger" });
-    await pool.query("insert into user_games (user_id, kit) values ($1, 'wow')", [user.id]);
-    await tools.call(caller, "search_game_info", { game: "wow", query: "hogger" });
-    const rows = await eventsOf(user.id, 4);
+    await tools.call(caller, "report_issue", { game: "wow", note: "Wrong zone." });
+    const rows = await eventsOf(user.id, 3);
     expect(rows.map((row) => [row["tool"], row["error"]])).toEqual([
       ["break_things", "failed"],
       ["wow_get_state", "game_off"],
-      ["search_game_info", "user_error"],
-      // No FIRECRAWL_API_KEY.
-      ["search_game_info", "search_unavailable"],
+      ["report_issue", "user_error"],
     ]);
     expect(JSON.stringify(rows)).not.toMatch(/duplicate key/);
 
@@ -225,7 +206,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
     const calls: [typeof alice, number, string, string][] = [
       [alice, 0, "list_games", "claude"],
       [alice, 10, "wow_get_state", "claude"],
-      [alice, 35, "search_game_info", "chatgpt"],
+      [alice, 35, "report_issue", "chatgpt"],
       [bob, 5, "wow_get_state", "claude"],
       [alice, 70, "wow_get_state", "claude"],
     ];
@@ -245,7 +226,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
     ]);
 
     expect(await listVisits(pool, { since: at(-60), until: at(120), gapMinutes: 30 })).toEqual([
-      { userUuid: alice.uuid, startedAt: at(0), endedAt: at(35), calls: 3, tools: ["list_games", "search_game_info", "wow_get_state"], agentClients: ["chatgpt", "claude"] },
+      { userUuid: alice.uuid, startedAt: at(0), endedAt: at(35), calls: 3, tools: ["list_games", "report_issue", "wow_get_state"], agentClients: ["chatgpt", "claude"] },
       { userUuid: bob.uuid, startedAt: at(5), endedAt: at(5), calls: 1, tools: ["wow_get_state"], agentClients: ["claude"] },
       { userUuid: alice.uuid, startedAt: at(70), endedAt: at(70), calls: 1, tools: ["wow_get_state"], agentClients: ["claude"] },
     ]);
@@ -254,10 +235,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("events (§16)", () => {
 
   it("deletes a user's events with the user", async () => {
     const user = await player({ wow: true, snapshot: true });
-    await createToolRegistry({ pool, kits: KITS, search, events }).call({ userUuid: user.uuid, clientId: CLIENT_ID }, "search_game_info", {
-      game: "wow",
-      query: "hogger",
-    });
+    await createToolRegistry({ pool, kits: KITS, events }).call({ userUuid: user.uuid, clientId: CLIENT_ID }, "list_games", {});
     await pool.query("insert into events (user_id, occurred_at, kind, latency_ms, device_id, status) values ($1, now(), 'ingest', 1, $2, 'stored')", [
       user.id,
       user.deviceId,

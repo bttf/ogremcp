@@ -113,7 +113,7 @@ function DeleteData() {
     <section className="og-card" aria-labelledby={`${id}-title`}>
       <h2 id={`${id}-title`}>Delete my data</h2>
       <p>
-        Deletes the game state your bridges uploaded, the record of your agents' tool calls and searches, and the problems you reported
+        Deletes the game state your bridges uploaded, the record of your agents' tool calls, and the problems you reported
         through your agent. Your account, devices, connected agents, and games stay. Your agents see no game state until your bridge
         uploads it again.
       </p>

@@ -17,9 +17,8 @@ import type { ToolCallError } from "./tool-envelope.js";
  * wait at once: an event past that is dropped, and the drops are logged by
  * count, so a slow database cannot grow a queue without bound.
  *
- * A row holds no text the agent or the player wrote, except
- * search_game_info's normalized query: user data, which "Delete my data"
- * removes with the rest of the user's rows (§11, §16.2).
+ * A row holds no text the agent or the player wrote. "Delete my data"
+ * removes the user's rows (§11).
  *
  * Visits (§3) are not stored. `VISITS_SQL` derives them from the gaps
  * between a user's tool-call rows: the transport is stateless, so there are
@@ -40,16 +39,12 @@ export interface ToolCallEvent {
   sections: string[] | null;
   /** A kit's flavor key, or null. */
   flavor: string | null;
-  /** search_game_info's normalized query, or null. */
-  query: string | null;
   /** Null when the call succeeded. */
   error: ToolCallError | null;
   /** When the snapshot the call returned was captured, or null. */
   snapshotAt: Date | null;
   /** The uuid of the snapshot whose state a kit tool call returned, or null. `report_issue` names it (§16.2). */
   snapshotUuid: string | null;
-  cacheHit: boolean | null;
-  searchCredits: number | null;
 }
 
 /** One ingest request that named its device (§8.3, §16.1). */
@@ -136,12 +131,9 @@ const COLUMNS = [
   "tool",
   "sections",
   "flavor",
-  "query",
   "error",
   "snapshot_age_seconds",
   "snapshot_uuid",
-  "cache_hit",
-  "search_credits",
   "device_id",
   "status",
   "parse_status",
@@ -174,12 +166,9 @@ function row(event: RecordedEvent): Row {
       tool: event.tool,
       sections: event.sections,
       flavor: event.flavor,
-      query: event.query,
       error: event.error,
       snapshot_age_seconds: event.snapshotAt === null ? null : int((event.occurredAt.getTime() - event.snapshotAt.getTime()) / 1000),
       snapshot_uuid: event.snapshotUuid,
-      cache_hit: event.cacheHit,
-      search_credits: event.searchCredits,
     };
   }
   const { meta, parse } = event;
@@ -253,22 +242,18 @@ export const DEFAULT_VISIT_GAP_MINUTES = 30;
  *
  * Only the calls in `[$2, $3)` count, so a visit that spans `$2` or `$3` is
  * cut there: the part before `$2` and the part from `$3` on are left out.
- * `/admin` uses it as a subquery, and reads `succeeded_tools` too: the tools
- * of the visit's calls that answered without an error, in name order, or an
- * empty array.
  */
 export const VISITS_SQL = `
-select u.uuid as user_uuid, v.started_at, v.ended_at, v.calls, v.tools, v.agent_clients, v.succeeded_tools
+select u.uuid as user_uuid, v.started_at, v.ended_at, v.calls, v.tools, v.agent_clients
   from (
     select user_id, min(occurred_at) as started_at, max(occurred_at) as ended_at, count(*)::int as calls,
            array_agg(distinct tool order by tool) as tools,
-           array_agg(distinct agent_client order by agent_client) as agent_clients,
-           coalesce(array_agg(distinct tool order by tool) filter (where error is null), '{}') as succeeded_tools
+           array_agg(distinct agent_client order by agent_client) as agent_clients
       from (
-        select user_id, occurred_at, tool, agent_client, error,
+        select user_id, occurred_at, tool, agent_client,
                count(*) filter (where starts) over (partition by user_id order by occurred_at, id) as visit
           from (
-            select id, user_id, occurred_at, tool, agent_client, error,
+            select id, user_id, occurred_at, tool, agent_client,
                    coalesce(occurred_at - lag(occurred_at) over (partition by user_id order by occurred_at, id)
                               > make_interval(secs => $1), true) as starts
               from events

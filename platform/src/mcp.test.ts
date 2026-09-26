@@ -13,7 +13,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
 import { createEventRecorder } from "./events.js";
-import { fetchGamePage } from "./fetch-game-page.js";
 import { parseUpload, writeSnapshot } from "./ingest.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { writeAdapterZips } from "./kits/adapter.js";
@@ -27,7 +26,6 @@ import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
 import { generateOidcKeys } from "./oidc-keys.js";
 import { reportIssue } from "./report-issue.js";
-import { searchGameInfo } from "./search-game-info.js";
 import { GROUNDING_REMINDER } from "./tool-envelope.js";
 import { WebSessions } from "./web-sessions.js";
 
@@ -39,24 +37,10 @@ const ISSUER = "https://ogremcp.example";
 
 /** `list_games` as `tools/list` lists it, for every user (§10.3). */
 const LIST_GAMES = { name: listGames.name, description: listGames.description, inputSchema: listGames.inputSchema, annotations: listGames.annotations };
-/** `search_game_info` as `tools/list` lists it, for every user (§10.3). */
-const SEARCH_GAME_INFO = {
-  name: searchGameInfo.name,
-  description: searchGameInfo.description,
-  inputSchema: searchGameInfo.inputSchema,
-  annotations: searchGameInfo.annotations,
-};
-/** `fetch_game_page` as `tools/list` lists it, for every user (§10.3). */
-const FETCH_GAME_PAGE = {
-  name: fetchGamePage.name,
-  description: fetchGamePage.description,
-  inputSchema: fetchGamePage.inputSchema,
-  annotations: fetchGamePage.annotations,
-};
 /** `report_issue` as `tools/list` lists it, for every user (§10.3). */
 const REPORT_ISSUE = { name: reportIssue.name, description: reportIssue.description, inputSchema: reportIssue.inputSchema, annotations: reportIssue.annotations };
 /** The platform tools, as `tools/list` lists them. */
-const PLATFORM = [LIST_GAMES, SEARCH_GAME_INFO, FETCH_GAME_PAGE, REPORT_ISSUE];
+const PLATFORM = [LIST_GAMES, REPORT_ISSUE];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let server: Server | undefined;

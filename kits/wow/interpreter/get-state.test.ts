@@ -62,7 +62,7 @@ function content(result: ToolResult) {
 it("is described as §10.1 and §10.5 ask", () => {
   expect(tool?.description).toContain("World of Warcraft");
   // The rules that act on the result's own fields, and the grounding rule.
-  for (const phrase of ["Experimental flavors", "`hardcore`", "`fresh`", "`search_game_info` or `fetch_game_page` results", "call `search_game_info`", "Never answer from model memory alone", "say so rather than guess"]) {
+  for (const phrase of ["Experimental flavors", "`hardcore`", "`fresh`", "never memory alone", "Ogre MCP has no search tool", "search the web yourself", "preferring sources for the player's `flavor`", "say how sure you are"]) {
     expect(tool?.description).toContain(phrase);
   }
   const experimental = Object.entries(manifest.flavors).flatMap(([key, { status }]) => (status === "experimental" ? [key] : []));
