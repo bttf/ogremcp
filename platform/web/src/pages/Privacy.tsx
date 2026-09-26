@@ -101,8 +101,8 @@ export function Privacy() {
           and the bridge's error counts.
         </li>
         <li>
-          <strong>Reported problems:</strong> when you ask your agent to report a problem, the note it sends, your recent tool calls, and
-          which snapshot the agent read.
+          <strong>Reported problems:</strong> when you ask your agent to report a problem, the note it sends, the tool calls of that visit
+          with their arguments, and which snapshot the agent read.
         </li>
         <li>
           <strong>Daily usage:</strong> how many tool calls you made each day.

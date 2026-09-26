@@ -55,7 +55,7 @@ export const ENVELOPE_FIELDS = ["snapshot_at", "flavor", "rules", "character"] a
  * form of the §10.5 grounding rule (§12). Platform text only.
  */
 export const GROUNDING_REMINDER =
-  "Before you state where to go, who to see, where something is, or where an item comes from beyond the quest text, search the web with your own tools, preferring sources for this flavor. Never answer from memory alone. If your research is inconclusive, tell the user and say how sure you are.";
+  "Before you state where to go, who to see, where something is, or where an item comes from beyond the quest text, search the web with your own tools, preferring sources for this flavor. Never answer from memory alone. If your research is inconclusive, sources disagree, or you can't search, tell the user and say how sure you are.";
 
 /** The UTF-8 bytes `grounding` adds to a kit tool result's JSON. */
 const GROUNDING_BYTES = utf8Length(`,"grounding":${JSON.stringify(GROUNDING_REMINDER)}`);
