@@ -6,5 +6,5 @@
     "noEmit": true,
     "resolveJsonModule": true
   },
-  "include": ["interpreter/**/*.ts"]
+  "include": ["interpreter/**/*.ts", "manifest.test.ts"]
 }

@@ -4,11 +4,12 @@
 // source. Pure: no DB or network.
 import type { Interpreter, Parsed, UnknownFlavor } from "@ogremcp/sdk";
 import { clip, parseError, QUOTE_MAX } from "./errors.js";
-import { Damaged, GAM_SIGNATURE, readFlavorFacts, readGam, Reader } from "./gam.js";
+import { Damaged, GAM_SIGNATURE, type ReadLimits, readFlavorFacts, readGam, Reader, TooMany } from "./gam.js";
 import { getState } from "./get-state.js";
 import { type Bg1State, buildState } from "./state.js";
 import { loadTables } from "./tables.js";
 
+export type { ReadLimits } from "./gam.js";
 export type { Bg1State } from "./state.js";
 
 /** The manifest's only source (kits/bg1/manifest.json). */
@@ -19,13 +20,34 @@ export const ADAPTER_SCHEMA = 0;
 
 export const NOT_A_SAVE_MESSAGE = "This isn't a Baldur's Gate: Enhanced Edition save.";
 
-/** The BG1 kit's interpreter. */
-export const interpreter: Interpreter<Bg1State> = {
-  parse: (sourceId, bytes) => parse(sourceId, bytes),
-  tools: [getState],
+/**
+ * The proposed limits on record counts (§0). They are config: pass others to
+ * `createInterpreter`. The owner's saves hold at most 36 characters out of
+ * the party, 227 variables, 100 journal entries, and 17 spell levels, 12
+ * memorized spells, and 25 items per party member.
+ */
+export const DEFAULT_LIMITS: Readonly<ReadLimits> = {
+  otherCharacters: 500,
+  variables: 20_000,
+  journalEntries: 5_000,
+  spellLevels: 64,
+  memorizedSpells: 500,
+  items: 500,
 };
 
-function parse(sourceId: string, bytes: Uint8Array): Parsed<Bg1State> {
+/** The BG1 kit's interpreter, with `limits` in place of the defaults it names. */
+export function createInterpreter(limits: Partial<ReadLimits> = {}): Interpreter<Bg1State> {
+  const resolved: ReadLimits = { ...DEFAULT_LIMITS, ...limits };
+  return {
+    parse: (sourceId, bytes) => parse(sourceId, bytes, resolved),
+    tools: [getState],
+  };
+}
+
+/** The BG1 kit's interpreter with the default limits. */
+export const interpreter: Interpreter<Bg1State> = createInterpreter();
+
+function parse(sourceId: string, bytes: Uint8Array, limits: ReadLimits): Parsed<Bg1State> {
   if (sourceId !== SOURCE_ID) {
     throw parseError(`The Baldur's Gate kit has no source "${clip(sourceId, QUOTE_MAX)}".`);
   }
@@ -37,7 +59,7 @@ function parse(sourceId: string, bytes: Uint8Array): Parsed<Bg1State> {
   try {
     const detected = detect(readFlavorFacts(gam));
     facts = { ...facts, flavor: detected.flavor };
-    const save = readGam(gam);
+    const save = readGam(gam, limits);
     const protagonist = save.party[0]?.name ?? "";
     return {
       flavor: detected.flavor,
@@ -53,6 +75,9 @@ function parse(sourceId: string, bytes: Uint8Array): Parsed<Bg1State> {
   } catch (error) {
     if (error instanceof Damaged) {
       throw parseError(`This Baldur's Gate save is cut short or damaged: ${error.what} is missing or out of place. Save the game again.`, facts);
+    }
+    if (error instanceof TooMany) {
+      throw parseError(`This Baldur's Gate save lists ${error.count} ${error.what}, and the server reads at most ${error.max}.`, facts);
     }
     throw error;
   }

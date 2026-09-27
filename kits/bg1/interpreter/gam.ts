@@ -3,8 +3,10 @@
 // https://gibberlings3.github.io/iesdp/). Every offset and count is checked
 // against the file, or against its CRE record, before it is read: a read out
 // of range, or a CRE record without its signature, throws Damaged, which
-// `parse` turns into a ParseError. The result holds the save's codes;
-// state.ts looks them up in the name tables.
+// `parse` turns into a ParseError. Each count is also capped (ReadLimits,
+// TooMany), and no record is read twice for one character, so the work is
+// bounded by the file's size, not by products of its counts. The result
+// holds the save's codes; state.ts looks them up in the name tables.
 
 /** A read past the end of the file or of a record, or a record in the wrong format. `what` names the part, for the player. */
 export class Damaged extends Error {
@@ -13,9 +15,43 @@ export class Damaged extends Error {
   }
 }
 
+/** A count over its limit. `what` names the records, for the player. */
+export class TooMany extends Error {
+  constructor(
+    readonly what: string,
+    readonly count: number,
+    readonly max: number,
+  ) {
+    super(`${count} ${what}, over the limit of ${max}`);
+  }
+}
+
+/**
+ * The most records of each kind `parse` reads (§0: proposed values, so
+ * config). A count over its limit is a ParseError. The party has at most 6
+ * members, the game's own limit.
+ */
+export interface ReadLimits {
+  /** Characters out of the party (GAM 0x34). */
+  otherCharacters: number;
+  /** Global variables (GAM 0x3c). */
+  variables: number;
+  /** Journal entries (GAM 0x4c). */
+  journalEntries: number;
+  /** Memorization-info entries per party member, one per spell type and level (CRE 0x2ac). */
+  spellLevels: number;
+  /** Memorized spells per party member (CRE 0x2b4). */
+  memorizedSpells: number;
+  /** Items per party member (CRE 0x2c0). */
+  items: number;
+}
+
 /** The GAM V2.0 signature and version (0x00). */
 export const GAM_SIGNATURE = "GAMEV2.0";
 const CRE_SIGNATURE = "CRE V1.0";
+
+/** The game's party size. */
+export const PARTY_MAX = 6;
 
 const GAM_HEADER_SIZE = 0xb4;
 const NPC_SIZE = 0x160;
@@ -122,19 +158,25 @@ export interface Gam {
   /** In record order: `party[0]` is the protagonist, Player1 (§6.6.2). */
   party: Npc[];
   /** Records not in the party: every joinable character the game has placed, met or not. */
-  others: Npc[];
+  others: Other[];
   /** The CHAPTER global, or null when the save has none. */
   chapter: number | null;
   journal: JournalEntry[];
 }
 
 export interface Npc {
-  /** 0 to 5, the portrait position; 0xffff out of the party (0x02). */
+  /** 0 to 5, the portrait position (0x02). */
   partyOrder: number;
   /** The GAM's name field (0xc0). Only the protagonist's is set. */
   name: string;
   area: string;
   cre: Cre | null;
+}
+
+/** A character out of the party: only what `former_party` needs (§6.6.4). */
+export interface Other {
+  area: string;
+  cre: { flags: number; deathVariable: string } | null;
 }
 
 export interface Cre {
@@ -146,8 +188,6 @@ export interface Cre {
   state: number;
   hp: number;
   maxHp: number;
-  /** Natural armor class, before items (0x46). */
-  armorClass: number;
   thac0: number;
   /** Death, wands, polymorph, breath, spells (0x54). */
   saves: number[];
@@ -200,47 +240,67 @@ export function readFlavorFacts(gam: Reader): { campaign: string; loadingProgres
   return { campaign: gam.text(0x94, 8, "the campaign"), loadingProgress: gam.u32(0x64, "the loading progress") };
 }
 
-/** The whole save. The signature is checked before. */
-export function readGam(gam: Reader): Gam {
+/** The whole save, with at most `limits` records of each kind. The signature is checked before. */
+export function readGam(gam: Reader, limits: ReadLimits): Gam {
   gam.check(0, GAM_HEADER_SIZE, "the header");
-  const npcs = (offset: number, count: number, list: string) =>
-    gam.records(gam.u32(offset, list), gam.u32(offset + 4, list), NPC_SIZE, list).map((at, i) => readNpc(gam, at, `record ${i + 1} of ${list}`));
+  const party = "the party list";
+  const others = "the list of characters out of the party";
   return {
     gameTime: gam.u32(0x08, "the game time"),
     gold: gam.u32(0x18, "the party gold"),
     activeMember: gam.i16(0x1c, "the active party member"),
     reputation: gam.u32(0x54, "the reputation"),
     currentArea: gam.resref(0x58, "the current area"),
-    party: npcs(0x20, 0x24, "the party list"),
-    others: npcs(0x30, 0x34, "the list of characters out of the party"),
-    chapter: readChapter(gam),
-    journal: readJournal(gam),
+    party: npcRecords(gam, 0x20, party, "party members", PARTY_MAX).map(({ at, what }) => {
+      const cre = creRecord(gam, at, what);
+      return {
+        partyOrder: gam.u16(at + 0x02, what),
+        name: gam.text(at + 0xc0, 32, what),
+        area: gam.resref(at + 0x18, what),
+        cre: cre && readCre(cre.reader, cre.what, limits),
+      };
+    }),
+    others: npcRecords(gam, 0x30, others, "characters out of the party", limits.otherCharacters).map(({ at, what }) => {
+      const cre = creRecord(gam, at, what);
+      return { area: gam.resref(at + 0x18, what), cre: cre && readCreHeader(cre.reader, cre.what) };
+    }),
+    chapter: readChapter(gam, limits),
+    journal: readJournal(gam, limits),
   };
 }
 
-function readNpc(gam: Reader, at: number, what: string): Npc {
-  const creOffset = gam.u32(at + 0x04, what);
-  const creSize = gam.u32(at + 0x08, what);
-  return {
-    partyOrder: gam.u16(at + 0x02, what),
-    name: gam.text(at + 0xc0, 32, what),
-    area: gam.resref(at + 0x18, what),
-    cre: creSize === 0 ? null : readCre(gam.sub(creOffset, creSize, `the character data of ${what}`), `the character data of ${what}`),
-  };
+/** The NPC records whose offset and count are at `offset` and `offset + 4`, at most `max` of them. */
+function npcRecords(gam: Reader, offset: number, list: string, noun: string, max: number): { at: number; what: string }[] {
+  const count = gam.u32(offset + 4, list);
+  if (count > max) throw new TooMany(noun, count, max);
+  return gam.records(gam.u32(offset, list), count, NPC_SIZE, list).map((at, i) => ({ at, what: `record ${i + 1} of ${list}` }));
 }
 
-function readCre(cre: Reader, what: string): Cre {
+/** The CRE record an NPC record points to, or null when it has none. */
+function creRecord(gam: Reader, at: number, what: string): { reader: Reader; what: string } | null {
+  const offset = gam.u32(at + 0x04, what);
+  const size = gam.u32(at + 0x08, what);
+  const creWhat = `the character data of ${what}`;
+  return size === 0 ? null : { reader: gam.sub(offset, size, creWhat), what: creWhat };
+}
+
+/** The CRE header, after checking its size and signature. */
+function readCreHeader(cre: Reader, what: string): { flags: number; deathVariable: string } {
   cre.check(0, CRE_HEADER_SIZE, what);
   if (cre.text(0, 8, what) !== CRE_SIGNATURE) throw new Damaged(what);
+  return { flags: cre.u32(0x10, what), deathVariable: cre.text(0x280, 32, what).trim().toUpperCase() };
+}
+
+function readCre(cre: Reader, what: string, limits: ReadLimits): Cre {
+  const { flags, deathVariable } = readCreHeader(cre, what);
   const u8 = (offset: number) => cre.u8(offset, what);
   return {
     longName: cre.u32(0x08, what),
-    flags: cre.u32(0x10, what),
+    flags,
     xp: cre.u32(0x18, what),
     state: cre.u32(0x20, what),
     hp: cre.u16(0x24, what),
     maxHp: cre.u16(0x26, what),
-    armorClass: cre.i16(0x46, what),
     thac0: u8(0x52),
     saves: [0x54, 0x55, 0x56, 0x57, 0x58].map(u8),
     thief: {
@@ -268,64 +328,81 @@ function readCre(cre: Reader, what: string): Cre {
     class: u8(0x273),
     gender: u8(0x275),
     alignment: u8(0x27b),
-    deathVariable: cre.text(0x280, 32, what).trim().toUpperCase(),
-    memorized: readMemorized(cre, what),
-    slots: readSlots(cre, what),
+    deathVariable,
+    memorized: readMemorized(cre, what, limits),
+    slots: readSlots(cre, what, limits),
   };
+}
+
+/** The count at `offset`, unless it is over `max`. */
+function readCount(reader: Reader, offset: number, what: string, noun: string, max: number): number {
+  const n = reader.u32(offset, what);
+  if (n > max) throw new TooMany(noun, n, max);
+  return n;
 }
 
 /**
  * The memorized spells, with the level and type of the memorization-info
  * entry that lists them. An entry whose index or count leaves the memorized
- * list is skipped.
+ * list is skipped. Entries that list more spells in all than the list holds
+ * overlap, so the record is damaged: each spell is read at most once.
  */
-function readMemorized(cre: Reader, what: string): MemorizedSpell[] {
-  const infos = cre.records(cre.u32(0x2a8, what), cre.u32(0x2ac, what), MEMORIZATION_INFO_SIZE, what);
-  const spells = cre.records(cre.u32(0x2b0, what), cre.u32(0x2b4, what), MEMORIZED_SPELL_SIZE, what);
+function readMemorized(cre: Reader, what: string, limits: ReadLimits): MemorizedSpell[] {
+  const infoCount = readCount(cre, 0x2ac, what, `spell levels in ${what}`, limits.spellLevels);
+  const spellCount = readCount(cre, 0x2b4, what, `memorized spells in ${what}`, limits.memorizedSpells);
+  const infos = cre.records(cre.u32(0x2a8, what), infoCount, MEMORIZATION_INFO_SIZE, what);
+  const spells = cre.records(cre.u32(0x2b0, what), spellCount, MEMORIZED_SPELL_SIZE, what);
   const memorized: MemorizedSpell[] = [];
+  let listed = 0;
   for (const info of infos) {
     const level = cre.u16(info, what) + 1;
     const type = cre.u16(info + 0x06, what);
     const first = cre.u32(info + 0x08, what);
-    const count = cre.u32(info + 0x0c, what);
-    if (first + count > spells.length) continue;
-    for (const at of spells.slice(first, first + count)) {
+    const n = cre.u32(info + 0x0c, what);
+    if (first + n > spells.length) continue;
+    listed += n;
+    if (listed > spells.length) throw new Damaged(what);
+    for (const at of spells.slice(first, first + n)) {
       memorized.push({ code: cre.resref(at, what), level, type, ready: (cre.u32(at + 0x08, what) & 1) === 1 });
     }
   }
   return memorized;
 }
 
-/** The item in each slot. A slot whose index leaves the item list is empty. */
-function readSlots(cre: Reader, what: string): (Item | null)[] {
-  const items = cre.records(cre.u32(0x2bc, what), cre.u32(0x2c0, what), ITEM_SIZE, what).map(
-    (at): Item => ({
+/** The item in each slot, read from the item list by the slot's index. A slot whose index leaves the list is empty. */
+function readSlots(cre: Reader, what: string, limits: ReadLimits): (Item | null)[] {
+  const itemCount = readCount(cre, 0x2c0, what, `items in ${what}`, limits.items);
+  const items = cre.u32(0x2bc, what);
+  if (itemCount > 0) cre.check(items, itemCount * ITEM_SIZE, what);
+  const slots = cre.u32(0x2b8, what);
+  return Array.from({ length: ITEM_SLOT_COUNT }, (_, i): Item | null => {
+    const index = cre.u16(slots + i * 2, what);
+    if (index === NO_ITEM || index >= itemCount) return null;
+    const at = items + index * ITEM_SIZE;
+    return {
       code: cre.resref(at, what),
       charges: [cre.u16(at + 0x0a, what), cre.u16(at + 0x0c, what), cre.u16(at + 0x0e, what)],
       identified: (cre.u32(at + 0x10, what) & 1) === 1,
-    }),
-  );
-  const slots = cre.u32(0x2b8, what);
-  return Array.from({ length: ITEM_SLOT_COUNT }, (_, i) => {
-    const index = cre.u16(slots + i * 2, what);
-    return index === NO_ITEM ? null : (items[index] ?? null);
+    };
   });
 }
 
 /** The CHAPTER global: the only variable the kit reads (§6.6.4). */
-function readChapter(gam: Reader): number | null {
-  const what = "the variables";
-  for (const at of gam.records(gam.u32(0x38, what), gam.u32(0x3c, what), VARIABLE_SIZE, what)) {
+function readChapter(gam: Reader, limits: ReadLimits): number | null {
+  const what = "the variable list";
+  const n = readCount(gam, 0x3c, what, "variables", limits.variables);
+  for (const at of gam.records(gam.u32(0x38, what), n, VARIABLE_SIZE, what)) {
     if (gam.text(at, 32, what).trim().toUpperCase() === "CHAPTER") return gam.i32(at + 0x28, what);
   }
   return null;
 }
 
 /** The journal, in the save's order. Entries whose text is not in dialog.tlk (the player's own notes) are left out. */
-function readJournal(gam: Reader): JournalEntry[] {
+function readJournal(gam: Reader, limits: ReadLimits): JournalEntry[] {
   const what = "the journal";
+  const n = readCount(gam, 0x4c, what, "journal entries", limits.journalEntries);
   return gam
-    .records(gam.u32(0x50, what), gam.u32(0x4c, what), JOURNAL_ENTRY_SIZE, what)
+    .records(gam.u32(0x50, what), n, JOURNAL_ENTRY_SIZE, what)
     .filter((at) => gam.u8(at + 0x0b, what) === TLK_LOCATION)
     .map((at) => ({
       strref: gam.u32(at, what),

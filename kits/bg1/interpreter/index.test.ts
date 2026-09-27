@@ -100,9 +100,49 @@ describe("a file that is not a whole save", () => {
     expect(error).toMatchObject({ message: expect.stringMatching(/^This Baldur's Gate save is cut short or damaged: the journal/), adapterSchema: 0, flavor: "bgee" });
   });
 
+  it("is a ParseError, fast, when counts would multiply the work", { timeout: 1000 }, () => {
+    const cases = [
+      // One party member whose spell levels each list every memorized spell.
+      { bytes: crafted(1, 150_000, { infos: 9_000, spells: 12_500 }), message: /lists 9000 spell levels in the character data of record 1 of the party list/ },
+      // The same, within the limits: the spell levels list more spells than there are.
+      { bytes: crafted(1, 150_000, { infos: 64, spells: 500 }), message: /cut short or damaged: the character data of record 1 of the party list/ },
+      // 1,000 party records that share one character.
+      { bytes: crafted(1_000, 1_000_000, {}), message: /lists 1000 party members, and the server reads at most 6/ },
+    ];
+    for (const { bytes, message } of cases) expect(() => parse(bytes)).toThrow(message);
+  });
+
   it("is a ParseError without the GAME V2.0 signature", () => {
     for (const bytes of [new Uint8Array(0), whole.subarray(0, 7), new TextEncoder().encode("GAMEV1.1 and more")]) {
       expect(() => parse(bytes)).toThrow(new ParseError(NOT_A_SAVE_MESSAGE));
     }
   });
 });
+
+/**
+ * A GAM of `size` bytes with `records` party records that all point to one
+ * CRE, whose `infos` memorization-info entries each list all of its `spells`
+ * memorized spells.
+ */
+function crafted(records: number, size: number, { infos = 0, spells = 0 }: { infos?: number; spells?: number }): Uint8Array {
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer);
+  const u32 = (at: number, value: number) => view.setUint32(at, value, true);
+  bytes.set(new TextEncoder().encode("GAMEV2.0"), 0);
+  const party = 0xb4;
+  const cre = party + records * 0x160;
+  u32(0x20, party);
+  u32(0x24, records);
+  for (let i = 0; i < records; i++) {
+    u32(party + i * 0x160 + 0x04, cre);
+    u32(party + i * 0x160 + 0x08, size - cre);
+  }
+  bytes.set(new TextEncoder().encode("CRE V1.0"), cre);
+  const infoAt = 0x2d4;
+  u32(cre + 0x2a8, infoAt);
+  u32(cre + 0x2ac, infos);
+  u32(cre + 0x2b0, 0);
+  u32(cre + 0x2b4, spells);
+  for (let i = 0; i < infos; i++) u32(cre + infoAt + i * 16 + 0x0c, spells);
+  return bytes;
+}

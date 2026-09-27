@@ -58,10 +58,9 @@ export interface PartyMember {
   hp: number;
   max_hp: number;
   abilities: Cre["abilities"];
-  // The save holds the base armor class, THAC0, saving throws, and thief
-  // skills: the game adds the items', effects', and ability scores' bonuses
-  // as it plays. Every character's base armor class is 10.
-  base_armor_class: number;
+  // The save holds the base THAC0, saving throws, and thief skills: the game
+  // adds the items', effects', and ability scores' bonuses as it plays. It
+  // holds no armor class but the base 10, so the state leaves it out.
   base_thac0: number;
   base_saving_throws: { death: number; wands: number; polymorph: number; breath: number; spells: number };
   /** Null for a class without thief skills. */
@@ -244,7 +243,6 @@ function partyMember(npc: Npc, cre: Cre, protagonist: boolean, lookup: Lookup): 
     hp: cre.hp,
     max_hp: cre.maxHp,
     abilities: cre.abilities,
-    base_armor_class: cre.armorClass,
     base_thac0: cre.thac0,
     base_saving_throws: { death, wands, polymorph, breath, spells },
     base_thief_skills: THIEF_SKILL_CLASSES.has(cre.class) ? cre.thief : null,

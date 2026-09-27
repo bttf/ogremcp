@@ -30,7 +30,7 @@ export function describeGetState(experimental: readonly string[]): string {
   return [
     "Baldur's Gate: Enhanced Edition: the player's game state, from the latest snapshot, by default of the newest save.",
     "`character` (the protagonist's name) picks another playthrough, and `sections` narrows it.",
-    "The result carries `snapshot_at`, `flavor`, `rules`, and `character`.",
+    "The result carries `snapshot_at`, `flavor`, `rules`, and `character`. The party's `base_*` values leave out items and bonuses.",
     SOURCES_RULE,
     FRESHNESS_RULE,
     QUESTS_RULE,
