@@ -35,9 +35,11 @@ describe("loadKitRegistry", () => {
   });
   afterAll(() => rmSync(adaptersDir, { recursive: true, force: true }));
 
-  it("loads the WoW kit: manifest, interpreter, and adapter zip (§5, §8.2)", () => {
+  it("loads the kits, and the WoW kit's manifest, interpreter, and adapter zip (§5, §8.2)", () => {
     const registry = loadKitRegistry({ adaptersDir });
-    expect(registry.list().map((kit) => kit.key)).toEqual(["wow"]);
+    expect(registry.list().map((kit) => kit.key)).toEqual(["wow", "bg1"]);
+    // BG1 has no adapter (§6.6), so the build made no zip for it.
+    expect(registry.get("bg1")?.adapter).toBeNull();
     const kit = registry.get("wow");
     expect(kit?.manifest.tool_prefix).toBe("wow");
     expect(kit?.name).toBe("World of Warcraft");

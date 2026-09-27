@@ -8,6 +8,8 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
+import { interpreter as bg1Interpreter } from "@ogremcp/kit-bg1";
+import bg1Manifest from "@ogremcp/kit-bg1/manifest.json" with { type: "json" };
 import { interpreter as wowInterpreter } from "@ogremcp/kit-wow";
 import wowManifest from "@ogremcp/kit-wow/manifest.json" with { type: "json" };
 import type { Interpreter, Manifest } from "@ogremcp/sdk";
@@ -18,7 +20,10 @@ import { checkKits, type KitSource } from "./validate.js";
 // Only `resolve`: the registry finds kit files, and loads no module this way.
 const { resolve } = createRequire(import.meta.url);
 
-/** A kit's `adapter/` folder, next to the `manifest.json` that `manifestPath` names. */
+/**
+ * A kit's `adapter/` folder, next to the `manifest.json` that `manifestPath`
+ * names. An adapter-less kit has none, and nothing reads the path (§6.1).
+ */
 function adapterDir(manifestPath: string): string {
   return join(dirname(manifestPath), "adapter");
 }
@@ -31,6 +36,12 @@ export const KIT_SOURCES: readonly KitSource[] = [
     interpreter: wowInterpreter,
     adapterDir: adapterDir(resolve("@ogremcp/kit-wow/manifest.json")),
   },
+  {
+    package: "@ogremcp/kit-bg1",
+    manifest: bg1Manifest,
+    interpreter: bg1Interpreter,
+    adapterDir: adapterDir(resolve("@ogremcp/kit-bg1/manifest.json")),
+  },
 ];
 
 /**
@@ -38,7 +49,10 @@ export const KIT_SOURCES: readonly KitSource[] = [
  * manifest has no display name, so the platform keeps them here. A kit without
  * one stops the start.
  */
-export const KIT_NAMES: ReadonlyMap<string, string> = new Map([["wow", "World of Warcraft"]]);
+export const KIT_NAMES: ReadonlyMap<string, string> = new Map([
+  ["wow", "World of Warcraft"],
+  ["bg1", "Baldur's Gate: Enhanced Edition"],
+]);
 
 /** A checked kit, as the rest of the platform sees it. */
 export interface Kit {

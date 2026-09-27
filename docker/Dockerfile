@@ -48,6 +48,7 @@ RUN mkdir /prod \
       node_modules \
       packages/sdk/package.json packages/sdk/LICENSE packages/sdk/dist packages/sdk/src/manifest.schema.json \
       kits/wow/package.json kits/wow/LICENSE kits/wow/dist kits/wow/manifest.json kits/wow/node_modules \
+      kits/bg1/package.json kits/bg1/LICENSE kits/bg1/dist kits/bg1/manifest.json kits/bg1/data kits/bg1/node_modules \
       platform/package.json platform/LICENSE platform/dist platform/migrations platform/node_modules \
       /prod
 

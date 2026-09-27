@@ -14,7 +14,7 @@ export interface KitSource {
   /** The kit's `manifest.json`, checked against the SDK's manifest schema. */
   manifest: unknown;
   interpreter: Interpreter<unknown>;
-  /** The kit's `adapter/` folder. The build zips it (§5, §8.2). */
+  /** The kit's `adapter/` folder. The build zips it when the manifest has an `adapter` (§5, §6.1, §8.2). */
   adapterDir: string;
 }
 
