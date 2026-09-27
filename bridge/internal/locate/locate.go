@@ -21,6 +21,11 @@
 // the Prompter for a folder. A candidate counts only when root.verify matches
 // under it. The caller remembers the result for this device (package config).
 //
+// A path the OS does not let the bridge read does not count, and the chain
+// goes on. macOS refuses a folder in Documents until the user allows the
+// bridge to read it (§6.6.1). A Prompter that is also a Refuser is told of
+// each refused path.
+//
 // # Staying under root
 //
 // Glob checks the text of a relative path (manifest.CheckRelative), and then
@@ -38,6 +43,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,6 +67,23 @@ type Prompter interface {
 	// PickFolder shows a folder picker titled title, the manifest's prompt,
 	// and returns the folder the user picked, or "" when the user cancels.
 	PickFolder(ctx context.Context, title string) (string, error)
+}
+
+// Refuser is told of each path of the locate chain that the OS did not let
+// the bridge read. Root calls Refused when its Prompter is a Refuser, and goes
+// on with the chain.
+type Refuser interface {
+	Refused(path string)
+}
+
+// refusals tells its Refuser, when it has one, of each path whose error is a
+// refusal.
+type refusals struct{ to Refuser }
+
+func (r refusals) check(path string, err error) {
+	if r.to != nil && errors.Is(err, fs.ErrPermission) {
+		r.to.Refused(path)
+	}
 }
 
 // Env holds the values of the manifest's variables on this device. An empty
@@ -94,8 +117,10 @@ func DefaultEnv() Env {
 // nothing verified, and an error that wraps ErrWrongFolder when the user
 // picked a folder that does not verify.
 func Root(ctx context.Context, r manifest.Root, remembered string, env Env, p Prompter) (string, error) {
+	var refused refusals
+	refused.to, _ = p.(Refuser)
 	if remembered != "" && filepath.IsAbs(remembered) {
-		ok, err := verifies(remembered, r.Verify)
+		ok, err := verifies(remembered, r.Verify, refused)
 		if err != nil {
 			return "", err
 		}
@@ -109,8 +134,8 @@ func Root(ctx context.Context, r manifest.Root, remembered string, env Env, p Pr
 		}
 		switch {
 		case e.Path != "":
-			for _, dir := range expand(e.Path, env) {
-				ok, err := verifies(dir, r.Verify)
+			for _, dir := range expand(e.Path, env, refused) {
+				ok, err := verifies(dir, r.Verify, refused)
 				if err != nil {
 					return "", err
 				}
@@ -129,7 +154,7 @@ func Root(ctx context.Context, r manifest.Root, remembered string, env Env, p Pr
 			if !filepath.IsAbs(dir) {
 				return "", fmt.Errorf("%w: %q is not a full path", ErrWrongFolder, dir)
 			}
-			ok, err := verifies(dir, r.Verify)
+			ok, err := verifies(dir, r.Verify, refused)
 			if err != nil {
 				return "", err
 			}
@@ -144,18 +169,18 @@ func Root(ctx context.Context, r manifest.Root, remembered string, env Env, p Pr
 
 // verifies reports whether dir is a folder and root.verify, pattern, matches
 // under it.
-func verifies(dir, pattern string) (bool, error) {
-	if !isDir(dir) {
+func verifies(dir, pattern string, refused refusals) (bool, error) {
+	if !isDir(dir, refused) {
 		return false, nil
 	}
-	matches, err := Glob(dir, pattern)
+	matches, err := glob(dir, pattern, refused)
 	return len(matches) > 0, err
 }
 
 // expand returns the existing folders a locate path matches. A path that
 // starts with an undefined variable, or that is not absolute on this OS once
 // its variable is expanded, matches nothing.
-func expand(path string, env Env) []string {
+func expand(path string, env Env, refused refusals) []string {
 	base, rest := "", path
 	if filepath.IsAbs(path) {
 		vol := filepath.VolumeName(path)
@@ -175,8 +200,8 @@ func expand(path string, env Env) []string {
 		return nil
 	}
 	var dirs []string
-	for _, p := range walk(base, manifest.Segments(rest)) {
-		if isDir(p) {
+	for _, p := range walk(base, manifest.Segments(rest), refused) {
+		if isDir(p, refused) {
 			dirs = append(dirs, p)
 		}
 	}
@@ -189,10 +214,15 @@ func expand(path string, env Env) []string {
 // filepath.Glob, it ignores file system errors, such as a folder it cannot
 // read.
 func Glob(root, rel string) ([]string, error) {
+	return glob(root, rel, refusals{})
+}
+
+// glob is Glob, and tells refused of each path the OS did not let it read.
+func glob(root, rel string, refused refusals) ([]string, error) {
 	if err := manifest.CheckRelative(rel); err != nil {
 		return nil, fmt.Errorf("the path %q %w", rel, err)
 	}
-	matches := walk(root, manifest.Segments(rel))
+	matches := walk(root, manifest.Segments(rel), refused)
 	for _, p := range matches {
 		if !inside(root, p) {
 			return nil, fmt.Errorf("the path %q leaves the game folder", rel)
@@ -203,14 +233,14 @@ func Glob(root, rel string) ([]string, error) {
 
 // walk returns the existing paths under base that segs match, sorted. Every
 // segment but the last must match a folder.
-func walk(base string, segs []string) []string {
+func walk(base string, segs []string, refused refusals) []string {
 	paths := []string{base}
 	for i, seg := range segs {
 		var next []string
 		for _, dir := range paths {
-			for _, name := range entries(dir, seg) {
+			for _, name := range entries(dir, seg, refused) {
 				p := filepath.Join(dir, name)
-				if i == len(segs)-1 || isDir(p) {
+				if i == len(segs)-1 || isDir(p, refused) {
 					next = append(next, p)
 				}
 			}
@@ -222,15 +252,18 @@ func walk(base string, segs []string) []string {
 }
 
 // entries returns the names in dir that seg, one segment, matches.
-func entries(dir, seg string) []string {
+func entries(dir, seg string, refused refusals) []string {
 	if !strings.Contains(seg, "*") {
-		if _, err := os.Stat(filepath.Join(dir, seg)); err != nil {
+		p := filepath.Join(dir, seg)
+		if _, err := os.Stat(p); err != nil {
+			refused.check(p, err)
 			return nil
 		}
 		return []string{seg}
 	}
 	list, err := os.ReadDir(dir)
 	if err != nil {
+		refused.check(dir, err)
 		return nil
 	}
 	var names []string
@@ -287,7 +320,10 @@ func inside(root, p string) bool {
 	return err == nil && rel != "." && filepath.IsLocal(rel)
 }
 
-func isDir(path string) bool {
+// isDir reports whether path is a folder. It tells refused when the OS did
+// not let it read path.
+func isDir(path string, refused refusals) bool {
 	info, err := os.Stat(path)
+	refused.check(path, err)
 	return err == nil && info.IsDir()
 }

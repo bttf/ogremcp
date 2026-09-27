@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -254,9 +255,16 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			errs["kit|"+k.Kit] = names[k.Kit] + ": " + k.Err.Error()
 			continue
 		}
-		root, err := locate.Root(ctx, k.Manifest.Root, c.savedRoot(k.Kit), p.env, kitPrompter{c: c, kit: k.Kit})
+		kp := &kitPrompter{c: c, kit: k.Kit}
+		root, err := locate.Root(ctx, k.Manifest.Root, c.savedRoot(k.Kit), p.env, kp)
 		if ctx.Err() != nil {
 			return
+		}
+		// macOS refuses a folder in Documents until the user allows it
+		// (§6.6.1). The chain has gone on to the folder picker.
+		if len(kp.refused) > 0 && runtime.GOOS == "darwin" {
+			errs["access|"+k.Kit] = names[k.Kit] + ": macOS did not let the bridge read " + kp.refused[0] +
+				". You can allow it under System Settings > Privacy & Security > Files and Folders."
 		}
 		if err != nil {
 			errs["locate|"+k.Kit] = names[k.Kit] + ": " + err.Error()
@@ -361,13 +369,19 @@ func (c *Controller) logShown(msgs []string) {
 
 // kitPrompter is the folder picker of one kit's locate chain. It shows the
 // picker once per kit, until ChooseFolder allows it again, so a user who
-// cancels is not asked at every fetch.
+// cancels is not asked at every fetch. It also collects the paths of the
+// chain that the OS refused (locate.Refuser).
 type kitPrompter struct {
-	c   *Controller
-	kit string
+	c       *Controller
+	kit     string
+	refused []string
 }
 
-func (p kitPrompter) PickFolder(ctx context.Context, title string) (string, error) {
+func (p *kitPrompter) Refused(path string) {
+	p.refused = append(p.refused, path)
+}
+
+func (p *kitPrompter) PickFolder(ctx context.Context, title string) (string, error) {
 	c := p.c
 	c.mu.Lock()
 	if c.asked == nil {

@@ -23,6 +23,21 @@
 // lost events; the platform ignores an upload whose bytes it already has
 // (§8.3).
 //
+// # New folders
+//
+// The watcher also watches each folder that holds the last folder segment
+// of a source path with a "*": for BG1's save/*/BALDUR.gam, the save folder,
+// and for WoW's path, each WTF/Account folder. An entry there that matches
+// the segment and is created, renamed, or removed makes the watcher resolve
+// the globs again once the debounce delay has passed without another. So a
+// new save folder is watched, and its file uploaded, without waiting for the
+// interval, and so is a save folder the game removes and writes again (§7).
+// The spec names creates and renames. Removes count too: on macOS, kqueue
+// can report a folder removed and made again as a remove alone. The delay
+// lets the game finish writing the folder. A folder watch that starts
+// resolves the globs again too, after the delay, since a folder may have
+// appeared between the resolve and the watch.
+//
 // # Changes
 //
 // Each event that names an instance's file, other than a change of mode,
@@ -117,6 +132,13 @@ type Watcher struct {
 	pending map[instKey]*pending
 	due     chan *pending
 	tick    chan struct{}
+	// folders holds the folder watches: each folder that holds a source
+	// path's last folder segment with a "*", and those segments.
+	folders map[string][]string
+	// soon is the timer of a rescan that a folder watch asks for, or nil.
+	// soonDue gets its fire.
+	soon    timer
+	soonDue chan struct{}
 	// warned holds the problems logged already, so each is logged once.
 	warned map[string]bool
 }
@@ -202,6 +224,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 	w.pending = map[instKey]*pending{}
 	w.due = make(chan *pending)
 	w.tick = make(chan struct{})
+	w.folders = map[string][]string{}
+	w.soonDue = make(chan struct{})
 	w.warned = map[string]bool{}
 
 	w.takeKits()
@@ -209,6 +233,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 	period := w.clock.AfterFunc(w.interval, w.tock)
 	defer func() {
 		period.Stop()
+		if w.soon != nil {
+			w.soon.Stop()
+		}
 		for _, p := range w.pending {
 			p.timer.Stop()
 		}
@@ -224,15 +251,22 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-w.tick:
 			w.rescan()
 			period = w.clock.AfterFunc(w.interval, w.tock)
+		case <-w.soonDue:
+			// A fire of a timer that was stopped too late gives one rescan
+			// more, which changes nothing.
+			w.soon = nil
+			w.rescan()
 		case ev := <-fsw.Events:
 			w.event(ev)
 		case err := <-fsw.Errors:
 			w.log.Warn("file watcher error", "error", err)
 			if errors.Is(err, fsnotify.ErrEventOverflow) {
-				// Events were lost: count every instance as changed.
+				// Events were lost: count every instance as changed, and
+				// look for new folders.
 				for _, wt := range w.watches {
 					w.scheduleExisting(wt)
 				}
+				w.rescanSoon()
 			}
 		case p := <-w.due:
 			// A timer that fired before it was restarted is not the
@@ -262,7 +296,8 @@ func (w *Watcher) takeKits() {
 }
 
 // event handles one file event: it starts or restarts the debounce of each
-// instance the event names.
+// instance the event names, and of a rescan when the event names a new or
+// lost entry of a folder watch.
 func (w *Watcher) event(ev fsnotify.Event) {
 	if ev.Op == fsnotify.Chmod {
 		return
@@ -275,9 +310,30 @@ func (w *Watcher) event(ev fsnotify.Event) {
 			matched = true
 		}
 	}
+	if ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Rename) || ev.Op.Has(fsnotify.Remove) {
+		if slices.ContainsFunc(w.folders[dir], func(seg string) bool { return locate.Match(seg, name) }) {
+			w.tracef("rescan soon %s", ev.Name)
+			w.rescanSoon()
+			matched = true
+		}
+	}
 	if !matched {
 		w.tracef("ignore %s", ev.Name)
 	}
+}
+
+// rescanSoon starts or restarts the debounce of a rescan.
+func (w *Watcher) rescanSoon() {
+	if w.soon != nil {
+		w.soon.Stop()
+	}
+	ctx := w.ctx
+	w.soon = w.clock.AfterFunc(w.debounce, func() {
+		select {
+		case w.soonDue <- struct{}{}:
+		case <-ctx.Done():
+		}
+	})
 }
 
 // fileName returns the name of the instance that name, a matching file in the
@@ -339,6 +395,7 @@ func (w *Watcher) settle(key instKey) {
 // watches in line with them.
 func (w *Watcher) rescan() {
 	want := map[watchKey]*watch{}
+	wantFolders := map[string][]string{}
 	for _, k := range w.kits {
 		for _, s := range k.Sources {
 			if s.Type != "file" {
@@ -355,11 +412,20 @@ func (w *Watcher) rescan() {
 			for _, wt := range list {
 				want[wt.watchKey] = wt
 			}
+			dirs, seg := folders(k, s)
+			for _, dir := range dirs {
+				if !slices.Contains(wantFolders[dir], seg) {
+					wantFolders[dir] = append(wantFolders[dir], seg)
+				}
+			}
 		}
 	}
 	wanted := map[string]bool{}
 	for key := range want {
 		wanted[key.dir] = true
+	}
+	for dir := range wantFolders {
+		wanted[dir] = true
 	}
 
 	// fsnotify drops the watch of a folder that is removed or renamed. A
@@ -427,6 +493,17 @@ func (w *Watcher) rescan() {
 			delete(w.pending, key)
 		}
 	}
+	w.folders = map[string][]string{}
+	started := false
+	for dir, segs := range wantFolders {
+		if w.dirs[dir] != nil {
+			w.folders[dir] = segs
+			started = started || added[dir]
+		}
+	}
+	if started {
+		w.rescanSoon()
+	}
 	if changed {
 		w.log.Info("watching source folders", "folders", len(w.dirs))
 	}
@@ -487,6 +564,38 @@ func resolve(k Kit, s manifest.Source) ([]*watch, error) {
 		})
 	}
 	return list, nil
+}
+
+// folders returns the folders of a source's folder watches: those under the
+// kit's root that hold the last folder segment of the source's path with a
+// "*". It also returns that segment. It returns no folders when no folder
+// segment has a "*". Call it on a source that resolve accepts.
+func folders(k Kit, s manifest.Source) ([]string, string) {
+	root := filepath.Clean(k.Root)
+	segs := manifest.Segments(s.Path)
+	i := len(segs) - 2
+	for i >= 0 && !strings.Contains(segs[i], "*") {
+		i--
+	}
+	if i < 0 {
+		return nil, ""
+	}
+	dirs := []string{root}
+	if i > 0 {
+		// Glob checks that each folder is inside root. On an error, the
+		// source's new folders wait for the interval.
+		var err error
+		if dirs, err = locate.Glob(root, strings.Join(segs[:i], "/")); err != nil {
+			return nil, ""
+		}
+	}
+	var list []string
+	for _, dir := range dirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			list = append(list, dir)
+		}
+	}
+	return list, segs[i]
 }
 
 // warnOnce logs a warning, unless the problem named key was logged before.
