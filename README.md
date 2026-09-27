@@ -19,6 +19,8 @@ To run your own server with Docker Compose, see [`docs/self-host.md`](docs/self-
 
 Each of the four paths above has its own `LICENSE` file. `platform/` is licensed under the GNU Affero General Public License v3.0 or later. `packages/sdk/`, `kits/wow/`, and `bridge/` are licensed under the MIT License. Every file outside those four paths is licensed under the MIT License in the root [`LICENSE`](LICENSE).
 
+The exception is `kits/bg1/data/`. It holds text extracted from Baldur's Gate: Enhanced Edition, which is Beamdog's. No license in this repository covers it; see its [`NOTICE`](kits/bg1/data/NOTICE).
+
 ## Contributing
 
 Contributions use the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), not a CLA. Sign off every commit with `git commit -s`. CI fails a pull request if any of its commits lacks a `Signed-off-by:` line that matches the commit author's name and email.
