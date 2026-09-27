@@ -10,8 +10,10 @@ import type { PlatformTool, PlatformToolContext } from "./tools.js";
  * characters, newest first. A character is a character key in one flavor:
  * the same `Name-Realm` in two flavors is two characters (§6.2). Each shows
  * the name and realm of its latest snapshot, so a renamed character shows
- * its new name. `last_active` is the game and flavor of the newest snapshot
- * of any enabled game.
+ * its new name. A character of a kit without realms, such as BG1, shows its
+ * name alone: its realm is `""`, and the result leaves `realm` out (§6.2).
+ * `last_active` is the game and flavor of the newest snapshot of any enabled
+ * game.
  *
  * When no enabled game has a snapshot, the result also carries `note` and
  * the `setup` steps. That is a normal result, not an `isError` one: the
@@ -41,7 +43,7 @@ export const SETUP_STEPS: readonly string[] = [
   "Enable the game on the Games page of the Ogre MCP website. The bridge installs a game's addon only when the game is enabled.",
   "Install the Ogre MCP bridge on the computer that runs the game, from the Get started page of the website.",
   "Approve the bridge on the website, with the code the bridge shows.",
-  "Type /transmit in World of Warcraft. If WoW was running when the bridge installed the addon, restart WoW first.",
+  "Send the game's state. In World of Warcraft, type /transmit; if WoW was running when the bridge installed the addon, restart WoW first. In Baldur's Gate: Enhanced Edition, save the game; a quick-save is fastest.",
 ];
 
 export const NO_GAMES_NOTE =
@@ -51,7 +53,8 @@ export const NO_SNAPSHOT_NOTE = "No snapshot yet. The player sends the first one
 
 interface CharacterSummary {
   name: string;
-  realm: string;
+  /** Left out for a character without a realm (§6.2). */
+  realm?: string;
   flavor: string;
   snapshot_at: string;
 }
@@ -121,7 +124,7 @@ async function summarize({ pool, user, settings }: PlatformToolContext, kit: Kit
     snapshot_at: latest[0]?.snapshot_at.toISOString() ?? null,
     characters: characters.map((row) => ({
       name: row.character_name,
-      realm: row.character_realm,
+      ...(row.character_realm !== "" && { realm: row.character_realm }),
       flavor: row.flavor,
       snapshot_at: row.snapshot_at.toISOString(),
     })),

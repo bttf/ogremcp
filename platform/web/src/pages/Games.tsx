@@ -9,7 +9,9 @@ export interface Game {
 
 /**
  * In-game tips by kit key (§13.2). The page shows a game's tips while the
- * game is enabled. The bridge installs and updates the addon (§7).
+ * game is enabled. The bridge installs and updates the WoW addon (§7). BG1
+ * has no addon: the bridge reads its saves from the game's folder in
+ * Documents (§6.6.1).
  */
 const TIPS: Readonly<Record<string, readonly ReactNode[]>> = {
   wow: [
@@ -18,6 +20,11 @@ const TIPS: Readonly<Record<string, readonly ReactNode[]>> = {
     </>,
     "Restart WoW after the addon's first install.",
     "Close WoW to finish an addon update.",
+  ],
+  bg1: [
+    "Save the game to send your latest state. A quick-save is fastest.",
+    "The bridge reads your saves from the game's folder in Documents.",
+    "On macOS, allow the bridge to read your Documents folder when macOS asks.",
   ],
 };
 

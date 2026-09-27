@@ -43,8 +43,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     }
   });
 
-  /** A user with a device, and a function that stores one snapshot of theirs, in insert order. */
-  async function newUser(): Promise<{ uuid: string; add(snapshotAt: Date, flavor: string, character: Character | null): Promise<void> }> {
+  /** A user with a device, and a function that stores one snapshot of theirs of `kit`, in insert order. */
+  async function newUser(kit = "wow"): Promise<{ uuid: string; add(snapshotAt: Date, flavor: string, character: Character | null): Promise<void> }> {
     const { rows: users } = await pool.query<{ id: string; uuid: string }>("insert into users default values returning id, uuid");
     const user = users[0];
     if (user === undefined) throw new Error("no user row");
@@ -56,22 +56,22 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
         const hex = () => randomBytes(32).toString("hex");
         const { rows } = await pool.query<{ id: string }>(
           `insert into uploads (user_id, device_id, kit, source_id, instance, sha256, content_gzip, kit_version, adapter_schema, parse_status)
-           values ($1, $2, 'wow', 'savedvariables', $3, $4, '\\x00', '0.1.0', 1, 'parsed') returning id`,
-          [user.id, deviceId, hex(), hex()],
+           values ($1, $2, $3, 'savedvariables', $4, $5, '\\x00', '0.1.0', 1, 'parsed') returning id`,
+          [user.id, deviceId, kit, hex(), hex()],
         );
         await pool.query(
           `insert into snapshots (user_id, upload_id, kit, flavor, rules, character_key, character_name, character_realm, snapshot_at, state)
-           values ($1, $2, 'wow', $3, '{}', $4, $5, $6, $7, $8)`,
-          [user.id, rows[0]?.id, flavor, character?.key, character?.name, character?.realm, snapshotAt, { at: snapshotAt.toISOString() }],
+           values ($1, $2, $3, $4, '{}', $5, $6, $7, $8, $9)`,
+          [user.id, rows[0]?.id, kit, flavor, character?.key, character?.name, character?.realm, snapshotAt, { at: snapshotAt.toISOString() }],
         );
       },
     };
   }
 
-  async function contextOf(uuid: string, settings: ToolContextSettings = DEFAULT_TOOL_CONTEXT) {
+  async function contextOf(uuid: string, settings: ToolContextSettings = DEFAULT_TOOL_CONTEXT, kit = "wow") {
     const user = await findToolUser(pool, uuid);
     if (user === null) throw new Error("no user");
-    return createToolContext({ pool, user, kit: "wow", settings });
+    return createToolContext({ pool, user, kit, settings });
   }
 
   it("orders by snapshot_at, not insert time, and caps history at maxHistoryLimit", async () => {
@@ -150,6 +150,19 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("ToolContext (§6.2)", () => {
     expect((await ctx.latest({ character: "zoela-otherrealm" }))?.character).toEqual(ZOELA_OTHER);
     // A flavor narrows the characters a name can match.
     expect((await ctx.latest({ character: "zoela", flavor: "classic_era" }))?.character).toEqual(ZOELA);
+  });
+
+  it("matches a character without a realm on the whole argument, hyphen and all (§6.2)", async () => {
+    const user = await newUser("bg1");
+    const hyphenated = { key: "Jan-Kai", name: "Jan-Kai", realm: "" };
+    const jan = { key: "Jan", name: "Jan", realm: "" };
+    await user.add(at(10), "bgee", hyphenated);
+    await user.add(at(11), "bgee", jan);
+    const ctx = await contextOf(user.uuid, DEFAULT_TOOL_CONTEXT, "bg1");
+
+    expect((await ctx.latest({ character: "jan-kai" }))?.character).toEqual(hyphenated);
+    expect((await ctx.latest({ character: "JAN" }))?.character).toEqual(jan);
+    await expect(ctx.latest({ character: "Jan-" })).rejects.toThrow(UserFacingError);
   });
 
   it("counts one Name-Realm in two flavors as two characters", async () => {

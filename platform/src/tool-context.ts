@@ -20,14 +20,17 @@ import type { Pool } from "pg";
  *   without regard to case. Realms also compare without whitespace, `-`, and
  *   `.`, as chat shows them: `Brannic-LivingFlame` names Brannic of Living
  *   Flame.
+ * - A character of a kit without realms, such as BG1, has the realm `""`
+ *   (§6.2). The whole argument names it, without regard to case, and is not
+ *   split at a hyphen: `Jan-Kai` names the character Jan-Kai.
  * - The snapshots of every matching character key are read: the key stays
  *   the same when a character is renamed or moves realm, and a deleted
  *   character's name can come back with a new key.
  * - Matches with more than one key and more than one `Name-Realm` and
  *   flavor pair are ambiguous: the same `Name-Realm` in two flavors is two
  *   characters. An ambiguous name rejects with a `UserFacingError` that lists
- *   the matches as `Name-Realm (flavor)`, newest first. No match rejects with
- *   one too.
+ *   the matches as `Name-Realm (flavor)`, or `Name (flavor)` without a
+ *   realm, newest first. No match rejects with one too.
  *
  * A bad `since`, `limit`, or `character` also rejects with a
  * `UserFacingError`, so that the agent gets a tool result it can act on
@@ -165,7 +168,7 @@ export function createToolContext({ pool, user, kit, settings, onRead }: ToolCon
     const keys = [...new Set(matches.map((row) => row.character_key))];
     const names = new Map<string, string>();
     for (const row of matches) {
-      const name = `${row.character_name}-${row.character_realm} (${row.flavor})`;
+      const name = `${characterName(row)} (${row.flavor})`;
       if (!names.has(name.toLowerCase())) names.set(name.toLowerCase(), name);
     }
     if (keys.length > 1 && names.size > 1) {
@@ -221,13 +224,20 @@ export function createToolContext({ pool, user, kit, settings, onRead }: ToolCon
 
 /**
  * Whether `wanted`, a `Name-Realm` or a bare name, names the row's character.
- * Case-insensitive, and realms compare in `realmKey` form.
+ * Case-insensitive, and realms compare in `realmKey` form. A character
+ * without a realm matches the whole of `wanted` (§6.2).
  */
 function sameCharacter(row: CharacterRow, wanted: string): boolean {
   const w = wanted.toLowerCase();
+  if (row.character_realm === "") return row.character_name.toLowerCase() === w.trim();
   const hyphen = w.indexOf("-");
   if (hyphen === -1) return row.character_name.toLowerCase() === w.trim();
   return row.character_name.toLowerCase() === w.slice(0, hyphen).trim() && realmKey(row.character_realm) === realmKey(w.slice(hyphen + 1));
+}
+
+/** `Name-Realm`, or the name alone for a character without a realm (§6.2). */
+function characterName(row: CharacterRow): string {
+  return row.character_realm === "" ? row.character_name : `${row.character_name}-${row.character_realm}`;
 }
 
 /** A realm as chat writes it, lowercase: without whitespace, `-`, and `.`. `Azjol-Nerub` is `azjolnerub`. */
