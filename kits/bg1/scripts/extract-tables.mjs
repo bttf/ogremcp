@@ -25,9 +25,19 @@
 //   quests.json   [{ "title": <strref>, "entries": [<strref>, ...] }]: the quest
 //                 list from buildQuestsTable in BGEE.LUA, in the game's order.
 //                 An entry's first line is its objective (UTIL.LUA createEntry).
+//                 One entry strref can belong to more than one quest (27130,
+//                 27194, and 31453 in 2.7.3), so map an entry to a list of quests.
 //   items.json    { "<RESREF>": { "name": <strref>|null, "unidentified": <strref>|null } }
 //                 (ITM V1 0x0c and 0x08; null when the strref has no text).
 //   spells.json   { "<RESREF>": <strref> } (SPL V1 0x08).
+//   joinable.json { "<DEATH VARIABLE>": <strref> }: the characters who can join
+//                 the party, one per PDIALOG.2DA row, with their long name: the
+//                 one a BCS SetName action gives them if any (Branwen's CRE
+//                 files all name her "Statue"), else the one the most of their
+//                 CRE files carry. former_party (§6.6.4) is the
+//                 GAM's non-party records with the been-in-party flag (CRE 0x10
+//                 bit 15) whose CRE death variable (0x280, upper case) is a
+//                 key here.
 //   areas.json    { "<RESREF>": "<name>" }: the cheatAreas list in BGEE.LUA,
 //                 without the notes that name characters: parenthetical notes,
 //                 and a leading "<Name> - " when <Name> is a PDIALOG.2DA row.
@@ -37,7 +47,8 @@
 //                 "Fighter" and "Mage". Race: RACETEXT.2DA UPPERCASE. Kit:
 //                 KITLIST.2DA MIXED, keyed by its KITIDS value (KIT.IDS).
 //                 Alignment and gender have no text table: their names are the
-//                 ALIGNMEN.IDS and GENDER.IDS symbols in title case.
+//                 ALIGNMEN.IDS and GENDER.IDS symbols in title case. Every key
+//                 is the ID as a decimal string, e.g. "17" for 0x11.
 //   meta.json     { "gameVersion": "<version>", "language": "en_US" }
 //
 // Items, spells, and strings with no text are left out. Resrefs are upper case.
@@ -58,9 +69,10 @@ const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "data");
 // Resource types (IESDP), and the file extension of each in override/.
 const TYPE = { itm: 0x3ed, spl: 0x3ee, bcs: 0x3ef, ids: 0x3f0, cre: 0x3f1, dlg: 0x3f3, "2da": 0x3f4, lua: 0x409 };
 
-// The script actions that add, finish, or remove a journal entry. Their first
-// parameter is the entry's strref (ACTION.IDS).
+// The script actions that add, finish, or remove a journal entry, and the one
+// that renames a creature. Their first parameter is a strref (ACTION.IDS).
 const JOURNAL_ACTIONS = ["AddJournalEntry", "EraseJournalEntry", "SetQuestDone"];
+const SET_NAME = "SetName";
 const DLG_HAS_JOURNAL = 0x10;
 const ITM_SCROLL = 11;
 // What the engine puts in place of these tokens for a character without a kit.
@@ -87,17 +99,19 @@ function main() {
   try {
     const lua = res.text("BGEE", TYPE.lua);
     const joinable = joinableCharacters(res);
+    const actionIds = strrefActionIds(res, [...JOURNAL_ACTIONS, SET_NAME]);
+    const actions = scriptActions(res);
     const quests = questList(lua);
     const areas = areaNames(lua, joinable);
     const { items, notes } = itemNames(res, tlk);
     const spells = spellNames(res, tlk);
-    const journal = journalStrrefs(res, quests, notes);
-    const creatures = joinableNames(res, joinable);
+    const journal = journalStrrefs(res, quests, notes, actions, actionIds);
+    const creatures = joinableNames(res, joinable, tlk, actions, actionIds);
     const options = characterOptions(res, tlk);
 
     const strrefs = new Set([
       ...journal,
-      ...creatures,
+      ...creatures.strrefs,
       ...Object.values(items).flatMap((item) => [item.name, item.unidentified]),
       ...Object.values(spells),
     ]);
@@ -118,6 +132,7 @@ function main() {
     const files = {
       "strings.json": objectLines(strings),
       "quests.json": arrayLines(quests),
+      "joinable.json": objectLines(sortKeys(creatures.names)),
       "items.json": objectLines(sortKeys(items)),
       "spells.json": objectLines(sortKeys(spells)),
       "areas.json": objectLines(sortKeys(areas)),
@@ -131,7 +146,7 @@ function main() {
     console.log(
       `${quests.length} quests, ${quests.reduce((n, q) => n + q.entries.length, 0)} quest entries, ` +
         `${journal.size} journal strrefs, ${Object.keys(items).length} items, ${Object.keys(spells).length} spells, ` +
-        `${Object.keys(areas).length} areas, ${creatures.size} joinable-creature names, game ${gameVersion}`,
+        `${Object.keys(areas).length} areas, ${Object.keys(creatures.names).length} joinable characters, game ${gameVersion}`,
     );
   } finally {
     res.close();
@@ -239,7 +254,7 @@ function spellNames(res, tlk) {
 }
 
 /** Every strref the journal can show. */
-function journalStrrefs(res, quests, notes) {
+function journalStrrefs(res, quests, notes, actions, actionIds) {
   const strrefs = new Set([...quests.flatMap((quest) => [quest.title, ...quest.entries]), ...notes]);
   const add = (value) => {
     if (value >= 0 && value < 0xffffffff) strrefs.add(value);
@@ -272,32 +287,40 @@ function journalStrrefs(res, quests, notes) {
     }
   }
 
-  // Journal actions in compiled scripts. An action is
-  // AC <id>OB <object>OB OB <object>OB OB <object>OB <int1> <x> <y> <int2> <int3>"<s1>" "<s2>" AC
-  // and the entry's strref is <int1>.
-  const ids = journalActionIds(res);
-  const action = /AC\s*(\d+)\s*OB[^]*?OB\s*OB[^]*?OB\s*OB[^]*?OB\s*(-?\d+)/g;
-  for (const name of res.names(TYPE.bcs)) {
-    // Strings hold no quotes, and dropping them leaves "OB" and "AC" only as markers.
-    const script = res.get(name, TYPE.bcs).toString("latin1").replace(/"[^"]*"/g, '""');
-    for (const m of script.matchAll(action)) {
-      if (ids.has(Number(m[1]))) add(Number(m[2]));
-    }
-  }
+  // Journal actions in compiled scripts.
+  const journalIds = new Set(JOURNAL_ACTIONS.flatMap((name) => [...actionIds.get(name)]));
+  for (const action of actions) if (journalIds.has(action.id)) add(action.strref);
   return strrefs;
 }
 
-function journalActionIds(res) {
-  const ids = new Set();
-  const found = new Set();
+/**
+ * The actions in every BCS file. An action is
+ * AC <id>OB <object>"<actor>"OB OB <object>""OB OB <object>""OB <int1> <x> <y> <int2> <int3>"<s1>" "<s2>" AC
+ * where <actor> is the script name of the creature that runs it (empty for
+ * the script's owner), and <int1> is a strref for the actions read here.
+ * Script strings hold no quotes.
+ */
+function scriptActions(res) {
+  const action = /AC\s*(\d+)\s*OB[^"]*"([^"]*)"OB\s*OB[^"]*"[^"]*"OB\s*OB[^"]*"[^"]*"OB\s*(-?\d+)/g;
+  const actions = [];
+  for (const name of res.names(TYPE.bcs)) {
+    for (const m of res.get(name, TYPE.bcs).toString("latin1").matchAll(action)) {
+      actions.push({ id: Number(m[1]), actor: m[2].toUpperCase(), strref: Number(m[3]) });
+    }
+  }
+  return actions;
+}
+
+/** Action name -> its IDs in ACTION.IDS, for actions whose first parameter is a strref. */
+function strrefActionIds(res, names) {
+  const ids = new Map(names.map((name) => [name, new Set()]));
   for (const line of res.text("ACTION", TYPE.ids).split("\n")) {
     const m = /^\s*(\d+)\s+(\w+)\s*\(([^)]*)\)/.exec(line);
-    if (!m || !JOURNAL_ACTIONS.includes(m[2])) continue;
+    if (!m || !ids.has(m[2])) continue;
     if (!/^I:/.test(m[3])) throw new Error(`ACTION.IDS: ${m[2]} does not take a strref first`);
-    ids.add(Number(m[1]));
-    found.add(m[2]);
+    ids.get(m[2]).add(Number(m[1]));
   }
-  for (const name of JOURNAL_ACTIONS) if (!found.has(name)) throw new Error(`ACTION.IDS: no ${name}`);
+  for (const [name, found] of ids) if (found.size === 0) throw new Error(`ACTION.IDS: no ${name}`);
   return ids;
 }
 
@@ -306,21 +329,47 @@ function joinableCharacters(res) {
   return new Set(parse2da(res.text("PDIALOG", TYPE["2da"]), "PDIALOG.2DA").map((row) => row.name.toUpperCase()));
 }
 
-/** Long names (CRE 0x08) of every CRE whose death variable is a PDIALOG.2DA row. */
-function joinableNames(res, joinable) {
-  const strrefs = new Set();
-  const found = new Set();
+/**
+ * Names of the characters who can join the party. `strrefs` holds every long
+ * name (CRE 0x08) of every CRE whose death variable is a PDIALOG.2DA row, and
+ * every name a BCS SetName action gives one of them. `names` holds one per
+ * row: a SetName name if there is one, else the long name the most CREs
+ * carry. Ties go to the lower strref.
+ */
+function joinableNames(res, joinable, tlk, actions, actionIds) {
+  const counts = new Map(); // death variable -> Map(strref -> CRE count)
   for (const name of res.names(TYPE.cre)) {
     const b = res.get(name, TYPE.cre);
     if (!hasSignature(b, "CRE V1.0", 0x2a0)) continue;
     const deathVar = cstring(b, 0x280, 32).toUpperCase();
-    if (!joinable.has(deathVar)) continue;
-    found.add(deathVar);
-    const strref = b.readUInt32LE(0x08);
-    if (strref < 0xffffffff) strrefs.add(strref);
+    const strref = textRef(tlk, b.readUInt32LE(0x08));
+    if (joinable.has(deathVar) && strref !== null) tally(counts, deathVar, strref);
   }
-  for (const name of joinable) if (!found.has(name)) warn(`PDIALOG.2DA: no CRE has death variable ${name}`);
-  return strrefs;
+  const renames = new Map(); // death variable -> Map(strref -> SetName count)
+  const setName = actionIds.get(SET_NAME);
+  for (const action of actions) {
+    if (setName.has(action.id) && joinable.has(action.actor) && textRef(tlk, action.strref) !== null) {
+      tally(renames, action.actor, action.strref);
+    }
+  }
+  const strrefs = new Set();
+  const names = {};
+  for (const deathVar of joinable) {
+    const perName = renames.get(deathVar) ?? counts.get(deathVar);
+    if (!perName) {
+      warn(`PDIALOG.2DA: no CRE with a named death variable ${deathVar}`);
+      continue;
+    }
+    for (const strref of [...(counts.get(deathVar)?.keys() ?? []), ...perName.keys()]) strrefs.add(strref);
+    names[deathVar] = [...perName].sort(([a, n], [b, m]) => m - n || a - b)[0][0];
+  }
+  return { strrefs, names };
+}
+
+function tally(counts, key, value) {
+  const perKey = counts.get(key) ?? new Map();
+  perKey.set(value, (perKey.get(value) ?? 0) + 1);
+  counts.set(key, perKey);
 }
 
 function characterOptions(res, tlk) {
@@ -454,7 +503,7 @@ class Resources {
     const at = bif.files.get(entry.index);
     if (!at) throw new Error(`${name}: not in ${this.bifs[entry.bif]}`);
     const b = Buffer.alloc(at.size);
-    readSync(bif.fd, b, 0, at.size, at.offset);
+    readFully(bif.fd, b, at.offset, `${name} in ${this.bifs[entry.bif]}`);
     return b;
   }
 
@@ -472,20 +521,22 @@ class Resources {
     const name = this.bifs[index];
     if (name === undefined) throw new Error(`chitin.key: no BIFF ${index}`);
     const fd = openSync(findPath(this.root, name), "r");
-    const header = Buffer.alloc(20);
-    readSync(fd, header, 0, 20, 0);
-    if (!hasSignature(header, "BIFFV1  ", 20)) {
+    try {
+      const header = Buffer.alloc(20);
+      readFully(fd, header, 0, name);
+      if (!hasSignature(header, "BIFFV1  ", 20)) throw new Error(`${name}: not BIFF V1 (compressed BIFFs are not read)`);
+      const [nfiles, offset] = [header.readUInt32LE(8), header.readUInt32LE(16)];
+      const table = Buffer.alloc(nfiles * 16);
+      readFully(fd, table, offset, name);
+      const files = new Map();
+      for (let i = 0; i < nfiles; i++) {
+        files.set(table.readUInt32LE(i * 16) & 0x3fff, { offset: table.readUInt32LE(i * 16 + 4), size: table.readUInt32LE(i * 16 + 8) });
+      }
+      bif = { fd, files };
+    } catch (err) {
       closeSync(fd);
-      throw new Error(`${name}: not BIFF V1 (compressed BIFFs are not read)`);
+      throw err;
     }
-    const [nfiles, offset] = [header.readUInt32LE(8), header.readUInt32LE(16)];
-    const table = Buffer.alloc(nfiles * 16);
-    readSync(fd, table, 0, table.length, offset);
-    const files = new Map();
-    for (let i = 0; i < nfiles; i++) {
-      files.set(table.readUInt32LE(i * 16) & 0x3fff, { offset: table.readUInt32LE(i * 16 + 4), size: table.readUInt32LE(i * 16 + 8) });
-    }
-    bif = { fd, files };
     this.open.set(index, bif);
     return bif;
   }
@@ -555,6 +606,12 @@ function readdirSafe(path) {
 }
 
 // ---------- helpers ----------
+
+/** Fills b from fd at position, and throws on a short read. */
+function readFully(fd, b, position, where) {
+  const n = readSync(fd, b, 0, b.length, position);
+  if (n !== b.length) throw new Error(`${where}: read ${n} of ${b.length} bytes at 0x${position.toString(16)}`);
+}
 
 function hasSignature(b, signature, minLength) {
   return b !== undefined && b.length >= minLength && b.toString("latin1", 0, 8) === signature;
