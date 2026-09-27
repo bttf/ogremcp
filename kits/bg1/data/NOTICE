@@ -1,0 +1,10 @@
+The name tables in this directory (the .json files) hold text extracted from
+Baldur's Gate: Enhanced Edition: its dialog.tlk, its UI Lua (BGEE.LUA), and
+its IDS and 2DA files. The text is Beamdog's.
+
+No license in this repository covers these files. The MIT License and the
+GNU Affero General Public License v3.0 or later, which cover the rest of the
+repository, do not apply to them.
+
+kits/bg1/scripts/extract-tables.mjs builds them from a game install
+(docs/architecture.md §6.6.3).
