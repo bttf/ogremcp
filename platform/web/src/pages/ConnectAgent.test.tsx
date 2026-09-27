@@ -54,6 +54,7 @@ it("shows the MCP URL with a copy button, and steps for each target client", asy
   expect(container.querySelector("h1")?.textContent).toBe("Connect your agent");
   expect([...container.querySelectorAll("h2")].map((h2) => h2.textContent)).toEqual(["Claude", "Claude Code", "ChatGPT", "Perplexity"]);
   expect(container.textContent).toContain("Claude's Free plan allows one custom connector.");
+  expect(container.textContent).toContain("When Ogre MCP adds a game, use Refresh tool list in the connector's settings");
   expect([...container.querySelectorAll(".og-copy code")].map((code) => code.textContent)).toEqual([
     url,
     `claude mcp add --transport http --scope user ogremcp ${url}`,

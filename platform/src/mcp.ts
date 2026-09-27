@@ -36,9 +36,10 @@ import type { ToolRegistry } from "./tools.js";
  * - A POST past the token check that gets a 4xx is logged, with the fixed
  *   text of the refusal and nothing of the request but its MCP method and
  *   `MCP-Protocol-Version` (`logRefusal`).
- * - `tools/list` and `tools/call` serve the tools of the token's user, from
- *   the tool registry (`tools.ts`, §10). A call's events row names the
- *   token's OAuth client as the agent client (§16).
+ * - `tools/list` lists every platform and kit tool, the same for every user
+ *   (§10.2), and `tools/call` calls one for the token's user, from the tool
+ *   registry (`tools.ts`, §10). A call's events row names the token's OAuth
+ *   client as the agent client (§16).
  *
  * The OAuth server's own metadata, at `/.well-known/openid-configuration` and
  * `/.well-known/oauth-authorization-server`, is oidc-provider's (`oidc.ts`).
@@ -200,15 +201,15 @@ const SERVER_INFO = { name: "ogremcp", version: platformVersion() };
 /**
  * The MCP server of one request to `/mcp`, for the agent whose access token
  * `requireRead` accepted: `agent.userUuid` is the user. Stateless (D12): the
- * server lives for one request, so the tool list is computed per request
- * (§10.2), and its `tools` capability does not claim `listChanged`.
+ * server lives for one request, and its `tools` capability does not claim
+ * `listChanged`. The tool list changes only with a deploy (§10.2).
  *
  * It is the SDK's low-level `Server`, not `McpServer`: a kit's `ToolDef`
  * carries a JSON Schema (§6.2), and `McpServer` takes zod schemas only and
  * always claims `listChanged`.
  *
- * `tools/call` of an unknown tool name is a protocol error. A tool of a game
- * the user has not enabled gets an `isError` result instead (§10.5,
+ * `tools/call` of an unknown tool name is a protocol error. A listed tool of
+ * a game the user has not enabled gets an `isError` result instead (§10.5,
  * `tool-envelope.ts`). The SDK sends a thrown error's message to the client,
  * and a Postgres error's message can repeat a row, so any other error is
  * logged by its code alone and sent as "Internal error".

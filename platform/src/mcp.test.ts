@@ -290,7 +290,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
 
     const list = await send(port, "POST", "/mcp", { ...agent, "mcp-protocol-version": "2025-11-25" }, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
     expect(list.status).toBe(200);
-    // A user with no game enabled gets the platform tools alone.
+    // With no kit registered, the platform tools alone.
     expect(JSON.parse(list.body)).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: PLATFORM } });
   });
 
@@ -345,22 +345,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     return JSON.parse(res.body);
   }
 
-  it("lists the WoW tools for a user with WoW enabled, and calls wow_get_state on that user's snapshot only (§10.2)", async () => {
+  it("calls wow_get_state on the user's snapshot only (§10.4)", async () => {
     const port = await serve(pool, provider, kits);
     const zoela = await player({ wow: true, snapshot: true });
-    const wowTools = kits.get("wow")?.interpreter.tools ?? [];
-
-    expect(wowTools.map((tool) => tool.name)).toEqual(["wow_get_state", "wow_get_history"]);
-    expect(await rpc(port, zoela, "tools/list")).toEqual({
-      jsonrpc: "2.0",
-      id: 1,
-      result: {
-        tools: [
-          ...PLATFORM,
-          ...wowTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations })),
-        ],
-      },
-    });
     const call = (await rpc(port, zoela, "tools/call", { name: "wow_get_state", arguments: { sections: ["location"] } })) as {
       result: { structuredContent: unknown; content: { text: string }[]; isError?: boolean };
     };
@@ -394,22 +381,43 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("/mcp with a read token", () =>
     expect(byName.result).toEqual({ isError: true, content: [{ type: "text", text: "None of your characters with a snapshot has that name." }] });
   });
 
-  it("lists no kit tool for a user without WoW enabled, and says the game is turned off when one is called (§10.2, §10.5)", async () => {
+  it("lists every kit's tools to a user with only WoW enabled, and answers a BG1 tool call with the turned-off message, uncounted (§10.2, §10.5)", async () => {
     const port = await serve(pool, provider, kits);
-    // A snapshot from before the user disabled the game.
-    const agent = await player({ wow: false, snapshot: true });
-    expect(await rpc(port, agent, "tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: PLATFORM } });
-    // A client can keep the tool list of a chat from before the game was turned off.
-    expect(await rpc(port, agent, "tools/call", { name: "wow_get_state" })).toEqual({
+    const agent = await player({ wow: true, snapshot: true });
+    const kitTools = kits.list().flatMap((kit) => kit.interpreter.tools);
+    expect(kitTools.map((tool) => tool.name)).toEqual(["wow_get_state", "wow_get_history", "bg1_get_state"]);
+    expect(await rpc(port, agent, "tools/list")).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: [
+          ...PLATFORM,
+          ...kitTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations })),
+        ],
+      },
+    });
+    expect(await rpc(port, agent, "tools/call", { name: "bg1_get_state" })).toEqual({
       jsonrpc: "2.0",
       id: 1,
       result: {
         isError: true,
         content: [
-          { type: "text", text: "World of Warcraft is turned off on the Games page of the Ogre MCP website. The player can turn it on there." },
+          {
+            type: "text",
+            text: "Baldur's Gate: Enhanced Edition is turned off on the Games page of the Ogre MCP website. The player can turn it on there.",
+          },
         ],
       },
     });
+    // Recorded, and not counted toward the daily cap (§14).
+    const { rows } = await vi.waitFor(async () => {
+      const found = await pool.query<{ user_id: string; error: string }>("select user_id, error from events where tool = 'bg1_get_state'");
+      expect(found.rows).toHaveLength(1);
+      return found;
+    });
+    expect(rows[0]?.error).toBe("game_off");
+    const { rows: usage } = await pool.query("select tool_calls from usage_daily where user_id = $1", [rows[0]?.user_id]);
+    expect(usage).toEqual([]);
     expect(await rpc(port, agent, "tools/call", { name: "no_such_tool" })).toEqual({
       jsonrpc: "2.0",
       id: 1,
