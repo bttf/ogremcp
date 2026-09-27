@@ -188,21 +188,24 @@ type Poller struct {
 	client   *Client
 	check    time.Duration
 	interval time.Duration
-	onFetch  func([]Kit, error)
+	onFetch  func([]Kit, error) bool
 	wake     chan struct{}
 	sync     chan struct{}
 
 	// Run's goroutine owns the rest. etag is the ETag of entries, the list
-	// of the last fetch that onFetch got without an error; known is false
-	// until there is one, and after a fetch that failed.
+	// of the last fetch. known is true after a fetch that had every
+	// manifest and that onFetch finished; a check sends If-None-Match only
+	// then.
 	etag    string
 	entries []Entry
 	known   bool
 }
 
 // NewPoller returns a Poller that fetches from c every interval, checks the
-// list every check, and passes each fetch's result to onFetch.
-func NewPoller(c *Client, check, interval time.Duration, onFetch func([]Kit, error)) *Poller {
+// list every check, and passes each fetch's result to onFetch. onFetch
+// returns false when it could not finish with the kits, as when an adapter
+// download failed: the next check then fetches again.
+func NewPoller(c *Client, check, interval time.Duration, onFetch func([]Kit, error) bool) *Poller {
 	return &Poller{
 		client:   c,
 		check:    check,
@@ -280,10 +283,12 @@ func (p *Poller) poll(ctx context.Context, conditional bool) {
 	if ctx.Err() != nil {
 		return
 	}
-	// After a failure, the next check fetches, so onFetch hears when the
-	// server answers again.
-	p.etag, p.entries, p.known = tag, entries, err == nil
-	p.onFetch(list, err)
+	done := p.onFetch(list, err)
+	// After a failure, a manifest the server did not send, or a fetch that
+	// onFetch could not finish, the next check fetches again, and does not
+	// wait for the list to change.
+	p.etag, p.entries = tag, entries
+	p.known = err == nil && done && !slices.ContainsFunc(list, func(k Kit) bool { return k.Err != nil })
 }
 
 // sameEntry reports whether a and b list the same kit, manifest, and

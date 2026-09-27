@@ -107,8 +107,8 @@ type Controller struct {
 	// It shows it once per kit by itself; ChooseFolder allows it again.
 	asked map[string]bool
 	// resume starts the uploads again and checks the kit list, after a
-	// login. fetch fetches the kits, and sync does what Sync does. Run sets
-	// them.
+	// login. fetch fetches the kits, and sync does what Sync does. runServer
+	// sets them.
 	resume func()
 	fetch  func()
 	sync   func()
@@ -176,8 +176,8 @@ func (c *Controller) runServer(ctx context.Context) {
 	p.uploader = upload.New(c.Base, c.Auth, c.Version, settings.UploadCap(), c.Log)
 	p.watcher = watch.New(settings.DebounceDelay(), settings.Interval(), c.Log, p.uploader.Add)
 	p.updater = adapter.New(adapter.NewClient(c.Base, c.Auth), process.System{})
-	poller := kits.NewPoller(kits.New(c.Base, c.Auth), settings.KitCheckEvery(), settings.Interval(), func(list []kits.Kit, err error) {
-		c.onFetch(ctx, p, list, err)
+	poller := kits.NewPoller(kits.New(c.Base, c.Auth), settings.KitCheckEvery(), settings.Interval(), func(list []kits.Kit, err error) bool {
+		return c.onFetch(ctx, p, list, err)
 	})
 	c.mu.Lock()
 	c.resume = func() {
@@ -186,6 +186,7 @@ func (c *Controller) runServer(ctx context.Context) {
 	}
 	c.fetch = poller.Sync
 	c.sync = func() {
+		p.uploader.Resume()
 		p.watcher.Resync()
 		poller.Sync()
 	}
@@ -216,21 +217,23 @@ func (c *Controller) runServer(ctx context.Context) {
 	wg.Wait()
 }
 
-// onFetch handles a fetch of the kits, on the poller's goroutine.
-func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err error) {
+// onFetch handles a fetch of the kits, on the poller's goroutine. It returns
+// false when it could not finish with the kits, as when an adapter's sync
+// failed, so the next check of the kit list fetches again.
+func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err error) bool {
 	switch {
 	case errors.Is(err, auth.ErrLoginRequired):
 		// No request reached the server. The status line says so, and the
 		// menu offers a login, after which Run's resume fetches again.
 		c.Model.LoginEnded()
 		c.showErrors("fetch", nil)
-		return
+		return false
 	case errors.Is(err, auth.ErrNotRead):
 		// Whether the bridge holds a login is unknown. The menu offers a
 		// login, which writes a new one.
 		c.Model.LoginEnded()
 		c.showErrors("fetch", map[string]string{"keychain": "Could not read the login: " + err.Error()})
-		return
+		return false
 	case errors.Is(err, auth.ErrNotSaved):
 		// A refresh whose new refresh token the keychain did not save.
 		c.mu.Lock()
@@ -240,12 +243,12 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			c.Model.SaveFailing()
 			c.startSaveRetry(ctx)
 		}
-		return
+		return false
 	case err != nil:
 		// Offline, perhaps: the bridge holds a login it could not check.
 		c.Model.LoginKnown()
 		c.showErrors("fetch", map[string]string{"kits": "Could not fetch the kits: " + err.Error()})
-		return
+		return false
 	}
 	c.Model.LoginWorks()
 	names := map[string]string{}
@@ -267,7 +270,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		kp := &kitPrompter{c: c, kit: k.Kit}
 		root, err := locate.Root(ctx, k.Manifest.Root, c.savedRoot(k.Kit), p.env, kp)
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		// macOS refuses a folder in Documents until the user allows it
 		// (§6.6.1). The chain has gone on to the folder picker.
@@ -290,7 +293,9 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 	c.Model.SetGames(games)
 	c.Model.SetNeedFolder(need)
 	c.showErrors("fetch", errs)
-	c.logShown(c.Model.SetAdapters(p.updater.Sync(ctx, targets)))
+	statuses := p.updater.Sync(ctx, targets)
+	c.logShown(c.Model.SetAdapters(statuses))
+	return !slices.ContainsFunc(statuses, func(st adapter.Status) bool { return st.State == adapter.StateFailed })
 }
 
 // canPick reports whether a root's locate chain has a folder picker.
@@ -427,9 +432,10 @@ func (c *Controller) ChooseFolder() {
 }
 
 // Sync fetches the kits now, without If-None-Match, resolves every glob
-// again, and counts every source instance as changed, as at start, so each
-// file the server does not hold yet is uploaded (§7). The menu's Sync with
-// server calls it.
+// again, and uploads each file whose bytes differ from its last upload, or
+// that has none (§7). It also starts the uploads that device_limit stopped,
+// for a player who freed the upload slot. The menu's Sync with server calls
+// it.
 func (c *Controller) Sync() {
 	c.mu.Lock()
 	syncNow := c.sync

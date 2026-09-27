@@ -41,7 +41,7 @@
 // The tray app, bridge run, and the -watch commands check the kit list every
 // kit check interval, and fetch the kits when it changed (§7). The tray's
 // Games submenu lists the enabled games; its Sync with server fetches the kits
-// at once and counts every source instance as changed.
+// at once and uploads each file whose bytes changed since its last upload.
 //
 // The tray app of a release build updates itself (package selfupdate, §7). It
 // checks the bridge-v releases at start and every update interval, installs a
@@ -272,10 +272,10 @@ func listKits(args []string) error {
 	}
 
 	env := locate.DefaultEnv()
-	show := func(list []kits.Kit, err error) {
+	show := func(list []kits.Kit, err error) bool {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
-			return
+			return false
 		}
 		if len(list) == 0 {
 			fmt.Println("No kits are enabled for this account.")
@@ -306,6 +306,7 @@ func listKits(args []string) error {
 		if watcher != nil {
 			watcher.SetKits(located)
 		}
+		return true
 	}
 
 	api := kits.New(base, client)

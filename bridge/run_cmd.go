@@ -69,17 +69,17 @@ func run(args []string) error {
 
 	relogin := make(chan struct{}, 1)
 	env := locate.DefaultEnv()
-	onFetch := func(list []kits.Kit, err error) {
+	onFetch := func(list []kits.Kit, err error) bool {
 		if errors.Is(err, auth.ErrLoginRequired) {
 			select {
 			case relogin <- struct{}{}:
 			default:
 			}
-			return
+			return false
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
-			return
+			return false
 		}
 		var located []watch.Kit
 		for _, k := range list {
@@ -106,6 +106,7 @@ func run(args []string) error {
 			}
 		}
 		watcher.SetKits(located)
+		return true
 	}
 	poller := kits.NewPoller(kits.New(base, client), settings.KitCheckEvery(), settings.Interval(), onFetch)
 

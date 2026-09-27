@@ -14,9 +14,9 @@ import (
 )
 
 // server is the bridge API's kit routes. It serves the WoW kit's manifest,
-// read from the repo, and lists a kit it has no manifest for and a kit with
-// an invalid name. The list's ETag is its version, and a matching
-// If-None-Match gets 304.
+// read from the repo, and lists WoW and the entries in extra: at first a kit
+// it has no manifest for and a kit with an invalid name. The list's ETag is
+// its version, and a matching If-None-Match gets 304.
 type server struct {
 	*httptest.Server
 	manifest []byte
@@ -35,7 +35,9 @@ func newServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &server{manifest: raw}
+	s := &server{manifest: raw, extra: `,
+		{"kit": "gone", "manifest_version": "1.0.0", "adapter": null},
+		{"kit": "../admin", "manifest_version": "1.0.0", "adapter": null}`}
 	s.Server = httptest.NewServer(s)
 	t.Cleanup(s.Close)
 	return s
@@ -58,9 +60,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Write([]byte(`{"kits": [
-			{"kit": "wow", "manifest_version": "0.1.0", "adapter": {"version": "0.1.0", "sha256": "` + zeros + `"}},
-			{"kit": "gone", "manifest_version": "1.0.0", "adapter": null},
-			{"kit": "../admin", "manifest_version": "1.0.0", "adapter": null}` + extra + `
+			{"kit": "wow", "manifest_version": "0.1.0", "adapter": {"version": "0.1.0", "sha256": "` + zeros + `"}}` + extra + `
 		]}`))
 	case "/api/v1/kits/wow/manifest":
 		w.Write(s.manifest)
@@ -109,7 +109,7 @@ func TestFetch(t *testing.T) {
 func fetches(t *testing.T, s *server, check, interval time.Duration) (<-chan []Kit, *Poller) {
 	t.Helper()
 	results := make(chan []Kit, 16)
-	p := NewPoller(New(s.URL, s.Client()), check, interval, func(list []Kit, err error) {
+	p := NewPoller(New(s.URL, s.Client()), check, interval, func(list []Kit, err error) bool {
 		if err != nil {
 			t.Error(err)
 		}
@@ -117,6 +117,7 @@ func fetches(t *testing.T, s *server, check, interval time.Duration) (<-chan []K
 		case results <- list:
 		default: // the test has what it needs
 		}
+		return true
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -158,9 +159,11 @@ func TestPollerFetchesOnSync(t *testing.T) {
 }
 
 // The check sends the list's ETag. A 304 fetches nothing; a changed list
-// fetches the manifests, and onFetch gets it (§7, §8.2).
+// fetches the manifests, and onFetch gets it (§7, §8.2). A manifest the
+// server does not send makes each check fetch again.
 func TestPollerChecksTheList(t *testing.T) {
 	s := newServer(t)
+	s.extra = ""
 	results, _ := fetches(t, s, 10*time.Millisecond, time.Hour)
 	next(t, results) // at start
 	checks := func() []string {
@@ -179,19 +182,22 @@ func TestPollerChecksTheList(t *testing.T) {
 	}
 	before := len(s.requests())
 
+	// The server has no manifest for the new kit.
 	s.mu.Lock()
 	s.version++
 	s.extra = `, {"kit": "bg1", "name": "Baldur's Gate", "manifest_version": "1.0.0", "adapter": null}`
 	s.mu.Unlock()
-	select {
-	case list := <-results:
-		if len(list) != 4 || list[3].Kit != "bg1" {
-			t.Errorf("fetched %+v", list)
+	for i := range 2 {
+		select {
+		case list := <-results:
+			if len(list) != 2 || list[1].Kit != "bg1" || list[1].Err == nil {
+				t.Errorf("fetch %d: %+v", i, list)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no fetch %d after the list changed", i)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no fetch after the list changed")
 	}
-	if got := s.requests()[before:]; !slices.Contains(got, "/api/v1/kits/wow/manifest") {
+	if got := s.requests()[before:]; !slices.Contains(got, "/api/v1/kits/bg1/manifest") {
 		t.Errorf("requests after the change: %q", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 
 	"github.com/bttf/ogremcp/bridge/internal/adapter"
 	"github.com/bttf/ogremcp/bridge/internal/kits"
@@ -64,10 +65,12 @@ func syncAdapters(args []string) error {
 		}
 	}
 	env := locate.DefaultEnv()
-	onFetch := func(list []kits.Kit, err error) {
+	// onFetch returns false when an adapter's sync failed, so the next check
+	// of the kit list fetches again.
+	onFetch := func(list []kits.Kit, err error) bool {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
-			return
+			return false
 		}
 		var targets []adapter.Target
 		for _, k := range list {
@@ -85,7 +88,9 @@ func syncAdapters(args []string) error {
 			}
 			targets = append(targets, adapter.Target{Kit: k, Root: root})
 		}
-		show(updater.Sync(ctx, targets))
+		statuses := updater.Sync(ctx, targets)
+		show(statuses)
+		return !slices.ContainsFunc(statuses, func(st adapter.Status) bool { return st.State == adapter.StateFailed })
 	}
 
 	api := kits.New(base, client)

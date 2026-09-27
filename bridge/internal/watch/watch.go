@@ -45,8 +45,9 @@
 // created there makes the watcher resolve the globs again in the same way, so
 // the first save is uploaded after the debounce too (§7).
 //
-// Resync counts every instance as changed, as at start. The tray's Sync with
-// server calls it (§7).
+// Resync counts every instance as changed, as at start, but marks its
+// Change IfChanged: the uploader sends it only when the file's bytes differ
+// from those of its last upload. The tray's Sync with server calls it (§7).
 //
 // # Changes
 //
@@ -108,6 +109,10 @@ type Change struct {
 	Path string
 	// ModTime is the file's modification time when the change settled.
 	ModTime time.Time
+	// IfChanged means only a Resync reported the change, not a file event
+	// or a new watch: upload it only when the file's bytes differ from
+	// those of the instance's last upload the server took.
+	IfChanged bool
 }
 
 // Watcher watches the source instances of a set of kits. Make one with New.
@@ -177,10 +182,12 @@ type instKey struct {
 	name string
 }
 
-// pending is the debounce timer of one instance.
+// pending is the debounce timer of one instance. ifChanged means only a
+// Resync scheduled it (Change.IfChanged).
 type pending struct {
-	key   instKey
-	timer timer
+	key       instKey
+	timer     timer
+	ifChanged bool
 }
 
 // New returns a Watcher. debounce is how long an instance's file must go
@@ -220,9 +227,9 @@ func (w *Watcher) SetKits(kits []Kit) {
 	}
 }
 
-// Resync makes the watcher resolve the globs again and count every instance
-// as changed, as at start. It does not block, and it may be called before
-// Run.
+// Resync makes the watcher resolve the globs again and report every
+// instance, each Change marked IfChanged unless a file event or a new watch
+// reports it too. It does not block, and it may be called before Run.
 func (w *Watcher) Resync() {
 	select {
 	case w.resync <- struct{}{}:
@@ -276,7 +283,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-w.resync:
 			w.rescan()
 			for _, wt := range w.watches {
-				w.scheduleExisting(wt)
+				w.scheduleExisting(wt, true)
 			}
 		case <-w.tick:
 			w.rescan()
@@ -294,7 +301,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 				// Events were lost: count every instance as changed, and
 				// look for new folders.
 				for _, wt := range w.watches {
-					w.scheduleExisting(wt)
+					w.scheduleExisting(wt, false)
 				}
 				w.rescanSoon()
 			}
@@ -303,7 +310,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			// pending one.
 			if w.pending[p.key] == p {
 				delete(w.pending, p.key)
-				w.settle(p.key)
+				w.settle(p)
 			}
 		case f := <-w.probe:
 			f()
@@ -336,7 +343,7 @@ func (w *Watcher) event(ev fsnotify.Event) {
 	matched := false
 	for _, wt := range w.byDir[dir] {
 		if locate.Match(wt.pattern, name) {
-			w.schedule(instKey{wt.watchKey, wt.fileName(name)})
+			w.schedule(instKey{wt.watchKey, wt.fileName(name)}, false)
 			matched = true
 		}
 	}
@@ -377,12 +384,15 @@ func (wt *watch) fileName(name string) string {
 	return wt.pattern
 }
 
-// schedule starts or restarts the debounce timer of an instance.
-func (w *Watcher) schedule(key instKey) {
+// schedule starts or restarts the debounce timer of an instance. ifChanged
+// means a Resync asks for it; a file event or a new watch before or after it
+// makes the change a plain one.
+func (w *Watcher) schedule(key instKey, ifChanged bool) {
 	if p := w.pending[key]; p != nil {
 		p.timer.Stop()
+		ifChanged = ifChanged && p.ifChanged
 	}
-	p := &pending{key: key}
+	p := &pending{key: key, ifChanged: ifChanged}
 	w.pending[key] = p
 	ctx := w.ctx
 	p.timer = w.clock.AfterFunc(w.debounce, func() {
@@ -396,7 +406,8 @@ func (w *Watcher) schedule(key instKey) {
 
 // settle reports the change of an instance whose debounce ran out, when its
 // source still watches the folder and the file exists.
-func (w *Watcher) settle(key instKey) {
+func (w *Watcher) settle(p *pending) {
+	key := p.key
 	wt := w.watches[key.watchKey]
 	if wt == nil {
 		return
@@ -413,11 +424,12 @@ func (w *Watcher) settle(key instKey) {
 	}
 	sum := sha256.Sum256([]byte(rel))
 	w.onChange(Change{
-		Kit:      key.kit,
-		SourceID: key.source,
-		Instance: hex.EncodeToString(sum[:]),
-		Path:     path,
-		ModTime:  info.ModTime(),
+		Kit:       key.kit,
+		SourceID:  key.source,
+		Instance:  hex.EncodeToString(sum[:]),
+		Path:      path,
+		ModTime:   info.ModTime(),
+		IfChanged: p.ifChanged,
 	})
 }
 
@@ -513,7 +525,7 @@ func (w *Watcher) rescan() {
 		w.watches[key] = wt
 		w.byDir[key.dir] = append(w.byDir[key.dir], wt)
 		if added[key.dir] || old[key] == nil {
-			w.scheduleExisting(wt)
+			w.scheduleExisting(wt, false)
 		}
 	}
 	for key, p := range w.pending {
@@ -541,15 +553,15 @@ func (w *Watcher) rescan() {
 
 // scheduleExisting starts the debounce of each instance already in the
 // folder of a new watch. Its file may have been written before the watch
-// started.
-func (w *Watcher) scheduleExisting(wt *watch) {
+// started. ifChanged is schedule's.
+func (w *Watcher) scheduleExisting(wt *watch, ifChanged bool) {
 	entries, err := os.ReadDir(wt.dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		if locate.Match(wt.pattern, e.Name()) {
-			w.schedule(instKey{wt.watchKey, wt.fileName(e.Name())})
+			w.schedule(instKey{wt.watchKey, wt.fileName(e.Name())}, ifChanged)
 		}
 	}
 }

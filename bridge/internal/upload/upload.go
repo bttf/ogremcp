@@ -15,6 +15,10 @@
 //
 // # Offline
 //
+// A change marked IfChanged (watch.Change), which the tray's Sync with server
+// makes, is not sent when the file's bytes are those of the instance's last
+// upload the server took (§7). Every other change is sent.
+//
 // Each instance has at most one pending upload: its latest change (§7). A
 // change that arrives while another is pending or in flight replaces it, and
 // is uploaded once the attempt in flight ends. There is never a backlog. An
@@ -183,6 +187,9 @@ type entry struct {
 	err        string
 	errAt      time.Time
 	lastUpload time.Time
+	// lastSHA is the SHA-256, as hex, of the last upload the server took,
+	// or "".
+	lastSHA string
 }
 
 // New returns an Uploader for the server at base, the base URL api holds
@@ -288,13 +295,13 @@ func (u *Uploader) Status() Status {
 // once.
 func (u *Uploader) Run(ctx context.Context) {
 	for {
-		k, c, seq, counts, wait := u.next()
+		j, wait := u.next()
 		if wait == 0 {
-			res := u.attempt(ctx, c, counts)
+			res := u.attempt(ctx, j.change, j.counts, j.same)
 			if ctx.Err() != nil {
 				return
 			}
-			u.finish(k, seq, counts, res)
+			u.finish(j.key, j.seq, j.counts, res)
 			continue
 		}
 		var timer *time.Timer
@@ -317,14 +324,24 @@ func (u *Uploader) Run(ctx context.Context) {
 	}
 }
 
-// next returns the instance to upload now, with its change, the change's
-// seq, and the error counts to send, and a wait of 0. With none to upload
+// job is an upload to attempt: an instance, its change, the change's seq,
+// and the error counts to send. same is the SHA-256 of the bytes not to send
+// again, for a change marked IfChanged, or "".
+type job struct {
+	key    key
+	change watch.Change
+	seq    uint64
+	counts map[string]int
+	same   string
+}
+
+// next returns the job to attempt now, and a wait of 0. With none to upload
 // now, it returns how long until the next one is due, or -1 when none is.
-func (u *Uploader) next() (key, watch.Change, uint64, map[string]int, time.Duration) {
+func (u *Uploader) next() (job, time.Duration) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.loginRequired {
-		return key{}, watch.Change{}, 0, nil, -1
+		return job{}, -1
 	}
 	now := u.now()
 	var best key
@@ -335,16 +352,20 @@ func (u *Uploader) next() (key, watch.Change, uint64, map[string]int, time.Durat
 		}
 	}
 	if first == nil {
-		return key{}, watch.Change{}, 0, nil, -1
+		return job{}, -1
 	}
 	if wait := first.due.Sub(now); wait > 0 {
-		return key{}, watch.Change{}, 0, nil, wait
+		return job{}, wait
 	}
 	counts := make(map[string]int, len(u.counts))
 	for name, n := range u.counts {
 		counts[name] = min(n, math.MaxInt32)
 	}
-	return best, first.change, first.seq, counts, 0
+	j := job{key: best, change: first.change, seq: first.seq, counts: counts}
+	if first.change.IfChanged {
+		j.same = first.lastSHA
+	}
+	return j, 0
 }
 
 // finish records the result of an attempt that sent change seq of instance
@@ -364,12 +385,12 @@ func (u *Uploader) finish(k key, seq uint64, sent map[string]int, res result) {
 	switch res.action {
 	case taken:
 		u.lastUpload = now
-		e.lastUpload = now
+		e.lastUpload, e.lastSHA = now, res.sha256
 		u.log.Info("uploaded", u.attrs(k, "status", res.status)...)
 		u.setErr(k, e, "", now)
 	case refused:
 		u.setErr(k, e, res.message, now)
-	case gone:
+	case gone, same:
 	case retry:
 		settled = false
 		e.failures++
