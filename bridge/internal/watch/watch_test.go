@@ -96,20 +96,26 @@ type harness struct {
 
 const sourcePath = "_*_/WTF/Account/*/SavedVariables/OgreMCP.lua"
 
+// start runs a watcher of the WoW kit's source.
 func start(t *testing.T, root string) *harness {
+	t.Helper()
+	return startKit(t, Kit{
+		Kit:  "wow",
+		Root: root,
+		Sources: []manifest.Source{{
+			ID: "savedvariables", Type: "file", Format: "text", Path: sourcePath, Trigger: "on_change",
+		}},
+	})
+}
+
+func startKit(t *testing.T, kit Kit) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: &fakeClock{}, changes: make(chan Change, 100)}
 	h.w = New(debounce, interval, slog.New(slog.DiscardHandler), func(c Change) { h.changes <- c })
 	h.w.clock = h.clock
 	h.w.trace = h.record
 	h.w.probe = make(chan func())
-	h.w.SetKits([]Kit{{
-		Kit:  "wow",
-		Root: root,
-		Sources: []manifest.Source{{
-			ID: "savedvariables", Type: "file", Format: "text", Path: sourcePath, Trigger: "on_change",
-		}},
-	}})
+	h.w.SetKits([]Kit{kit})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- h.w.Run(ctx) }()
@@ -374,4 +380,36 @@ func TestRescanFindsNewFolders(t *testing.T) {
 	if got := <-watched; len(got) != 0 {
 		t.Errorf("still watching %q", got)
 	}
+}
+
+// BG1 makes a folder for each new save (§6.6.1). The watch of the save folder
+// finds it after the debounce, not at the next interval.
+func TestNewFolderUnderAWildcard(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	saves := filepath.Join(root, "save")
+	if err := os.Mkdir(saves, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := startKit(t, Kit{
+		Kit:  "bg1",
+		Root: root,
+		Sources: []manifest.Source{{
+			ID: "gam", Type: "file", Format: "binary", Path: "save/*/BALDUR.gam", Trigger: "on_change",
+		}},
+	})
+	h.advance(debounce)
+	h.none()
+
+	h.mark()
+	dir := filepath.Join(saves, "000000002-Quick-Save")
+	path := filepath.Join(dir, "BALDUR.gam")
+	write(t, path, "v1")
+	h.waitTrace("rescan soon " + dir)
+	h.advance(debounce) // the rescan, which watches the new folder
+	h.advance(debounce) // the file's debounce
+	if got := h.next(); got.Kit != "bg1" || got.SourceID != "gam" || got.Path != path {
+		t.Errorf("change = %+v", got)
+	}
+	h.none()
 }
