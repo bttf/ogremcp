@@ -15,20 +15,22 @@ import { capReachedResult, createUsageMeter, REFUNDED_ERRORS, type UsageMeter } 
 /**
  * The tool registry: the MCP tools each user may list and call (§10).
  *
- * A user's tools are the platform tools, then the tools of each kit the user
- * has enabled (a `user_games` row), in registry order. They are computed per
- * request, from the database (§10.2): a game the user enables or disables
- * shows up the next time the client lists tools. A kit tool call gets a
- * `ToolContext` for the user and the kit (`tool-context.ts`), a platform tool
- * call a `PlatformToolContext`. What a call answers is the response envelope
- * of `tool-envelope.ts` (§10.5).
+ * Every user lists the same tools: the platform tools, then the tools of
+ * every kit, in registry order, whether or not the user has enabled the game
+ * (§10.2). Enabling or turning off a game never changes the tool list, which
+ * claude.ai caches; only a deploy that adds or removes a kit or a tool does.
+ * The tools the user may call are the platform tools and the tools of each
+ * kit the user has enabled (a `user_games` row), read per call. A kit tool
+ * call gets a `ToolContext` for the user and the kit (`tool-context.ts`), a
+ * platform tool call a `PlatformToolContext`. What a call answers is the
+ * response envelope of `tool-envelope.ts` (§10.5).
  *
  * Each call of a tool the user may call is counted toward the user's daily
  * tool calls before the tool runs (`usage.ts`, §14). A call past the tier's
  * cap does not run and is not counted: it answers `capReachedResult`. A call
  * that fails through the service's fault, one of `REFUNDED_ERRORS`, is taken
  * back once it has its answer. A call to a tool of a game the user has turned
- * off runs nothing and is not counted.
+ * off runs nothing and is not counted: it answers `gameOffResult` (§10.5).
  *
  * A paid-only tool, a kit's or the platform's (`paidOnly`), is listed for
  * every user, so the tool list does not change on upgrade (§10.2). A free
@@ -117,7 +119,11 @@ export interface ToolRegistryOptions {
 }
 
 export interface ToolRegistry {
-  /** The tools of the user with this `users.uuid`, as `tools/list` lists them. */
+  /**
+   * The tools `tools/list` lists to the user with this `users.uuid`: every
+   * platform and kit tool, the same for every user (§10.2). None when there
+   * is no user with this uuid.
+   */
   list(userUuid: string): Promise<Tool[]>;
   /**
    * Calls the tool `name` for the caller's user, and answers with the
@@ -133,8 +139,8 @@ export interface ToolRegistry {
   call(caller: ToolCaller, name: string, args: unknown): Promise<ToolResult | null>;
 }
 
-/** A tool the user may call, with what its call needs. */
-type UserTool = { def: PlatformTool; kit: null } | { def: ToolDef<unknown>; kit: Kit };
+/** A listed tool, with what its call needs. */
+type ListedTool = { def: PlatformTool; kit: null } | { def: ToolDef<unknown>; kit: Kit };
 
 /**
  * The tool registry of `kits` and `platformTools`. Throws when a platform
@@ -152,62 +158,51 @@ export function createToolRegistry({
 }: ToolRegistryOptions): ToolRegistry {
   const allKits = kits?.list() ?? [];
   checkPlatformTools(platformTools, allKits);
-
-  /** The user and their tools, or null when no user has this uuid. */
-  async function userTools(userUuid: string): Promise<{ user: ToolUser; games: Kit[]; tools: UserTool[] } | null> {
-    const user = await findToolUser(pool, userUuid);
-    if (user === null) return null;
-    const { rows } = await pool.query<{ kit: string }>("select kit from user_games where user_id = $1", [user.id]);
-    const enabled = new Set(rows.map((row) => row.kit));
-    const games = allKits.filter((kit) => enabled.has(kit.key));
-    const tools: UserTool[] = [
-      ...platformTools.map((def) => ({ def, kit: null })),
-      ...games.flatMap((kit) => kit.interpreter.tools.map((def) => ({ def, kit }))),
-    ];
-    return { user, games, tools };
-  }
+  // The same for every user (§10.2).
+  const listed: ListedTool[] = [
+    ...platformTools.map((def) => ({ def, kit: null })),
+    ...allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ def, kit }))),
+  ];
+  const tools: Tool[] = listed.map(({ def }) => ({
+    name: def.name,
+    description: def.description,
+    inputSchema: def.inputSchema,
+    ...(def.annotations && { annotations: def.annotations }),
+  }));
 
   return {
     async list(userUuid) {
-      const found = await userTools(userUuid);
-      return (found?.tools ?? []).map(({ def }) => ({
-        name: def.name,
-        description: def.description,
-        inputSchema: def.inputSchema,
-        ...(def.annotations && { annotations: def.annotations }),
-      }));
+      return (await findToolUser(pool, userUuid)) === null ? [] : tools;
     },
 
     async call(caller, name, args) {
       const occurredAt = new Date();
       const started = performance.now();
-      const found = await userTools(caller.userUuid);
-      if (found === null) return null;
-      const { user, games } = found;
+      const tool = listed.find(({ def }) => def.name === name);
+      if (tool === undefined) return null;
+      const user = await findToolUser(pool, caller.userUuid);
+      if (user === null) return null;
+      const { rows } = await pool.query<{ kit: string }>("select kit from user_games where user_id = $1", [user.id]);
+      const enabled = new Set(rows.map((row) => row.kit));
+      const games = allKits.filter((kit) => enabled.has(kit.key));
       const event: ToolCallNotes = {};
+      const schema = tool.def.inputSchema;
       let answer: ToolAnswer;
-      let schema: ToolInputSchema;
-      const tool = found.tools.find(({ def }) => def.name === name);
-      const paidOnly = tool?.def.paidOnly === true && user.tier !== "paid";
+      // Every client lists a turned-off game's tools (§10.2).
+      const off = tool.kit !== null && !enabled.has(tool.kit.key);
+      const paidOnly = !off && tool.def.paidOnly === true && user.tier !== "paid";
       // Before the tool runs, so that a call past the cap costs nothing (§14).
-      const count = tool === undefined || paidOnly ? null : await usage.count(user);
-      if (tool !== undefined && paidOnly) {
-        schema = tool.def.inputSchema;
+      const count = off || paidOnly ? null : await usage.count(user);
+      if (off) {
+        answer = { result: gameOffResult(tool.kit.name), error: "game_off" };
+      } else if (paidOnly) {
         answer = { result: paidOnlyResult(), error: "paid_only" };
-      } else if (tool !== undefined && count?.kind === "cap_reached") {
-        schema = tool.def.inputSchema;
+      } else if (count?.kind === "cap_reached") {
         answer = { result: capReachedResult(count), error: "cap_reached" };
-      } else if (tool !== undefined) {
-        schema = tool.def.inputSchema;
-        answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, event }, log);
       } else {
-        // A client can keep a turned-off game's tools until a new chat (§10.2).
-        const off = allKits.flatMap((kit) => kit.interpreter.tools.map((def) => ({ kit, def }))).find(({ def }) => def.name === name);
-        if (off === undefined) return null;
-        schema = off.def.inputSchema;
-        answer = { result: gameOffResult(off.kit.name), error: "game_off" };
+        answer = await answerCall(tool, args, { pool, user, agentClient: caller.clientId, games, settings, event }, log);
       }
-      const snapshotAt = tool?.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
+      const snapshotAt = tool.kit === null ? event.snapshotAt : envelopeSnapshotAt(answer);
       const { error } = answer;
       // A call that failed through the service's fault does not count (§14).
       if (count?.kind === "counted" && error !== null && REFUNDED_ERRORS.has(error)) await usage.refund(count);
@@ -230,7 +225,7 @@ export function createToolRegistry({
 }
 
 /** Runs the handler of `tool`, and answers with the response envelope. */
-async function answerCall(tool: UserTool, args: unknown, ctx: PlatformToolContext, log: (line: string) => void): Promise<ToolAnswer> {
+async function answerCall(tool: ListedTool, args: unknown, ctx: PlatformToolContext, log: (line: string) => void): Promise<ToolAnswer> {
   const { pool, user, settings } = ctx;
   try {
     if (tool.kit === null) {

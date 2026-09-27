@@ -28,7 +28,7 @@ import { UserFacingError } from "./tool-context.js";
  *   message (`userError`), not protocol errors, so the agent relays them: a
  *   `UserFacingError`, such as `ToolContext`'s for an unknown character, and
  *   a call to a tool of a game the user has turned off (`gameOffResult`),
- *   which a client can still list until a new chat (§10.2). So are a free
+ *   which every client lists (§10.2). So are a free
  *   user's call of a paid-only tool (`paidOnlyResult`, §10.2, §14), and cap
  *   reached (`capReachedResult` in `usage.ts`, §14).
  * - Any other error becomes `TOOL_FAILED_MESSAGE`, and a log line with the

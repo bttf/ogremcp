@@ -2,10 +2,9 @@
 // (docs/architecture.md §5, §13). For now it serves the health endpoints,
 // Google and Discord sign-in with web sessions (§13.1), the web UI shell with
 // its Sign in and Games pages (§13.2), the OAuth server with the MCP
-// endpoint's discovery (§9), the platform tools and the kit tools of each
-// user's enabled games (§10), the bridge's device flow (§8.1), the bridge's
-// kit and ingest endpoints (§8.2, §8.3), and the §16.1 metrics of the Admin
-// page (§13.2).
+// endpoint's discovery (§9), the platform tools and every kit's tools (§10),
+// the bridge's device flow (§8.1), the bridge's kit and ingest endpoints
+// (§8.2, §8.3), and the §16.1 metrics of the Admin page (§13.2).
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";

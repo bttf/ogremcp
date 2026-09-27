@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPool } from "./db.js";
 import type { Kit } from "./kits/registry.js";
-import { listGames, NO_GAMES_NOTE, NO_SNAPSHOT_NOTE, SETUP_STEPS } from "./list-games.js";
+import { listGames, NO_GAMES_NOTE, NO_SNAPSHOT_NOTE, SETUP_STEPS, TOOLS_NOTE } from "./list-games.js";
 import { migrate } from "./migrations.js";
 import { DEFAULT_TOOL_CONTEXT, findToolUser } from "./tool-context.js";
 
@@ -14,7 +14,7 @@ import { DEFAULT_TOOL_CONTEXT, findToolUser } from "./tool-context.js";
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 if (TEST_DATABASE_URL === undefined) console.warn("TEST_DATABASE_URL is not set: the Postgres tests in list-games.test.ts are skipped");
 
-const WOW = { key: "wow", name: "World of Warcraft" } as Kit;
+const WOW = { key: "wow", name: "World of Warcraft", interpreter: { tools: [{ name: "wow_get_state" }, { name: "wow_get_history" }] } } as Kit;
 
 const ZOELA: Character = { key: "Player-0000-00000001", name: "Zoela", realm: "Testrealm" };
 const BRANNIC: Character = { key: "Player-0000-00000002", name: "Brannic", realm: "Testrealm" };
@@ -80,7 +80,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("list_games (§10.3)", () => {
     return result.structuredContent;
   }
 
-  it("returns the last-active game and flavor and the recent characters, of this user only", async () => {
+  it("returns each game's tools, the last-active game and flavor, and the recent characters, of this user only", async () => {
     const user = await newUser();
     await user.add(at(10), "classic_era", ZOELA);
     await user.add(at(11), "forever", BRANNIC);
@@ -98,6 +98,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("list_games (§10.3)", () => {
         {
           game: "wow",
           name: "World of Warcraft",
+          tools: ["wow_get_state", "wow_get_history"],
           active_flavor: "classic_era",
           snapshot_at: at(13).toISOString(),
           characters: [
@@ -109,6 +110,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("list_games (§10.3)", () => {
         },
       ],
       last_active: { game: "wow", flavor: "classic_era", snapshot_at: at(13).toISOString() },
+      tools_note: TOOLS_NOTE,
     });
 
     const capped = await call(user.uuid, [WOW], { ...DEFAULT_TOOL_CONTEXT, listGamesCharacters: 2 });
@@ -118,8 +120,9 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("list_games (§10.3)", () => {
   it("returns the setup steps when no enabled game has a snapshot, and points to the Games page when no game is enabled", async () => {
     const user = await newUser();
     expect(await call(user.uuid, [WOW])).toEqual({
-      games: [{ game: "wow", name: "World of Warcraft", active_flavor: null, snapshot_at: null, characters: [] }],
+      games: [{ game: "wow", name: "World of Warcraft", tools: ["wow_get_state", "wow_get_history"], active_flavor: null, snapshot_at: null, characters: [] }],
       last_active: null,
+      tools_note: TOOLS_NOTE,
       note: NO_SNAPSHOT_NOTE,
       setup: SETUP_STEPS,
     });

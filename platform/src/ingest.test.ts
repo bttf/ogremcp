@@ -19,6 +19,7 @@ import { DEFAULT_INGEST, type IngestAnswer, type IngestMeta, type IngestSettings
 import { writeAdapterZips } from "./kits/adapter.js";
 import { KIT_SOURCES, type Kit, type KitRegistry, loadKitRegistry } from "./kits/registry.js";
 import { checkKits } from "./kits/validate.js";
+import { TOOLS_NOTE } from "./list-games.js";
 import { migrate } from "./migrations.js";
 import { createOidcProvider } from "./oidc.js";
 import { PostgresAdapter } from "./oidc-adapter.js";
@@ -384,12 +385,14 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
         {
           game: "bg1",
           name: "Baldur's Gate: Enhanced Edition",
+          tools: ["bg1_get_state"],
           active_flavor: "bgee",
           snapshot_at: snapshotAt.toISOString(),
           characters: [{ name: "Buhldozier", flavor: "bgee", snapshot_at: snapshotAt.toISOString() }],
         },
       ],
       last_active: { game: "bg1", flavor: "bgee", snapshot_at: snapshotAt.toISOString() },
+      tools_note: TOOLS_NOTE,
     });
   });
 

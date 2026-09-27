@@ -11,6 +11,8 @@ const CLAUDE_CODE_NAME = "ogremcp";
  * (§1), and short steps for each §9 target client. Each agent registers
  * itself (CIMD or DCR, §9), so no client ID is shown. The steps name each
  * client's setting area, not exact menu paths, which the clients rename.
+ * claude.ai keeps a connector's tool list until the player refreshes it, so
+ * its steps say to refresh it when Ogre MCP adds a game (§10.2).
  */
 export function ConnectAgent() {
   const [setup, setSetup] = useState<Setup | "loading" | "error">("loading");
@@ -43,6 +45,7 @@ export function ConnectAgent() {
               <li>In Claude's connector settings, add a custom connector with the URL above.</li>
               <li>Connect it, then sign in and approve Claude.</li>
               <li>Claude's Free plan allows one custom connector. This one covers every game you enable.</li>
+              <li>When Ogre MCP adds a game, use Refresh tool list in the connector's settings, so that Claude sees the game's tools.</li>
             </Client>
             <Client name="Claude Code">
               <li>
