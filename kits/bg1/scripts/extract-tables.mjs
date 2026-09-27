@@ -198,6 +198,9 @@ function areaNames(lua, joinable) {
       prev = name;
       name = name.replace(/\s*\([^()]*\)/g, "");
     }
+    // An unmatched "(" starts a note that runs to the end; an unmatched ")" is
+    // left over from one (AR3300 has "...Red Sheaf))").
+    name = name.replace(/\(.*$/, "").replace(/\)/g, "");
     name = name.replace(/\s+/g, " ").trim();
     const prefix = /^(\S+) - (.+)$/.exec(name);
     if (prefix && joinable.has(prefix[1].toUpperCase())) name = prefix[2];

@@ -22,6 +22,8 @@ Each of the paths above has its own `LICENSE` file. `platform/` is licensed unde
 
 The exception is `kits/bg1/data/`. It holds text extracted from Baldur's Gate: Enhanced Edition, which is Beamdog's. No license in this repository covers it; see its [`NOTICE`](kits/bg1/data/NOTICE).
 
+The exception is `kits/bg1/data/`. It holds text extracted from Baldur's Gate: Enhanced Edition, which is Beamdog's. No license in this repository covers it; see its [`NOTICE`](kits/bg1/data/NOTICE).
+
 ## Contributing
 
 Contributions use the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), not a CLA. Sign off every commit with `git commit -s`. CI fails a pull request if any of its commits lacks a `Signed-off-by:` line that matches the commit author's name and email.
