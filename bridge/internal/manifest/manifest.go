@@ -110,8 +110,10 @@ type Adapter struct {
 // Source is one kind of thing the bridge reads.
 type Source struct {
 	// ID is sent as source_id at ingest (§8.3).
-	ID      string `json:"id"`
-	Type    string `json:"type"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// Format is text or binary. The bridge uploads both the same way, as
+	// raw bytes (§6.1).
 	Format  string `json:"format"`
 	Path    string `json:"path"`
 	Trigger string `json:"trigger"`
@@ -210,8 +212,8 @@ func (m *Manifest) Validate() error {
 		if s.Type != "file" {
 			bad("sources[%d].type %q is not file", i, s.Type)
 		}
-		if s.Format != "text" {
-			bad("sources[%d].format %q is not text", i, s.Format)
+		if s.Format != "text" && s.Format != "binary" {
+			bad("sources[%d].format %q is not text or binary", i, s.Format)
 		}
 		if s.Trigger != "on_change" {
 			bad("sources[%d].trigger %q is not on_change", i, s.Trigger)

@@ -45,6 +45,34 @@ func TestParseWoWManifest(t *testing.T) {
 	}
 }
 
+// The BG1 manifest sketch of §6.6.1: no adapter, a binary source, and locate
+// paths with spaces and an apostrophe.
+func TestParseBG1Sketch(t *testing.T) {
+	raw := `{
+		"kit": "bg1",
+		"version": "0.1.0",
+		"sdk": "^0.0.0",
+		"tool_prefix": "bg1",
+		"root": {
+			"locate": [
+				{ "path": "{HOME}/Documents/Baldur's Gate - Enhanced Edition" },
+				{ "path": "{HOME}/OneDrive/Documents/Baldur's Gate - Enhanced Edition" },
+				{ "prompt": "Select the Baldur's Gate - Enhanced Edition folder in your Documents folder" }
+			],
+			"verify": "Baldur.lua"
+		},
+		"sources": [{ "id": "gam", "type": "file", "format": "binary", "path": "save/*/BALDUR.gam", "trigger": "on_change" }],
+		"flavors": { "bgee": { "status": "experimental" } }
+	}`
+	m, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Adapter != nil || m.Sources[0].Format != "binary" {
+		t.Errorf("adapter = %+v, sources = %+v", m.Adapter, m.Sources)
+	}
+}
+
 // A manifest from a platform that still lists a flavor's search scope
 // parses: the field was removed (§6.1, §12), and unknown fields are ignored.
 func TestParseIgnoresRemovedSearchField(t *testing.T) {

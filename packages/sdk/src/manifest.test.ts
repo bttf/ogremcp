@@ -37,6 +37,25 @@ const example = {
   },
 } satisfies Manifest;
 
+// The BG1 manifest sketch in docs/architecture.md §6.6.1: no adapter, a
+// binary source, and locate paths with spaces and an apostrophe.
+const bg1 = {
+  kit: "bg1",
+  version: "0.1.0",
+  sdk: "^0.0.0",
+  tool_prefix: "bg1",
+  root: {
+    locate: [
+      { path: "{HOME}/Documents/Baldur's Gate - Enhanced Edition" },
+      { path: "{HOME}/OneDrive/Documents/Baldur's Gate - Enhanced Edition" },
+      { prompt: "Select the Baldur's Gate - Enhanced Edition folder in your Documents folder" },
+    ],
+    verify: "Baldur.lua",
+  },
+  sources: [{ id: "gam", type: "file", format: "binary", path: "save/*/BALDUR.gam", trigger: "on_change" }],
+  flavors: { bgee: { status: "experimental" } },
+} satisfies Manifest;
+
 const source = example.sources[0];
 
 const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
@@ -44,6 +63,10 @@ const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
 describe("manifest schema", () => {
   it("accepts the §6.1 example", () => {
     expect(validate(example), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("accepts the §6.6.1 sketch", () => {
+    expect(validate(bg1), JSON.stringify(validate.errors)).toBe(true);
   });
 
   it.each<[string, unknown]>([

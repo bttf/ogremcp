@@ -93,9 +93,9 @@ export interface Source {
    */
   type: "file";
   /**
-   * Only `text` is implemented.
+   * What the file holds: `text` or `binary`. The bridge uploads both the same way, as raw bytes. A bridge that predates `binary` rejects a manifest that uses it (§6.1).
    */
-  format: "text";
+  format: "text" | "binary";
   /**
    * Relative to root. Globs allowed; the bridge watches every match. No variables, and it may not leave root.
    */
