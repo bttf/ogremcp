@@ -41,11 +41,14 @@
 //   areas.json    { "<RESREF>": "<name>" }: the cheatAreas list in BGEE.LUA,
 //                 without the notes that name characters: parenthetical notes,
 //                 and a leading "<Name> - " when <Name> is a PDIALOG.2DA row.
-//   options.json  { "alignment" | "class" | "gender" | "kit" | "race": { "<id>": "<name>" } }
+//   options.json  { "alignment" | "class" | "gender" | "kit" | "proficiency" | "race": { "<id>": "<name>" } }
 //                 Class: CLASTEXT.2DA MIXED of each class without a kit, with
 //                 the engine's tokens <FIGHTERTYPE> and <MAGESCHOOL> read as
 //                 "Fighter" and "Mage". Race: RACETEXT.2DA UPPERCASE. Kit:
 //                 KITLIST.2DA MIXED, keyed by its KITIDS value (KIT.IDS).
+//                 Proficiency: WEAPPROF.2DA NAME_REF, keyed by its ID column
+//                 (STATS.IDS), for the rows whose NAME_REF has text; the class
+//                 and kit maximums in the other columns are left out.
 //                 Alignment and gender have no text table: their names are the
 //                 ALIGNMEN.IDS and GENDER.IDS symbols in title case. Every key
 //                 is the ID as a decimal string, e.g. "17" for 0x11.
@@ -407,6 +410,14 @@ function characterOptions(res, tlk) {
     kits[id] = need(Number(row.MIXED), `KITLIST.2DA ${row.name}`);
   }
 
+  // The EXTRA rows (116 and up) have no name.
+  const proficiencies = {};
+  for (const row of parse2da(res.text("WEAPPROF", TYPE["2da"]), "WEAPPROF.2DA")) {
+    const id = Number(row.ID);
+    const name = tlk.text(Number(row.NAME_REF));
+    if (Number.isInteger(id) && name !== undefined && !(id in proficiencies)) proficiencies[id] = name;
+  }
+
   const alignments = {};
   for (const [id, symbol] of parseIds(res.text("ALIGNMEN", TYPE.ids))) {
     if (!symbol.startsWith("MASK_") && !(id in alignments)) alignments[id] = titleCase(symbol);
@@ -421,6 +432,7 @@ function characterOptions(res, tlk) {
     class: sortKeys(classes),
     gender: sortKeys(genders),
     kit: sortKeys(kits),
+    proficiency: sortKeys(proficiencies),
     race: sortKeys(races),
   };
 }

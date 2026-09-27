@@ -58,13 +58,16 @@ export interface PartyMember {
   hp: number;
   max_hp: number;
   abilities: Cre["abilities"];
-  // The save holds the base THAC0, saving throws, and thief skills: the game
-  // adds the items', effects', and ability scores' bonuses as it plays. It
-  // holds no armor class but the base 10, so the state leaves it out.
+  // The save holds the base THAC0, saving throws, thief skills, and weapon
+  // proficiencies: the game adds the items', effects', and ability scores'
+  // bonuses as it plays. It holds no armor class but the base 10, so the
+  // state leaves it out.
   base_thac0: number;
   base_saving_throws: { death: number; wands: number; polymorph: number; breath: number; spells: number };
   /** Null for a class without thief skills. */
   base_thief_skills: Cre["thief"] | null;
+  /** The weapon proficiencies with pips, in proficiency ID order. Null name, with `id`, when the tables lack it. */
+  base_proficiencies: { name: string | null; id?: number; pips: number }[];
   status: { dead: boolean; flags: string[] };
   /** The memorized spells, one line per spell and level, with how many of them are memorized and ready. */
   spells: { code: string; name: string | null; type: SpellType | null; level: number; memorized: number; ready: number }[];
@@ -211,6 +214,12 @@ class Lookup {
     return { code: item.code, name: text(names.name) ?? text(names.unidentified) ?? null, identified: true, charges };
   }
 
+  /** `{ name }`, or `{ name: null, id }` when the tables lack the proficiency. */
+  proficiency(id: number): { name: string | null; id?: number } {
+    const name = this.tables.options.proficiency.get(id);
+    return name === undefined ? { name: null, id } : { name };
+  }
+
   spell(code: string): string | null {
     const strref = this.tables.spells.get(code);
     return strref === undefined ? null : (this.tables.strings.get(strref) ?? null);
@@ -246,6 +255,10 @@ function partyMember(npc: Npc, cre: Cre, protagonist: boolean, lookup: Lookup): 
     base_thac0: cre.thac0,
     base_saving_throws: { death, wands, polymorph, breath, spells },
     base_thief_skills: THIEF_SKILL_CLASSES.has(cre.class) ? cre.thief : null,
+    base_proficiencies: [...cre.proficiencies]
+      .filter(([, pips]) => pips !== 0)
+      .sort(([a], [b]) => a - b)
+      .map(([id, pips]) => ({ ...lookup.proficiency(id), pips })),
     status: {
       dead: (cre.state & DEAD_STATES) !== 0,
       flags: STATE_FLAGS.filter((_, bit) => bit !== DEAD && (cre.state >>> bit) & 1),
