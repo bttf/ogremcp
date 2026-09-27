@@ -3,13 +3,13 @@ import { Link } from "react-router";
 import { ContactSection, LegalPage } from "./Legal.js";
 
 /** The day the text below last changed. Change it with the text. */
-export const PRIVACY_UPDATED = "September 26, 2026";
+export const PRIVACY_UPDATED = "September 27, 2026";
 
 /**
  * The Privacy page (§13.2). It describes the hosted service, with the default
  * limits. Every statement follows from the code and docs/architecture.md:
- * what the WoW adapter records (`kits/wow/adapter`), what the bridge sends
- * (§8.3), the tables (§11, `platform/migrations`), sign-in
+ * what the WoW adapter records (`kits/wow/adapter`), what the BG1 kit reads
+ * from a save (`kits/bg1`, §6.6), what the bridge sends (§8.3), the tables (§11, `platform/migrations`), sign-in
  * (`sign-in-providers.ts`), retention (`retention.ts`), the deletes
  * (`account.ts`), the cleanup of expired sign-ins and tokens
  * (`auth-cleanup.ts`), and the log (`log.ts`). Paid retention is described,
@@ -23,9 +23,9 @@ export function Privacy() {
   return (
     <LegalPage title="Privacy policy" updated={PRIVACY_UPDATED}>
       <p>
-        Ogre MCP is run by Red Pine Software. It has three parts: an addon in your game, the bridge app on your computer, and this
-        service, which your AI agent connects to. This page says what each part collects, who else receives it, how long it is kept,
-        and how to delete it.
+        Ogre MCP is run by Red Pine Software. It has three parts: an addon in World of Warcraft, the bridge app on your computer, and
+        this service, which your AI agent connects to. Baldur's Gate: Enhanced Edition needs no addon. This page says what each part
+        collects, who else receives it, how long it is kept, and how to delete it.
       </p>
       <p>It describes the hosted service. Someone who runs their own server can change the limits below.</p>
 
@@ -58,9 +58,25 @@ export function Privacy() {
         <code>/transmit</code>, reloads the game's interface so that the game writes the file.
       </p>
 
+      <h2>What the bridge reads from Baldur's Gate: Enhanced Edition</h2>
+      <p>
+        The game keeps its saves in its folder in Documents. Each time you save, the bridge sends that save's <code>BALDUR.gam</code>{" "}
+        file. On its first run, it sends the file of each save already there. It reads nothing else in the save folders: no screenshots,
+        portraits, or other files. The service stores the file and reads from it:
+      </p>
+      <ul>
+        <li>The protagonist's name.</li>
+        <li>The party: each member's name, class, race, level, experience, hit points, ability scores, and spells.</li>
+        <li>Each member's equipped and carried items.</li>
+        <li>The journal: the quests and entries the game has shown you.</li>
+        <li>The chapter, the game's day and hour, the party's gold and reputation, and the current area.</li>
+        <li>The characters who left the party, and the area each one is in.</li>
+      </ul>
+
       <h2>What the bridge sends</h2>
       <p>
-        The bridge watches that file. When it changes, the bridge sends it to the service, compressed, over HTTPS. With the file it sends
+        The bridge watches the addon's file and the Baldur's Gate save files. When one changes, the bridge sends it to the service,
+        compressed, over HTTPS. With the file it sends
         its own version, your computer's operating system, the time the file changed, and counts of its own errors. It sends the file's
         path only as a hash.
       </p>
@@ -90,7 +106,7 @@ export function Privacy() {
           <strong>Approvals:</strong> the agents and bridges you approved, and the tokens they use.
         </li>
         <li>
-          <strong>Uploads:</strong> each file the bridge sends, as it arrived, with everything the addon records. It is kept so that it can
+          <strong>Uploads:</strong> each file the bridge sends, as it arrived, with everything in it. It is kept so that it can
           be read again after a fix to the service.
         </li>
         <li>

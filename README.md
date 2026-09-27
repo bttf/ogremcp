@@ -8,6 +8,7 @@ Ogre MCP (Open Game Relay Engine, `ogremcp`) connects a video game to any AI age
 |---|---|---|
 | `packages/sdk/` | `@ogremcp/sdk`: manifest schema, `Interpreter` interface, shared types | MIT |
 | `kits/wow/` | `@ogremcp/kit-wow`: WoW adapter, manifest, interpreter, fixtures | MIT |
+| `kits/bg1/` | `@ogremcp/kit-bg1`: Baldur's Gate: Enhanced Edition manifest, interpreter, name tables, extraction script, fixtures. No adapter. | MIT, except `kits/bg1/data/` |
 | `platform/` | `@ogremcp/platform`: service, web UI, MCP server, bridge API, OAuth server | AGPL-3.0-or-later |
 | `bridge/` | Go module: the bridge that runs on the player's PC | MIT |
 
@@ -17,7 +18,7 @@ To run your own server with Docker Compose, see [`docs/self-host.md`](docs/self-
 
 ## License
 
-Each of the four paths above has its own `LICENSE` file. `platform/` is licensed under the GNU Affero General Public License v3.0 or later. `packages/sdk/`, `kits/wow/`, and `bridge/` are licensed under the MIT License. Every file outside those four paths is licensed under the MIT License in the root [`LICENSE`](LICENSE).
+Each of the paths above has its own `LICENSE` file. `platform/` is licensed under the GNU Affero General Public License v3.0 or later. `packages/sdk/`, `kits/wow/`, `kits/bg1/`, and `bridge/` are licensed under the MIT License. Every file outside those paths is licensed under the MIT License in the root [`LICENSE`](LICENSE).
 
 The exception is `kits/bg1/data/`. It holds text extracted from Baldur's Gate: Enhanced Edition, which is Beamdog's. No license in this repository covers it; see its [`NOTICE`](kits/bg1/data/NOTICE).
 
