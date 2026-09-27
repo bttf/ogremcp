@@ -289,6 +289,11 @@ function inventory(npc: Npc, cre: Cre, lookup: Lookup): MemberInventory {
  * quest; when several quests name it, to the last of them in the list. Notes
  * and journal info entries belong to no quest. A quest is complete when any
  * of its entries is (UTIL.LUA updateQuestState).
+ *
+ * Each strref shows once, as in the game (UI.MENU updateJournalEntry): a
+ * repeated quest entry keeps its place and takes the chapter and day of its
+ * last copy, and a repeated entry in no quest keeps its first copy. The game lists a repeated note
+ * (section 0) each time; here it shows once too.
  */
 function quests(journal: readonly JournalEntry[], lookup: Lookup): QuestsSection {
   const questOf = new Map<number, number>();
@@ -296,17 +301,17 @@ function quests(journal: readonly JournalEntry[], lookup: Lookup): QuestsSection
     for (const entry of quest.entries) questOf.set(entry, index);
   });
   const found = new Map<number, { quest: Quest; complete: boolean; latest: number }>();
+  const questEntries = new Map<number, JournalText>();
   const other: JournalText[] = [];
+  const otherStrrefs = new Set<number>();
   for (const entry of journal) {
-    const text: JournalText = {
-      ...lookup.name(entry.strref, "text"),
-      chapter: entry.chapter,
-      day: Math.floor(entry.time / JOURNAL_TICKS / PER_DAY),
-    };
+    const chapter = entry.chapter;
+    const day = Math.floor(entry.time / JOURNAL_TICKS / PER_DAY);
     const index = questOf.get(entry.strref);
     const isQuestEntry = (entry.section & 0b011) !== 0 && (entry.section & 0b100) === 0;
     if (index === undefined || !isQuestEntry) {
-      other.push(text);
+      if (!otherStrrefs.has(entry.strref)) other.push({ ...lookup.name(entry.strref, "text"), chapter, day });
+      otherStrrefs.add(entry.strref);
       continue;
     }
     let quest = found.get(index);
@@ -315,7 +320,14 @@ function quests(journal: readonly JournalEntry[], lookup: Lookup): QuestsSection
       quest = { quest: { ...lookup.name(title, "title"), entries: [] }, complete: false, latest: 0 };
       found.set(index, quest);
     }
-    quest.quest.entries.push(text);
+    const seen = questEntries.get(entry.strref);
+    if (seen === undefined) {
+      const text: JournalText = { ...lookup.name(entry.strref, "text"), chapter, day };
+      questEntries.set(entry.strref, text);
+      quest.quest.entries.push(text);
+    } else {
+      Object.assign(seen, { chapter, day });
+    }
     quest.complete ||= (entry.section & 0b010) !== 0;
     quest.latest = Math.max(quest.latest, entry.time);
   }
