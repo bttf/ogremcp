@@ -370,15 +370,26 @@ func TestRescanFindsNewFolders(t *testing.T) {
 	}
 	h.none()
 
-	// The account goes away, and so does its watch.
+	// The account goes away, and so do its watches. The root stays watched
+	// for a new flavor folder.
 	if err := os.RemoveAll(filepath.Join(root, "_classic_era_")); err != nil {
 		t.Fatal(err)
 	}
 	h.advance(interval)
 	watched := make(chan []string)
 	h.w.probe <- func() { watched <- h.w.fsw.WatchList() }
-	if got := <-watched; len(got) != 0 {
-		t.Errorf("still watching %q", got)
+	if got := <-watched; !slices.Equal(got, []string{root}) {
+		t.Errorf("watching %q, want only the root", got)
+	}
+}
+
+func bg1(root string) Kit {
+	return Kit{
+		Kit:  "bg1",
+		Root: root,
+		Sources: []manifest.Source{{
+			ID: "gam", Type: "file", Format: "binary", Path: "save/*/BALDUR.gam", Trigger: "on_change",
+		}},
 	}
 }
 
@@ -391,13 +402,7 @@ func TestNewFolderUnderAWildcard(t *testing.T) {
 	if err := os.Mkdir(saves, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := startKit(t, Kit{
-		Kit:  "bg1",
-		Root: root,
-		Sources: []manifest.Source{{
-			ID: "gam", Type: "file", Format: "binary", Path: "save/*/BALDUR.gam", Trigger: "on_change",
-		}},
-	})
+	h := startKit(t, bg1(root))
 	h.advance(debounce)
 	h.none()
 
@@ -409,6 +414,29 @@ func TestNewFolderUnderAWildcard(t *testing.T) {
 	h.advance(debounce) // the rescan, which watches the new folder
 	h.advance(debounce) // the file's debounce
 	if got := h.next(); got.Kit != "bg1" || got.SourceID != "gam" || got.Path != path {
+		t.Errorf("change = %+v", got)
+	}
+	h.none()
+}
+
+// Before BG1's first save there is no save folder. The watch of the game
+// folder finds the new save folder after the debounce, not at the next
+// interval (§7).
+func TestFirstSaveFolder(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	h := startKit(t, bg1(root))
+	h.advance(debounce) // the rescan that a new folder watch asks for
+	h.none()
+
+	h.mark()
+	saves := filepath.Join(root, "save")
+	path := filepath.Join(saves, "000000001-Quick-Save", "BALDUR.gam")
+	write(t, path, "v1")
+	h.waitTrace("rescan soon " + saves)
+	h.advance(debounce) // the rescan, which watches the new folders
+	h.advance(debounce) // the file's debounce
+	if got := h.next(); got.Kit != "bg1" || got.Path != path {
 		t.Errorf("change = %+v", got)
 	}
 	h.none()

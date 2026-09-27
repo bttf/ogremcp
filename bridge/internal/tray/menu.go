@@ -60,6 +60,9 @@ type State struct {
 	LoginPage string
 	// LastUpload is when the server last took an upload, or zero.
 	LastUpload time.Time
+	// KitUploads maps each kit to when the server last took an upload of
+	// it.
+	KitUploads map[string]time.Time
 	// Error is the newest error still current, and ErrorAt when it was
 	// shown.
 	Error   string
@@ -69,6 +72,9 @@ type State struct {
 	// KitNames maps each kit's ID to its display name, such as "World of
 	// Warcraft" (GET /api/v1/kits). A kit without one goes by its ID.
 	KitNames map[string]string
+	// Games are the enabled kits of the latest fetch, in the server's
+	// order. It is nil until a fetch answers.
+	Games []Game
 	// NeedFolder means a kit's game folder was not found, and its manifest
 	// lets the user pick it.
 	NeedFolder bool
@@ -83,6 +89,13 @@ type State struct {
 	// release it is about (§7).
 	Update        Update
 	UpdateVersion string
+}
+
+// Game is an enabled kit on the Games submenu (§7).
+type Game struct {
+	Kit string
+	// NotFound means the locate chain found no game folder.
+	NotFound bool
 }
 
 // Update is the state of the bridge's own update (§7).
@@ -117,6 +130,10 @@ type View struct {
 	Adapters []string
 	// Update is the line about the bridge's own update, hidden when "".
 	Update string
+	// Games are the lines of the Games submenu, at most MaxGameLines, above
+	// its Sync with server item. SyncEnabled enables that item.
+	Games       []string
+	SyncEnabled bool
 	// Active selects the icon of a logged-in bridge.
 	Active bool
 
@@ -134,6 +151,8 @@ type View struct {
 
 // Menu item titles that do not change.
 const (
+	TitleGames        = "Games"
+	TitleSync         = "Sync with server"
 	TitleChooseFolder = "Choose the game folder…"
 	TitleServer       = "Server…"
 	TitleAutostart    = "Start at login"
@@ -146,6 +165,9 @@ const (
 // MaxAdapterLines is the most adapter lines a View has.
 const MaxAdapterLines = 4
 
+// MaxGameLines is the most lines of the Games submenu a View has.
+const MaxGameLines = 8
+
 // maxErrorRunes is the most characters of an error message the menu shows.
 // The log has all of it.
 const maxErrorRunes = 120
@@ -155,6 +177,8 @@ func Render(s State, now time.Time) View {
 	v := View{
 		Active:           s.Login == LoginDone,
 		Adapters:         adapterLines(s.Adapters, s.KitNames),
+		Games:            gameLines(s, now),
+		SyncEnabled:      s.Login != LoginNeeded && s.Login != LoginWaiting,
 		ChooseFolder:     s.NeedFolder,
 		Autostart:        s.Autostart,
 		AutostartTitle:   TitleAutostart,
@@ -253,6 +277,30 @@ func adapterLines(list []adapter.Status, names map[string]string) []string {
 		lines = append(lines, kitLines...)
 	}
 	return lines[:min(len(lines), MaxAdapterLines)]
+}
+
+// gameLines are the lines of the Games submenu (§7): each enabled kit with
+// its last upload, or "folder not found" when the locate chain found none.
+func gameLines(s State, now time.Time) []string {
+	if s.Games == nil {
+		return nil
+	}
+	if len(s.Games) == 0 {
+		return []string{"No games enabled"}
+	}
+	var lines []string
+	for _, g := range s.Games {
+		name := kitName(s.KitNames, g.Kit)
+		switch at := s.KitUploads[g.Kit]; {
+		case g.NotFound:
+			lines = append(lines, name+": folder not found")
+		case at.IsZero():
+			lines = append(lines, name+": no upload yet")
+		default:
+			lines = append(lines, name+": last upload "+clock(at, now))
+		}
+	}
+	return lines[:min(len(lines), MaxGameLines)]
 }
 
 // kitName is the display name of kit, or its ID when it has none.
@@ -455,10 +503,22 @@ func (m *Model) SetKitNames(names map[string]string) {
 	})
 }
 
-// SetLastUpload records when the server last took an upload.
-func (m *Model) SetLastUpload(t time.Time) {
+// SetLastUpload records when the server last took an upload, and when it
+// last took one of each kit.
+func (m *Model) SetLastUpload(t time.Time, kits map[string]time.Time) {
 	m.update(func(s *State) []string {
-		s.LastUpload = t
+		s.LastUpload, s.KitUploads = t, kits
+		return nil
+	})
+}
+
+// SetGames records the enabled kits of a fetch.
+func (m *Model) SetGames(games []Game) {
+	m.update(func(s *State) []string {
+		s.Games = slices.Clone(games)
+		if s.Games == nil {
+			s.Games = []Game{}
+		}
 		return nil
 	})
 }

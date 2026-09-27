@@ -20,8 +20,9 @@
 //	    -root DIR   answer the folder prompt with DIR; without it the prompt
 //	                is skipped
 //	    -watch      keep running, fetch and locate again every refresh
-//	                interval, and watch the kits' sources (§7): print each
-//	                settled change of a source instance
+//	                interval and when the kit list changes, and watch the
+//	                kits' sources (§7): print each settled change of a
+//	                source instance
 //	bridge adapter  fetch and locate as bridge kits does, install or update
 //	                each kit's adapter (§7), and print the outcome at each
 //	                adapter folder. Takes -root, and -watch, which syncs every
@@ -37,6 +38,11 @@
 //	    reset       remove the server from the settings file, so the bridge
 //	                uses the hosted service
 //
+// The tray app, bridge run, and the -watch commands check the kit list every
+// kit check interval, and fetch the kits when it changed (§7). The tray's
+// Games submenu lists the enabled games; its Sync with server fetches the kits
+// at once and uploads each file whose bytes changed since its last upload.
+//
 // The tray app of a release build updates itself (package selfupdate, §7). It
 // checks the bridge-v releases at start and every update interval, installs a
 // newer one without asking, starts it, and quits. The new version waits for
@@ -50,9 +56,9 @@
 // The server is OGREMCP_BASE_URL when it is set, for development, or else the
 // settings file's server_url, or else the hosted service
 // (config.File.Server). The tray's Server… item and bridge server set change
-// server_url. The game folders, the refresh interval, the debounce delay, the
-// upload cap, and the update interval are in the settings file too (package
-// config).
+// server_url. The game folders, the refresh interval, the kit check interval,
+// the debounce delay, the upload cap, and the update interval are in the
+// settings file too (package config).
 package main
 
 import (
@@ -266,10 +272,10 @@ func listKits(args []string) error {
 	}
 
 	env := locate.DefaultEnv()
-	show := func(list []kits.Kit, err error) {
+	show := func(list []kits.Kit, err error) bool {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
-			return
+			return false
 		}
 		if len(list) == 0 {
 			fmt.Println("No kits are enabled for this account.")
@@ -300,11 +306,12 @@ func listKits(args []string) error {
 		if watcher != nil {
 			watcher.SetKits(located)
 		}
+		return true
 	}
 
 	api := kits.New(base, client)
 	if *follow {
-		kits.NewPoller(api, settings.Interval(), show).Run(ctx)
+		kits.NewPoller(api, settings.KitCheckEvery(), settings.Interval(), show).Run(ctx)
 		return nil
 	}
 	list, err := api.Fetch(ctx)
