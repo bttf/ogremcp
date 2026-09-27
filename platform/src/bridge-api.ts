@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import express, { type RequestHandler, type Response, type Router } from "express";
 import type Provider from "oidc-provider";
 import type { Pool } from "pg";
@@ -20,7 +22,9 @@ import { currentToken, requireToken, resourcesOf } from "./oidc-tokens.js";
  * prompts a new login. Every answer is `no-store`.
  *
  * - `GET /api/v1/kits`: a `KitList` of the user's enabled kits (`user_games`,
- *   §11) that the registry holds, in registry order.
+ *   §11) that the registry holds, in registry order. Its `ETag` is the
+ *   SHA-256 of the body. A request whose `If-None-Match` matches it gets 304
+ *   with no body: the bridge checks the list every minute (§7).
  * - `GET /api/v1/kits/{kit}/manifest`: the kit's pinned `manifest.json` (§5,
  *   §6.1).
  * - `GET /api/v1/kits/{kit}/adapter`: the adapter zip the platform build made
@@ -82,6 +86,17 @@ export interface KitListEntry {
   } | null;
 }
 
+/**
+ * Whether an `If-None-Match` header names `etag`, by the weak comparison of
+ * RFC 9110 §13.1.2. Express's `req.fresh` is not used: it ignores the header
+ * when the request also sends `Cache-Control: no-cache`, as `fetch` does.
+ */
+function noneMatch(header: string | undefined, etag: string): boolean {
+  if (header === undefined) return false;
+  if (header.trim() === "*") return true;
+  return header.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag);
+}
+
 export interface BridgeApiOptions {
   /** `PUBLIC_BASE_URL`. The resource is `<it>/api/v1`. */
   publicBaseUrl: string;
@@ -105,7 +120,7 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
     next();
   };
 
-  router.get("/api/v1/kits", noStore, requireIngest, async (_req, res) => {
+  router.get("/api/v1/kits", noStore, requireIngest, async (req, res) => {
     const { rows } = await pool.query<{ kit: string }>(
       "select g.kit from user_games g join users u on u.id = g.user_id where u.uuid = $1",
       [currentToken(res)?.userUuid],
@@ -122,7 +137,14 @@ export function bridgeApiRouter({ publicBaseUrl, provider, pool, kits, ingest = 
           adapter: kit.adapter === null ? null : { version: kit.adapter.version, sha256: kit.adapter.sha256 },
         })),
     };
-    res.json(list);
+    const body = JSON.stringify(list);
+    const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+    res.set("ETag", etag);
+    if (noneMatch(req.get("If-None-Match"), etag)) {
+      res.status(304).end();
+      return;
+    }
+    res.type("application/json").send(body);
   });
 
   /** The registered kit the path names, or a 404 `unknown_kit`. */

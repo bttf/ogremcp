@@ -67,6 +67,7 @@ it("lists WoW with a switch that enables it, then shows its in-game tips", async
   await vi.waitFor(() => expect(toggle.checked).toBe(true));
   expect(requests).toContain("PUT /api/v1/games/wow");
   expect([...container.querySelectorAll(".og-tips li")].map((li) => li.textContent)).toEqual([
+    "The bridge picks up this game within about a minute, or at once with Sync with server in its menu.",
     "Type /transmit in game to send your latest state.",
     "Restart WoW after the addon's first install.",
     "Close WoW to finish an addon update.",
