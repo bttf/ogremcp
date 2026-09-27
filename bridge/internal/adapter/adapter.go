@@ -113,6 +113,16 @@ type Status struct {
 	Latest string
 	// Err is why the sync failed, for StateFailed.
 	Err error
+	// Installing means the sync failed after it had the zip, while it
+	// installed it, as when the folder is not writable or the disk is full.
+	Installing bool
+}
+
+// FetchFailed reports whether st is a sync that failed before it had the
+// zip: the adapter folder was not found, or the download failed. A caller
+// fetches the kits again soon after one, and not after a failed install.
+func FetchFailed(st Status) bool {
+	return st.State == StateFailed && !st.Installing
 }
 
 // Target is an enabled kit and the game folder found for it (package
@@ -317,6 +327,7 @@ func (u *Updater) syncFolder(st *Status, p place, name string, latest Version, r
 		st.State = StateWaiting
 		return
 	}
+	st.Installing = true
 	if r == nil {
 		if r, err = makeParent(p); err != nil {
 			fail(err)
@@ -328,6 +339,7 @@ func (u *Updater) syncFolder(st *Status, p place, name string, latest Version, r
 		fail(err)
 		return
 	}
+	st.Installing = false
 	st.Installed = latest.String()
 	st.State = StateInstalled
 	if k == missing && running {

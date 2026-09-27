@@ -40,7 +40,7 @@ type Auth interface {
 // Controller runs the bridge for the tray app and reports through Model. Run
 // does what the dev commands `bridge run` and `bridge adapter -watch` do
 // together, and RunUpdates updates the bridge itself. The menu calls Login,
-// ChooseFolder, ChangeServer, and ToggleAutostart.
+// Sync, ChooseFolder, ChangeServer, and ToggleAutostart.
 type Controller struct {
 	// Base is the server's base URL, Auth its login, and Version the
 	// bridge's. Run replaces Base and Auth when the server changes
@@ -106,10 +106,12 @@ type Controller struct {
 	// asked holds the kits whose folder picker the locate chain has shown.
 	// It shows it once per kit by itself; ChooseFolder allows it again.
 	asked map[string]bool
-	// resume starts the uploads again and fetches the kits, after a login.
-	// wake fetches the kits. Run sets both.
+	// resume starts the uploads again and checks the kit list, after a
+	// login. fetch fetches the kits, and sync does what Sync does. runServer
+	// sets them.
 	resume func()
-	wake   func()
+	fetch  func()
+	sync   func()
 }
 
 // server is a server and its login.
@@ -127,11 +129,12 @@ type parts struct {
 }
 
 // Run runs the bridge until ctx ends (§7): it fetches the kits at start,
-// after each login, and every refresh interval, locates each game folder,
-// installs or updates each adapter, watches the kits' sources, and uploads
-// each settled change. When the server changes (SetServer), it stops all of
-// that, the uploads in flight and a running login included, and starts it
-// again against the new server. It returns once everything it started has
+// every refresh interval, and when a check of the kit list, after each login
+// and every kit check interval, finds it changed. It locates each game
+// folder, installs or updates each adapter, watches the kits' sources, and
+// uploads each settled change. When the server changes (SetServer), it stops
+// all of that, the uploads in flight and a running login included, and starts
+// it again against the new server. It returns once everything it started has
 // stopped.
 func (c *Controller) Run(ctx context.Context) {
 	c.readAutostart()
@@ -156,7 +159,7 @@ func (c *Controller) Run(ctx context.Context) {
 		// for, or sees run ended and does not start.
 		c.mu.Lock()
 		stop()
-		c.resume, c.wake = nil, nil
+		c.resume, c.fetch, c.sync = nil, nil, nil
 		c.mu.Unlock()
 		c.tasks.Wait()
 	}
@@ -173,15 +176,20 @@ func (c *Controller) runServer(ctx context.Context) {
 	p.uploader = upload.New(c.Base, c.Auth, c.Version, settings.UploadCap(), c.Log)
 	p.watcher = watch.New(settings.DebounceDelay(), settings.Interval(), c.Log, p.uploader.Add)
 	p.updater = adapter.New(adapter.NewClient(c.Base, c.Auth), process.System{})
-	poller := kits.NewPoller(kits.New(c.Base, c.Auth), settings.Interval(), func(list []kits.Kit, err error) {
-		c.onFetch(ctx, p, list, err)
+	poller := kits.NewPoller(kits.New(c.Base, c.Auth), settings.KitCheckEvery(), settings.Interval(), func(list []kits.Kit, err error) bool {
+		return c.onFetch(ctx, p, list, err)
 	})
 	c.mu.Lock()
 	c.resume = func() {
 		p.uploader.Resume()
 		poller.Wake()
 	}
-	c.wake = poller.Wake
+	c.fetch = poller.Sync
+	c.sync = func() {
+		p.uploader.Resume()
+		p.watcher.Resync()
+		poller.Sync()
+	}
 	c.mu.Unlock()
 
 	var wg sync.WaitGroup
@@ -209,21 +217,26 @@ func (c *Controller) runServer(ctx context.Context) {
 	wg.Wait()
 }
 
-// onFetch handles a fetch of the kits, on the poller's goroutine.
-func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err error) {
+// onFetch handles a fetch of the kits, on the poller's goroutine. It returns
+// false when it could not finish with the kits, as when an adapter's sync
+// failed before it had the zip, so the next check of the kit list fetches
+// again. An install that failed after the download waits for the refresh
+// interval, so a folder that is not writable does not download the zip every
+// check.
+func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err error) bool {
 	switch {
 	case errors.Is(err, auth.ErrLoginRequired):
 		// No request reached the server. The status line says so, and the
 		// menu offers a login, after which Run's resume fetches again.
 		c.Model.LoginEnded()
 		c.showErrors("fetch", nil)
-		return
+		return false
 	case errors.Is(err, auth.ErrNotRead):
 		// Whether the bridge holds a login is unknown. The menu offers a
 		// login, which writes a new one.
 		c.Model.LoginEnded()
 		c.showErrors("fetch", map[string]string{"keychain": "Could not read the login: " + err.Error()})
-		return
+		return false
 	case errors.Is(err, auth.ErrNotSaved):
 		// A refresh whose new refresh token the keychain did not save.
 		c.mu.Lock()
@@ -233,12 +246,12 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			c.Model.SaveFailing()
 			c.startSaveRetry(ctx)
 		}
-		return
+		return false
 	case err != nil:
 		// Offline, perhaps: the bridge holds a login it could not check.
 		c.Model.LoginKnown()
 		c.showErrors("fetch", map[string]string{"kits": "Could not fetch the kits: " + err.Error()})
-		return
+		return false
 	}
 	c.Model.LoginWorks()
 	names := map[string]string{}
@@ -249,8 +262,10 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 	errs := map[string]string{}
 	var located []watch.Kit
 	var targets []adapter.Target
+	games := make([]Game, len(list))
 	need := false
-	for _, k := range list {
+	for i, k := range list {
+		games[i].Kit = k.Kit
 		if k.Err != nil {
 			errs["kit|"+k.Kit] = names[k.Kit] + ": " + k.Err.Error()
 			continue
@@ -258,7 +273,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		kp := &kitPrompter{c: c, kit: k.Kit}
 		root, err := locate.Root(ctx, k.Manifest.Root, c.savedRoot(k.Kit), p.env, kp)
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		// macOS refuses a folder in Documents until the user allows it
 		// (§6.6.1). The chain has gone on to the folder picker.
@@ -270,6 +285,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 			errs["locate|"+k.Kit] = names[k.Kit] + ": " + err.Error()
 			p.uploader.CountError(upload.LocateFailed)
 			need = need || canPick(k.Manifest.Root)
+			games[i].NotFound = true
 			continue
 		}
 		c.remember(k.Kit, root)
@@ -277,9 +293,12 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 		targets = append(targets, adapter.Target{Kit: k, Root: root})
 	}
 	p.watcher.SetKits(located)
+	c.Model.SetGames(games)
 	c.Model.SetNeedFolder(need)
 	c.showErrors("fetch", errs)
-	c.logShown(c.Model.SetAdapters(p.updater.Sync(ctx, targets)))
+	statuses := p.updater.Sync(ctx, targets)
+	c.logShown(c.Model.SetAdapters(statuses))
+	return !slices.ContainsFunc(statuses, adapter.FetchFailed)
 }
 
 // canPick reports whether a root's locate chain has a folder picker.
@@ -319,8 +338,8 @@ type uploads interface {
 	Status() upload.Status
 }
 
-// followUploads shows the uploader's status: the last upload, a login the
-// server ended, and each instance's error.
+// followUploads shows the uploader's status: the last upload, of all kits
+// and of each, a login the server ended, and each instance's error.
 func (c *Controller) followUploads(ctx context.Context, u uploads) {
 	var last time.Time
 	for {
@@ -330,7 +349,13 @@ func (c *Controller) followUploads(ctx context.Context, u uploads) {
 		case <-u.Changed():
 		}
 		st := u.Status()
-		c.Model.SetLastUpload(st.LastUpload)
+		byKit := map[string]time.Time{}
+		for _, in := range st.Instances {
+			if in.LastUpload.After(byKit[in.Kit]) {
+				byKit[in.Kit] = in.LastUpload
+			}
+		}
+		c.Model.SetLastUpload(st.LastUpload, byKit)
 		if st.LastUpload.After(last) {
 			// The server took an upload made with the login.
 			last = st.LastUpload
@@ -402,10 +427,25 @@ func (p *kitPrompter) PickFolder(ctx context.Context, title string) (string, err
 func (c *Controller) ChooseFolder() {
 	c.mu.Lock()
 	clear(c.asked)
-	wake := c.wake
+	fetch := c.fetch
 	c.mu.Unlock()
-	if wake != nil {
-		wake()
+	if fetch != nil {
+		fetch()
+	}
+}
+
+// Sync fetches the kits now, without If-None-Match, resolves every glob
+// again, and uploads each file whose bytes differ from its last upload, or
+// that has none (§7). It also starts the uploads that device_limit stopped,
+// for a player who freed the upload slot. The menu's Sync with server calls
+// it.
+func (c *Controller) Sync() {
+	c.mu.Lock()
+	syncNow := c.sync
+	c.mu.Unlock()
+	if syncNow != nil {
+		c.Log.Info("syncing with the server")
+		syncNow()
 	}
 }
 

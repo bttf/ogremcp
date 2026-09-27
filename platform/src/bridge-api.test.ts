@@ -113,8 +113,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
     return { userId: user.id, accessToken: body.access_token ?? "" };
   }
 
-  function get(path: string, accessToken?: string): Promise<Response> {
-    return fetch(`${base}${path}`, { headers: accessToken === undefined ? {} : { authorization: `Bearer ${accessToken}` } });
+  function get(path: string, accessToken?: string, headers: Record<string, string> = {}): Promise<Response> {
+    return fetch(`${base}${path}`, { headers: accessToken === undefined ? headers : { ...headers, authorization: `Bearer ${accessToken}` } });
   }
 
   it("lists the user's enabled kits, and serves any kit's manifest and adapter zip", async () => {
@@ -150,6 +150,24 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("the bridge's kit endpoints (§
     const unknown = await get("/api/v1/kits/nope/manifest", bridge.accessToken);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: "unknown_kit" });
+  });
+
+  it("answers 304 to an unchanged kit list, and 200 with a new ETag once the list changes (§7)", async () => {
+    const bridge = await token(RESOURCES.bridge, "ingest");
+    const first = await get("/api/v1/kits", bridge.accessToken);
+    const etag = first.headers.get("etag") ?? "";
+    expect(etag).toMatch(/^"[\w-]{43}"$/);
+
+    const same = await get("/api/v1/kits", bridge.accessToken, { "if-none-match": etag });
+    expect(same.status).toBe(304);
+    expect(same.headers.get("etag")).toBe(etag);
+    expect(await same.text()).toBe("");
+
+    await pool.query("insert into user_games (user_id, kit) values ($1, 'bg1')", [bridge.userId]);
+    const changed = await get("/api/v1/kits", bridge.accessToken, { "if-none-match": etag });
+    expect(changed.status).toBe(200);
+    expect(changed.headers.get("etag")).not.toBe(etag);
+    expect(((await changed.json()) as KitList).kits.map((kit) => kit.kit)).toEqual(["bg1"]);
   });
 
   it("refuses a request without a token, and an agent's read token", async () => {

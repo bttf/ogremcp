@@ -237,6 +237,32 @@ func TestStoredThenDuplicate(t *testing.T) {
 	}
 }
 
+// Sync with server marks its changes IfChanged: the bytes of the last upload
+// the server took are not sent again, and new bytes are (§7).
+func TestIfChangedSkipsTheSameBytes(t *testing.T) {
+	s := newServer(t)
+	u := start(t, s)
+	dir := t.TempDir()
+	c := change(t, dir, "BALDUR.gam", "save/000000001-Quick-Save/BALDUR.gam", []byte("v1"))
+	u.Add(c)
+	waitFor(t, "the upload", func() bool { return len(s.got()) == 1 && !instance(u, c).Pending })
+
+	c.IfChanged = true
+	u.Add(c)
+	waitFor(t, "the skip", func() bool { return !instance(u, c).Pending })
+	if n := len(s.got()); n != 1 {
+		t.Errorf("%d uploads after an unchanged Sync, want 1", n)
+	}
+
+	c = change(t, dir, "BALDUR.gam", "save/000000001-Quick-Save/BALDUR.gam", []byte("v2"))
+	c.IfChanged = true
+	u.Add(c)
+	waitFor(t, "the changed upload", func() bool { return len(s.got()) == 2 && !instance(u, c).Pending })
+	if got := s.got()[1].data; string(got) != "v2" {
+		t.Errorf("second upload %q", got)
+	}
+}
+
 func TestCountersResetWhenTheServerKeepsARow(t *testing.T) {
 	s := newServer(t)
 	var sent []int

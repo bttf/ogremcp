@@ -42,6 +42,10 @@ const (
 	// gone: the file no longer exists. The upload is done; the watcher
 	// reports the file when it is written again.
 	gone
+	// same: the change is marked IfChanged, and the file's bytes are those
+	// of the last upload the server took. Nothing is sent; the upload is
+	// done.
+	same
 	// retry: try again after a backoff.
 	retry
 	// stop: device_limit. The instance waits for Resume.
@@ -63,6 +67,8 @@ type result struct {
 	counter string
 	// detail is a retry's error, for the debug log.
 	detail string
+	// sha256 is the SHA-256, as hex, of the bytes sent.
+	sha256 string
 }
 
 // meta is the `meta` part (§8.3).
@@ -89,8 +95,10 @@ type answer struct {
 
 var errTooLarge = errors.New("over the upload cap")
 
-// attempt uploads the file of change c once, with the error counts.
-func (u *Uploader) attempt(ctx context.Context, c watch.Change, counts map[string]int) result {
+// attempt uploads the file of change c once, with the error counts. It sends
+// nothing when the bytes' SHA-256 is skip, which is "" or the SHA-256 of the
+// last upload the server took.
+func (u *Uploader) attempt(ctx context.Context, c watch.Change, counts map[string]int, skip string) result {
 	data, err := readCapped(c.Path, u.maxBytes)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -102,7 +110,12 @@ func (u *Uploader) attempt(ctx context.Context, c watch.Change, counts map[strin
 		return result{action: retry, counter: ReadFailed, detail: err.Error(),
 			message: "Could not read the file. The bridge will try again."}
 	}
-	body, contentType, err := u.body(c, data, counts)
+	sum := sha256.Sum256(data)
+	sha := hex.EncodeToString(sum[:])
+	if sha == skip {
+		return result{action: same}
+	}
+	body, contentType, err := u.body(c, data, sha, counts)
 	if err != nil {
 		return result{action: refused, message: "Could not build the upload: " + err.Error()}
 	}
@@ -129,7 +142,9 @@ func (u *Uploader) attempt(ctx context.Context, c watch.Change, counts map[strin
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, maxAnswer))
 	var a answer
 	_ = json.Unmarshal(raw, &a)
-	return u.classify(res.StatusCode, res.Header.Get("Retry-After"), a)
+	r := u.classify(res.StatusCode, res.Header.Get("Retry-After"), a)
+	r.sha256 = sha
+	return r
 }
 
 // classify maps an answer to a result (§8.3). An answer counts as its status
@@ -163,14 +178,13 @@ func (u *Uploader) classify(code int, retryAfter string, a answer) result {
 }
 
 // body builds the request's body, `meta` first, and returns it with its
-// content type.
-func (u *Uploader) body(c watch.Change, data []byte, counts map[string]int) ([]byte, string, error) {
-	sum := sha256.Sum256(data)
+// content type. sha is the SHA-256 of data, as hex.
+func (u *Uploader) body(c watch.Change, data []byte, sha string, counts map[string]int) ([]byte, string, error) {
 	m := meta{
 		Kit:      c.Kit,
 		SourceID: c.SourceID,
 		Instance: c.Instance,
-		SHA256:   hex.EncodeToString(sum[:]),
+		SHA256:   sha,
 		Client:   clientMeta{BridgeVersion: u.version, OS: runtime.GOOS, Errors: counts},
 	}
 	if !c.ModTime.IsZero() {

@@ -8,10 +8,20 @@ export interface Game {
 }
 
 /**
+ * The first tip of every enabled game (§13.2): the bridge checks the kit list
+ * every minute, and its menu's Sync with server checks it at once (§7).
+ */
+const SYNC_TIP = (
+  <>
+    The bridge picks up this game within about a minute, or at once with <strong>Sync with server</strong> in its menu.
+  </>
+);
+
+/**
  * In-game tips by kit key (§13.2). The page shows a game's tips while the
- * game is enabled. The bridge installs and updates the WoW addon (§7). BG1
- * has no addon: the bridge reads its saves from the game's folder in
- * Documents (§6.6.1).
+ * game is enabled, after `SYNC_TIP`. The bridge installs and updates the WoW
+ * addon (§7). BG1 has no addon: the bridge reads its saves from the game's
+ * folder in Documents (§6.6.1).
  */
 const TIPS: Readonly<Record<string, readonly ReactNode[]>> = {
   wow: [
@@ -55,8 +65,8 @@ async function saveGame(kit: string, enabled: boolean): Promise<Game | null> {
 
 /**
  * The Games page (§13.2): the first-class kits, each with a switch that
- * enables or disables it for the signed-in user, and its in-game tips while
- * it is enabled.
+ * enables or disables it for the signed-in user, and its tips while it is
+ * enabled.
  */
 export function Games() {
   const [games, setGames] = useState<Game[] | "loading" | "error">("loading");
@@ -98,7 +108,7 @@ function GameCard({ game, onSaved }: { game: Game; onSaved: (game: Game) => void
   const id = useId();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
-  const tips = TIPS[game.kit] ?? [];
+  const tips = [SYNC_TIP, ...(TIPS[game.kit] ?? [])];
 
   async function toggle(enabled: boolean) {
     setSaving(true);
@@ -126,7 +136,7 @@ function GameCard({ game, onSaved }: { game: Game; onSaved: (game: Game) => void
         </label>
       </div>
       {failed && <p role="alert">The change was not saved. Try again.</p>}
-      {game.enabled && tips.length > 0 && (
+      {game.enabled && (
         <ul className="og-tips">
           {tips.map((tip, index) => (
             <li key={index}>{tip}</li>
