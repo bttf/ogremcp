@@ -215,7 +215,7 @@ export interface Cre {
   memorized: MemorizedSpell[];
   /** Per item slot (ITEM_SLOT_COUNT), the item in it or null. */
   slots: (Item | null)[];
-  /** Proficiency ID (STATS.IDS) -> pips, from the effect list. */
+  /** Proficiency ID (STATS.IDS) -> pips, from the effect list. A decrement can leave them below 0. */
   proficiencies: Map<number, number>;
 }
 
@@ -416,7 +416,8 @@ function readProficiencies(cre: Reader, what: string, limits: ReadLimits): Map<n
   for (const at of cre.records(cre.u32(0x2c4, what), count, size, what)) {
     const opcode = v2 ? cre.u32(at + 0x08, what) : cre.u16(at, what);
     if (opcode !== PROFICIENCY_OPCODE) continue;
-    const amount = cre.u32(at + (v2 ? 0x14 : 0x04), what);
+    // Signed: an increment of -1 is a decrement (IESDP).
+    const amount = cre.i32(at + (v2 ? 0x14 : 0x04), what);
     const param2 = cre.u32(at + (v2 ? 0x18 : 0x08), what);
     const id = param2 & 0xffff;
     pips.set(id, (param2 >>> 16 === ADD_PIPS ? (pips.get(id) ?? 0) : 0) + amount);

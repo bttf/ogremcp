@@ -93,6 +93,22 @@ it("reads the chapter 4 party's weapon proficiencies, without those at 0 pips", 
   });
 });
 
+it("applies a proficiency effect's negative increment as a decrement, and leaves out pips below 1", () => {
+  const bytes = new Uint8Array(fixture("chapter1"));
+  const view = new DataView(bytes.buffer);
+  // The protagonist's effects are EFF V2: after the ones that set Flail / Morning Star and
+  // Sword and Shield Style to 2, turn the last two into increments of -5 and -1.
+  const cre = view.getUint32(view.getUint32(0x20, true) + 0x04, true);
+  const effects = cre + view.getUint32(cre + 0x2c4, true);
+  for (const [index, amount, proficiency] of [[20, -5, 112], [21, -1, 100]] as const) {
+    const at = effects + index * 0x108;
+    view.setUint32(at + 0x08, 233, true);
+    view.setInt32(at + 0x14, amount, true);
+    view.setUint32(at + 0x18, 0x1_0000 | proficiency, true);
+  }
+  expect(parse(bytes).state.party[0]?.base_proficiencies).toEqual([{ name: "Flail / Morning Star", pips: 1 }]);
+});
+
 describe("a file that is not a whole save", () => {
   const whole = fixture("chapter4");
   // The journal is the last part the interpreter reads.

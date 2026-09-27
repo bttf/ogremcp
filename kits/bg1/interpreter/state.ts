@@ -66,7 +66,7 @@ export interface PartyMember {
   base_saving_throws: { death: number; wands: number; polymorph: number; breath: number; spells: number };
   /** Null for a class without thief skills. */
   base_thief_skills: Cre["thief"] | null;
-  /** The weapon proficiencies with pips, in proficiency ID order. Null name, with `id`, when the tables lack it. */
+  /** The weapon proficiencies with more than 0 pips, in proficiency ID order. Null name, with `id`, when the tables lack it. */
   base_proficiencies: { name: string | null; id?: number; pips: number }[];
   status: { dead: boolean; flags: string[] };
   /** The memorized spells, one line per spell and level, with how many of them are memorized and ready. */
@@ -256,7 +256,7 @@ function partyMember(npc: Npc, cre: Cre, protagonist: boolean, lookup: Lookup): 
     base_saving_throws: { death, wands, polymorph, breath, spells },
     base_thief_skills: THIEF_SKILL_CLASSES.has(cre.class) ? cre.thief : null,
     base_proficiencies: [...cre.proficiencies]
-      .filter(([, pips]) => pips !== 0)
+      .filter(([, pips]) => pips > 0)
       .sort(([a], [b]) => a - b)
       .map(([id, pips]) => ({ ...lookup.proficiency(id), pips })),
     status: {
