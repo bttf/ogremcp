@@ -400,6 +400,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
   - Joinable characters: the characters `PDIALOG.2DA` lists, by death variable, with their names. A name a game script sets (`SetName`) wins over the creature file's name; in 2.7.3 that affects only Branwen.
   - Areas: a name for each area, from the game's own area list in `BGEE.LUA` (the debug console's list). Parenthetical notes, and a leading "<joinable character's name> - ", are removed, because they name characters.
   - Character options: the class, race, alignment, gender, and kit names the state shows, from the game's IDS and 2DA files. The kit value is `u16(0x246) | u16(0x244) << 16` in the CRE; the IESDP's big-endian reading is wrong.
+  - Weapon proficiencies: the name of each proficiency ID, from the `NAME_REF` column of `WEAPPROF.2DA`. The class and kit maximums in the same file are left out (owner decision, 2026-09-27, RED-381).
 - **English only.** The codes are the same in every language, so a player in another language gets English text.
 - **Mods:** a code missing from the tables shows as unknown: the entry keeps its code and has no text. A string a mod changed shows the unmodded text.
 - **Licensing:** the text is Beamdog's. `kits/bg1/data/NOTICE` says so, and says the repo's licenses don't cover it (§5).
@@ -417,7 +418,8 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
   - level per class, XP, current and maximum HP
   - ability scores, THAC0, saving throws
   - thief skills, for classes that have them
-  - The save holds THAC0, saving throws, and thief skills before items and bonuses, so the state names them `base_*`. It leaves out armor class, which the save holds as 10 for every member.
+  - weapon proficiencies (`base_proficiencies`): each one's name and pips, in proficiency ID order. A proficiency with 0 pips is left out (RED-381).
+  - The save holds THAC0, saving throws, thief skills, and proficiencies before items and bonuses, so the state names them `base_*`. It leaves out armor class, which the save holds as 10 for every member.
   - status: dead, and the other permanent state flags
   - memorized spells by name, and how many of each are ready
 - **`inventory`:** each member's equipped items by slot, then the backpack, by name, with charges or quantity. An unidentified item shows only its unidentified name, as the game does.
@@ -436,6 +438,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 
 - The interpreter reads fixed-size records at the offsets the IESDP gives. It checks every offset and count against the file length and throws `ParseError` when one is out of range (§6.2).
 - Work is bounded by the file size, not by products of counts: at most 6 party records, only the items that slots point to, and each memorized spell once. The other record counts have limits (*proposed*, config: `DEFAULT_LIMITS` in the kit). Over a limit is a `ParseError`.
+- **Proficiencies** are effects in each party member's CRE effect list (0x2c4 offset, 0x2c8 count), not the CRE header's proficiency bytes, which the EE leaves at 0. Byte 0x33 gives the effect format: 0 is EFF V1 (0x30 bytes), 1 is EFF V2 (0x108 bytes). A proficiency is opcode 233: parameter 1 is the pips, and the low word of parameter 2 is the proficiency ID (STATS.IDS 89 to 134). The interpreter applies these effects in list order: each one sets the pips, or adds to them when the high word of parameter 2 is 1 (EE only, per the IESDP). The effect count per party member has a limit, like the other counts. In both fixtures, the effect list holds no item effects, so the pips leave out items.
 - No existing GAM parser can be vendored under MIT: Near Infinity is LGPL, and GemRB, WeiDU, and the Kaitai specs are GPL. The kit writes its own from the IESDP.
 - **Fixtures:** the owner's saves, one at chapter 4 with a full party and one early save. The repo is public, and the saves hold nothing personal besides the character name.
 
