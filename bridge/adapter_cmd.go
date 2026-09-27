@@ -65,8 +65,8 @@ func syncAdapters(args []string) error {
 		}
 	}
 	env := locate.DefaultEnv()
-	// onFetch returns false when an adapter's sync failed, so the next check
-	// of the kit list fetches again.
+	// onFetch returns false when an adapter's sync failed before it had the
+	// zip, so the next check of the kit list fetches again.
 	onFetch := func(list []kits.Kit, err error) bool {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not fetch the kits:", err)
@@ -90,7 +90,7 @@ func syncAdapters(args []string) error {
 		}
 		statuses := updater.Sync(ctx, targets)
 		show(statuses)
-		return !slices.ContainsFunc(statuses, func(st adapter.Status) bool { return st.State == adapter.StateFailed })
+		return !slices.ContainsFunc(statuses, adapter.FetchFailed)
 	}
 
 	api := kits.New(base, client)

@@ -219,7 +219,10 @@ func (c *Controller) runServer(ctx context.Context) {
 
 // onFetch handles a fetch of the kits, on the poller's goroutine. It returns
 // false when it could not finish with the kits, as when an adapter's sync
-// failed, so the next check of the kit list fetches again.
+// failed before it had the zip, so the next check of the kit list fetches
+// again. An install that failed after the download waits for the refresh
+// interval, so a folder that is not writable does not download the zip every
+// check.
 func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err error) bool {
 	switch {
 	case errors.Is(err, auth.ErrLoginRequired):
@@ -295,7 +298,7 @@ func (c *Controller) onFetch(ctx context.Context, p parts, list []kits.Kit, err 
 	c.showErrors("fetch", errs)
 	statuses := p.updater.Sync(ctx, targets)
 	c.logShown(c.Model.SetAdapters(statuses))
-	return !slices.ContainsFunc(statuses, func(st adapter.Status) bool { return st.State == adapter.StateFailed })
+	return !slices.ContainsFunc(statuses, adapter.FetchFailed)
 }
 
 // canPick reports whether a root's locate chain has a folder picker.
