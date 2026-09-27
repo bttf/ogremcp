@@ -119,7 +119,7 @@ type Sections = { [S in Section]?: Bg1State[S] | null };
 /** The envelope, the sections, and a note when trimmed, with JSON of at most `maxBytes` (`trim`). */
 function stateResult({ snapshotAt, flavor, rules, character, state }: Snapshot<Bg1State>, sections: readonly Section[], maxBytes: number): JsonObject {
   const picked: Sections = {};
-  // A snapshot without a section, which the state always has, reads as null.
+  // The parser writes every section; a section missing from a stored snapshot reads as null.
   for (const section of sections) Object.assign(picked, { [section]: state[section] ?? null });
   const build = (built: JsonObject, note: string | null): JsonObject => ({
     snapshot_at: snapshotAt.toISOString(),
