@@ -370,7 +370,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Instances:** each save folder (`save/<number>-<name>/`) is a source instance. The game writes `BALDUR.gam` on every save: manual saves, quick-saves, and autosaves. The bridge uploads each one. On its first run, it uploads every existing save; the per-device rate limit (§8.3) spreads those out.
 - **Only `BALDUR.gam`** (about 150 KB). `BALDUR.SAV` holds the visited areas, the world map, stores, and map notes. It is `[later]`: using it needs a way to combine two files of one save, and `parse` (§6.2) sees one upload at a time. The screenshot and portraits (`*.bmp`) are never read (D3).
 - **`snapshot_at`:** the save holds no wall-clock time, so `capturedAt` is null and the server uses the file's modification time (§6.2). The newest save is the latest snapshot. Loading an older save changes nothing until the player saves again.
-- **Freshness:** in BG1, saving the game does what `/transmit` does in WoW (§15). A quick-save is the fastest way. The bridge sees a new save folder at once, because it watches `save/` itself (§7).
+- **Freshness:** in BG1, saving the game does what `/transmit` does in WoW (§15). A quick-save is the fastest way. The bridge sees a new save folder at once, because it watches `save/` itself (§7). The exception is the first save of a fresh install: `save/` doesn't exist yet, so that save uploads at the periodic pass.
 
 #### 6.6.2 Flavor, rules, and character
 
@@ -385,7 +385,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Sanity check:** the loading-progress field (0x0064) is 0 or 1, the BG1 and Tales of the Sword Coast XP limits. All 12 scouted saves hold 0. Per the IESDP, a BG2:EE save picked by mistake holds 2 or more (the Shadows of Amn and Throne of Bhaal limits). No BG2:EE save was available to confirm it.
 - **Siege of Dragonspear** saves go in `sodsave/`, not `save/`, so the manifest never reads them. The `sod` row covers a SoD save copied into `save/`. Registering `sod` means adding `sodsave/*/BALDUR.gam` to the manifest, and it waits until someone can play-test it (§19.2).
 - **Rules:** none (`[]`). The save doesn't hold the difficulty.
-- **Character:** the protagonist, Player1: the first record in the GAM's list of party members. In all 12 scouted saves, it is the only party record with a name in the GAM's name field. `key` and `name` are that name (UTF-8). `realm` is empty. The save has no unique ID, so two playthroughs with the same protagonist name share one character. Confirm at implementation that reordering the party's portraits doesn't change the first record; if it does, pick the record whose party-order field (0x0002) is 0. When the realm is empty, the platform shows the name alone, and a `character` argument matches the whole name, even one with a hyphen (§6.2).
+- **Character:** the protagonist, Player1: the first record in the GAM's list of party members. In all 12 scouted saves, it is the only party record with a name in the GAM's name field. `key` and `name` are that name (UTF-8). `realm` is empty. The save has no unique ID, so two playthroughs with the same protagonist name share one character. In the scouted chapter 4 save, the records are in join order while the party-order field (0x0002) holds 0, 2, 5, 3, 1, 4, so portrait order lives in that field. The P12 check confirms that moving the protagonist's portrait keeps them the first record (RED-378). When the realm is empty, the platform shows the name alone, and a `character` argument matches the whole name, even one with a hyphen (§6.2).
 - **`adapterSchema`** is 0, because there is no adapter. A file whose signature isn't `GAMEV2.0` is a `ParseError` ("This isn't a Baldur's Gate: Enhanced Edition save."), not a flavor.
 
 #### 6.6.3 Name tables
@@ -394,29 +394,30 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **The kit bundles name tables** in `kits/bg1/data/`. The interpreter looks each code up at parse time, and the snapshot stores readable text. The bridge uploads the save unchanged and reads no game files (§7). Owner decision, 2026-09-27 (§19.1 D13).
 - **Extraction:** a script in `kits/bg1/scripts/` builds the tables from a BG:EE install. A maintainer runs it by hand; CI never does, and players never do. It reads `lang/en_US/dialog.tlk`, `chitin.key` and the BIFF archives, and the game's UI Lua (`BGEE.LUA`). The tables record the game version they came from. Re-run the script when a game patch changes the text. A re-parse (§11) applies new tables to old uploads.
 - **Contents:**
-  - Journal: the text of every string the journal can show (dialog transitions, script journal actions, and the game's quest list), and the quest list itself: each quest's title and its entries, from `buildQuestsTable` in `BGEE.LUA`.
+  - Journal: the text of every string the journal can show (dialog transitions, script journal actions, the game's quest list, and notes: the descriptions of scroll items the player can copy to the journal), and the quest list itself: each quest's title and its entries, from `buildQuestsTable` in `BGEE.LUA`. One entry can be in more than one quest.
   - Items: the identified and unidentified name of each item.
   - Spells: the name of each spell.
-  - Creatures: the names of the characters who can join the party.
-  - Areas: a name for each area, from the game's own area list in `BGEE.LUA` (the debug console's list). Parenthetical notes are removed, because they name characters.
-  - Character options: the class, race, alignment, gender, and kit names the state shows, from the game's IDS and 2DA files.
+  - Joinable characters: the characters `PDIALOG.2DA` lists, by death variable, with their names. A name a game script sets (`SetName`) wins over the creature file's name; in 2.7.3 that affects only Branwen.
+  - Areas: a name for each area, from the game's own area list in `BGEE.LUA` (the debug console's list). Parenthetical notes, and a leading "<joinable character's name> - ", are removed, because they name characters.
+  - Character options: the class, race, alignment, gender, and kit names the state shows, from the game's IDS and 2DA files. The kit value is `u16(0x246) | u16(0x244) << 16` in the CRE; the IESDP's big-endian reading is wrong.
 - **English only.** The codes are the same in every language, so a player in another language gets English text.
 - **Mods:** a code missing from the tables shows as unknown: the entry keeps its code and has no text. A string a mod changed shows the unmodded text.
 - **Licensing:** the text is Beamdog's. `kits/bg1/data/NOTICE` says so, and says the repo's licenses don't cover it (§5).
 - **Not a game-data corpus** (§12.1). The tables only decode the player's own save. No tool queries them, and the state holds only what the save references.
-- **Size:** a few hundred KB. The quest list alone is 161 quests and 733 entries, about 158 KB of text.
+- **Size:** a few hundred KB. The tables from 2.7.3 are about 400 KB. The quest list has 158 quests and 663 entries; `BGEE.LUA` comments out 3 more.
 
 #### 6.6.4 State
 
 `state` has five sections:
 
-- **`game`:** the chapter (the `CHAPTER` global), the game day and hour, party gold, reputation, and the current area (code and name).
+- **`game`:** the chapter (the `CHAPTER` global), the game day and hour, party gold, reputation, and the current area (code and name). The current area is the area of the party member that GAM 0x001c names, as the game does, and 0x0058 otherwise. Days count from 0; the P12 check compares one with the game (RED-378).
 - **`party`:** each member in party order:
   - name, and whether they are the protagonist
   - class and kit, race, alignment
   - level per class, XP, current and maximum HP
-  - ability scores, armor class, THAC0, saving throws
+  - ability scores, THAC0, saving throws
   - thief skills, for classes that have them
+  - The save holds THAC0, saving throws, and thief skills before items and bonuses, so the state names them `base_*`. It leaves out armor class, which the save holds as 10 for every member.
   - status: dead, and the other permanent state flags
   - memorized spells by name, and how many of each are ready
 - **`inventory`:** each member's equipped items by slot, then the backpack, by name, with charges or quantity. An unidentified item shows only its unidentified name, as the game does.
@@ -425,14 +426,16 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
   - completed quests with their entries
   - entries that belong to no quest: letters, notes, events
   - A quest's status follows the game's rule in `UTIL.LUA`: complete when any of its entries is complete, open otherwise.
+  - An entry in more than one quest goes under the last of them in list order, as the game's `UI.MENU` does. A repeated entry appears once, with the chapter and day of its last copy.
   - Notes the player wrote are stored in `BALDUR.SAV`, so they are `[later]` (§6.6.1).
-- **`former_party`:** joinable characters who were in the party and left, and the area each one is in. It lists only creatures with the "been in party" flag, so it names no one the player hasn't met.
+- **`former_party`:** joinable characters who were in the party and left, and the area each one is in. It lists only non-party records with the "been in party" flag (CRE 0x0010 bit 15) whose death variable is in the joinable-characters table, so it names no one the player hasn't met. Five creatures that can't join (Arkanis and others) carry the flag in the scouted saves.
 - **Left out:** the save's 200-odd plot variables. They are internal names, and they reveal plot state the player hasn't seen. Only `CHAPTER` is read.
 - The journal holds only text the player has seen, so it reveals nothing new.
 
 #### 6.6.5 Parsing
 
 - The interpreter reads fixed-size records at the offsets the IESDP gives. It checks every offset and count against the file length and throws `ParseError` when one is out of range (§6.2).
+- Work is bounded by the file size, not by products of counts: at most 6 party records, only the items that slots point to, and each memorized spell once. The other record counts have limits (*proposed*, config: `DEFAULT_LIMITS` in the kit). Over a limit is a `ParseError`.
 - No existing GAM parser can be vendored under MIT: Near Infinity is LGPL, and GemRB, WeiDU, and the Kaitai specs are GPL. The kit writes its own from the IESDP.
 - **Fixtures:** the owner's saves, one at chapter 4 with a full party and one early save. The repo is public, and the saves hold nothing personal besides the character name.
 
@@ -444,7 +447,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Generic:** no game logic. Everything game-specific arrives as manifests and adapters from the platform, for the user's enabled kits (§8.2).
 - **Tray UI:** status (last upload, latest error message), device-code login, folder picker for `prompt`, start-at-login, and the server to use (saved in the bridge's settings, for self-hosters, §13.3).
 - **Credentials:** the refresh token lives in the OS keychain (Windows Credential Manager, macOS Keychain), never in a plain file.
-- **Watching:** `fsnotify` on the *parent directories* of resolved instances, filtered by file name. WoW may replace the file on save (it keeps `.bak` copies), which breaks file-level watches. Debounce until writes settle (proposed 2 s). Re-resolve globs at start and periodically (proposed every 5 min) to pick up new flavor folders and accounts. Also watch the folder that holds a glob's last wildcard folder segment (for BG1's `save/*/BALDUR.gam`, the `save/` folder), and re-resolve that glob when an entry there is created or renamed. A new save folder is then uploaded after the debounce, not at the next periodic pass, and so is a save folder the game deletes and writes again (RED-373 review).
+- **Watching:** `fsnotify` on the *parent directories* of resolved instances, filtered by file name. WoW may replace the file on save (it keeps `.bak` copies), which breaks file-level watches. Debounce until writes settle (proposed 2 s). Re-resolve globs at start and periodically (proposed every 5 min) to pick up new flavor folders and accounts. Also watch the folder that holds a glob's last wildcard folder segment (for BG1's `save/*/BALDUR.gam`, the `save/` folder), and re-resolve the globs when an entry there is created, renamed, or removed. A new save folder is then uploaded after the debounce, not at the next periodic pass, and so is a save folder the game deletes and writes again (RED-373 review).
 - **Upload:** §8.3. **Offline:** keep only the latest pending upload per source instance, never a backlog.
 - **Errors:** show each distinct error message once per instance, not on every upload.
 - **Adapter install/update:** after login, at each start, and on the same periodic timer as glob re-resolution, fetch manifests and adapters for enabled kits from the platform (§8.2; interpreters stay server-side). Update when the platform's version is newer; never downgrade.
@@ -859,7 +862,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 - Tool-call cap numbers and the annual price.
 - **Forever:** finish its detection facts (`season_id`, GUID) and fixture (§6.3.1), re-test the SavedVariables bug on each new build, then settle its combat-log support and how far its content diverges from Classic.
 - **Season of Discovery:** whether to register `classic_sod`.
-- **Siege of Dragonspear:** whether to register `sod` and read `sodsave/` (§6.6.2).
+- **Siege of Dragonspear:** whether to register `sod` and read `sodsave/` (§6.6.2). A BG1 character's key is the name alone, so the same name in `bgee` and `sod` wouldn't be reported as ambiguous, and `bg1_get_state` has no `flavor` argument. Settle both before registering `sod`.
 - **BG1 `BALDUR.SAV`:** the world map, visited areas, and the player's own notes. It needs a way to combine two files of one save (§6.6.1).
 - ChatGPT connector plan requirements; Perplexity's exact static-client flow.
 - Kit deprecation policy (§6.5).
