@@ -29,7 +29,8 @@
 //                 (ITM V1 0x0c and 0x08; null when the strref has no text).
 //   spells.json   { "<RESREF>": <strref> } (SPL V1 0x08).
 //   areas.json    { "<RESREF>": "<name>" }: the cheatAreas list in BGEE.LUA,
-//                 without its parenthetical notes, which name characters.
+//                 without the notes that name characters: parenthetical notes,
+//                 and a leading "<Name> - " when <Name> is a PDIALOG.2DA row.
 //   options.json  { "alignment" | "class" | "gender" | "kit" | "race": { "<id>": "<name>" } }
 //                 Class: CLASTEXT.2DA MIXED of each class without a kit, with
 //                 the engine's tokens <FIGHTERTYPE> and <MAGESCHOOL> read as
@@ -85,12 +86,13 @@ function main() {
   const res = new Resources(install);
   try {
     const lua = res.text("BGEE", TYPE.lua);
+    const joinable = joinableCharacters(res);
     const quests = questList(lua);
-    const areas = areaNames(lua);
+    const areas = areaNames(lua, joinable);
     const { items, notes } = itemNames(res, tlk);
     const spells = spellNames(res, tlk);
     const journal = journalStrrefs(res, quests, notes);
-    const creatures = joinableNames(res);
+    const creatures = joinableNames(res, joinable);
     const options = characterOptions(res, tlk);
 
     const strrefs = new Set([
@@ -166,8 +168,11 @@ function questList(lua) {
   return quests;
 }
 
-/** The cheatAreas list in BGEE.LUA, without parenthetical notes. */
-function areaNames(lua) {
+/**
+ * The cheatAreas list in BGEE.LUA, without parenthetical notes, and without a
+ * leading "<Name> - " that names a character who can join the party.
+ */
+function areaNames(lua, joinable) {
   const block = /^cheatAreas\s*=\s*\{\s*$([\s\S]*?)^\}\s*$/m.exec(lua)?.[1];
   if (block === undefined) throw new Error("BGEE.LUA: no cheatAreas");
   const areas = {};
@@ -179,6 +184,8 @@ function areaNames(lua) {
       name = name.replace(/\s*\([^()]*\)/g, "");
     }
     name = name.replace(/\s+/g, " ").trim();
+    const prefix = /^(\S+) - (.+)$/.exec(name);
+    if (prefix && joinable.has(prefix[1].toUpperCase())) name = prefix[2];
     if (code in areas) {
       if (areas[code] !== name) warn(`cheatAreas: ${code} listed twice; kept "${areas[code]}", not "${name}"`);
       continue;
@@ -294,9 +301,13 @@ function journalActionIds(res) {
   return ids;
 }
 
+/** The characters who can join the party: PDIALOG.2DA row names (death variables), upper case. */
+function joinableCharacters(res) {
+  return new Set(parse2da(res.text("PDIALOG", TYPE["2da"]), "PDIALOG.2DA").map((row) => row.name.toUpperCase()));
+}
+
 /** Long names (CRE 0x08) of every CRE whose death variable is a PDIALOG.2DA row. */
-function joinableNames(res) {
-  const joinable = new Set(parse2da(res.text("PDIALOG", TYPE["2da"]), "PDIALOG.2DA").map((row) => row.name.toUpperCase()));
+function joinableNames(res, joinable) {
   const strrefs = new Set();
   const found = new Set();
   for (const name of res.names(TYPE.cre)) {

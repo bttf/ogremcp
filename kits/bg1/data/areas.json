@@ -482,11 +482,11 @@
   "AR6000": "Random encounter area",
   "AR6001": "Random encounter area",
   "AR6100": "Random encounter area",
-  "OH1000": "Dorn - Random Encounter Area",
-  "OH2000": "Neera - Adoy's Enclave, exterior",
-  "OH2010": "Neera - Adoy's Enclave, interior",
-  "OH3000": "Rasaad - Dark Moon temple, exterior",
-  "OH3010": "Rasaad - Dark Moon temple, interior",
-  "OH3020": "Rasaad - Dark Moon temple, interior",
-  "OH3100": "Rasaad - Dark Moon temple, interior"
+  "OH1000": "Random Encounter Area",
+  "OH2000": "Adoy's Enclave, exterior",
+  "OH2010": "Adoy's Enclave, interior",
+  "OH3000": "Dark Moon temple, exterior",
+  "OH3010": "Dark Moon temple, interior",
+  "OH3020": "Dark Moon temple, interior",
+  "OH3100": "Dark Moon temple, interior"
 }
