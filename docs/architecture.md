@@ -365,7 +365,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 ```
 
 - **Root** is the game's folder in Documents, where it keeps its settings (`Baldur.lua`) and saves. The kit never reads the install folder. The same path works on Windows (`{HOME}` is the user profile) and macOS. The OneDrive entry covers a redirected Documents folder on Windows. It is an inference, not a documented or tested path. The Mac App Store build keeps its saves in its own container under `~/Library/Containers`, per Aspyr's support page. The chain leaves that path out, because reading another app's container needs a second macOS permission; its players pick the folder at the prompt. The game takes the folder name from `engine_name` in the install's `engine.lua`. A player who changed it also picks the folder at the prompt.
-- **macOS permission:** macOS asks the player to let the bridge read the Documents folder. The bridge's `Info.plist` carries `NSDocumentsFolderUsageDescription`, which says why. If the player refuses, locate fails, and the tray says to allow it under System Settings > Privacy & Security > Files and Folders. The WoW kit never hits this, because it reads `/Applications`.
+- **macOS permission:** macOS asks the player to let the bridge read the Documents folder. The bridge's `Info.plist` carries `NSDocumentsFolderUsageDescription`, which says why. If the player refuses, that path doesn't count as found, and the chain moves on to the folder picker (§6.1). macOS lets the bridge read a folder the player picks there. The tray also says access can be allowed under System Settings > Privacy & Security > Files and Folders. The WoW kit never hits this, because it reads `/Applications`.
 - **`verify: "Baldur.lua"`:** the game writes it at first start, before any save exists.
 - **Instances:** each save folder (`save/<number>-<name>/`) is a source instance. The game writes `BALDUR.gam` on every save: manual saves, quick-saves, and autosaves. The bridge uploads each one. On its first run, it uploads every existing save; the per-device rate limit (§8.3) spreads those out.
 - **Only `BALDUR.gam`** (about 150 KB). `BALDUR.SAV` holds the visited areas, the world map, stores, and map notes. It is `[later]`: using it needs a way to combine two files of one save, and `parse` (§6.2) sees one upload at a time. The screenshot and portraits (`*.bmp`) are never read (D3).
@@ -806,7 +806,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | P10 | Tiers: caps, device limit, retention job, `wow_get_history`. Billing comes after G2 (D5). | §11, §14 | P6, D9 |
 | P11 | Launch readiness: delete data/account, privacy and terms, remaining web UI pages, client compatibility pass, self-host image | §11, §13 | P8–P10, D4 |
 | **G2** | **Public beta gate** (§18.2) | | P11 |
-| P12 | BG1 kit: the `binary` source format and a bridge release, name tables, interpreter, `bg1_get_state`, platform wiring, and the BG1 check (§18.2) | §6.1, §6.6, §10.6 | P9, D13 |
+| P12 | BG1 kit: the `binary` source format and a bridge release, name tables, interpreter, `bg1_get_state`, platform wiring, and the BG1 check (§18.2) | §6.1, §6.6, §7, §10.6 | P9, D13 |
 
 ### 18.2 Gates
 
