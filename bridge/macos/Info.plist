@@ -5,6 +5,8 @@
 	and names the binary after CFBundleExecutable. LSUIElement: a tray app has
 	no Dock icon. LSMinimumSystemVersion is the oldest macOS that Go 1.27
 	supports; .goreleaser.yaml passes the same version to clang.
+	NSDocumentsFolderUsageDescription is the reason macOS shows when the
+	bridge first reads a folder in Documents, such as BG1's (§6.6.1).
 -->
 <plist version="1.0">
 <dict>
@@ -30,5 +32,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Ogre MCP reads game saves in your Documents folder and uploads them to your account.</string>
 </dict>
 </plist>
