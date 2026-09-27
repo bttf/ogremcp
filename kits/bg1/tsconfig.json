@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["interpreter/**/*.ts", "manifest.test.ts"]
+}

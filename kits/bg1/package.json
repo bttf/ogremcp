@@ -1,0 +1,35 @@
+{
+  "name": "@ogremcp/kit-bg1",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./manifest.json": "./manifest.json"
+  },
+  "files": [
+    "dist",
+    "manifest.json",
+    "data"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ogremcp/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "ajv": "^8.20.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
