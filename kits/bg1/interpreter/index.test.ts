@@ -79,6 +79,36 @@ it("reads the chapter 4 party's classes, kits, and levels", () => {
   expect(party.find((member) => member.name === "Xan")).toMatchObject({ kit: { id: 512, name: "Enchanter" }, levels: [{ class: "Mage", level: 4 }] });
 });
 
+it("reads the chapter 4 party's weapon proficiencies, without those at 0 pips", () => {
+  const { party } = parse(fixture("chapter4")).state;
+  expect(Object.fromEntries(party.map((member) => [member.name, member.base_proficiencies]))).toEqual({
+    // War Hammer is at 0.
+    Buhldozier: [{ name: "Flail / Morning Star", pips: 2 }, { name: "Sword and Shield Style", pips: 2 }, { name: "Two-Weapon Style", pips: 1 }],
+    Khalid: [{ name: "Long Sword", pips: 3 }, { name: "Axe", pips: 1 }, { name: "Longbow", pips: 1 }],
+    Imoen: [{ name: "Short Sword", pips: 1 }, { name: "Shortbow", pips: 1 }, { name: "Sword and Shield Style", pips: 1 }],
+    // In ID order: the save lists Club first.
+    Jaheira: [{ name: "Quarterstaff", pips: 1 }, { name: "Sling", pips: 2 }, { name: "Club", pips: 2 }],
+    Xan: [{ name: "Dagger", pips: 1 }],
+    Viconia: [{ name: "Mace", pips: 1 }, { name: "Sling", pips: 1 }, { name: "Sword and Shield Style", pips: 1 }],
+  });
+});
+
+it("applies a proficiency effect's negative increment as a decrement, and leaves out pips below 1", () => {
+  const bytes = new Uint8Array(fixture("chapter1"));
+  const view = new DataView(bytes.buffer);
+  // The protagonist's effects are EFF V2: after the ones that set Flail / Morning Star and
+  // Sword and Shield Style to 2, turn the last two into increments of -5 and -1.
+  const cre = view.getUint32(view.getUint32(0x20, true) + 0x04, true);
+  const effects = cre + view.getUint32(cre + 0x2c4, true);
+  for (const [index, amount, proficiency] of [[20, -5, 112], [21, -1, 100]] as const) {
+    const at = effects + index * 0x108;
+    view.setUint32(at + 0x08, 233, true);
+    view.setInt32(at + 0x14, amount, true);
+    view.setUint32(at + 0x18, 0x1_0000 | proficiency, true);
+  }
+  expect(parse(bytes).state.party[0]?.base_proficiencies).toEqual([{ name: "Flail / Morning Star", pips: 1 }]);
+});
+
 describe("a file that is not a whole save", () => {
   const whole = fixture("chapter4");
   // The journal is the last part the interpreter reads.
@@ -110,6 +140,17 @@ describe("a file that is not a whole save", () => {
       { bytes: crafted(1_000, 1_000_000, {}), message: /lists 1000 party members, and the server reads at most 6/ },
     ];
     for (const { bytes, message } of cases) expect(() => parse(bytes)).toThrow(message);
+  });
+
+  it("is a ParseError when a party member's effect list is out of range", () => {
+    const bytes = crafted(1, 10_000, {});
+    expect(parse(bytes).state.party[0]?.base_proficiencies).toEqual([]);
+    // One EFF V1 effect (0x30 bytes) that starts 0x10 bytes before the end.
+    const cre = 0xb4 + 0x160;
+    const view = new DataView(bytes.buffer);
+    view.setUint32(cre + 0x2c4, bytes.length - cre - 0x10, true);
+    view.setUint32(cre + 0x2c8, 1, true);
+    expect(() => parse(bytes)).toThrow(/cut short or damaged: the character data of record 1 of the party list/);
   });
 
   it("is a ParseError without the GAME V2.0 signature", () => {

@@ -44,6 +44,8 @@ export interface ReadLimits {
   memorizedSpells: number;
   /** Items per party member (CRE 0x2c0). */
   items: number;
+  /** Effects per party member (CRE 0x2c8). */
+  effects: number;
 }
 
 /** The GAM V2.0 signature and version (0x00). */
@@ -61,6 +63,13 @@ const CRE_HEADER_SIZE = 0x2d4;
 const MEMORIZATION_INFO_SIZE = 0x10;
 const MEMORIZED_SPELL_SIZE = 0x0c;
 const ITEM_SIZE = 0x14;
+/** Effect sizes by the CRE's effect format (0x33): 0 is EFF V1, 1 is EFF V2 without its file header. */
+const EFFECT_SIZES = [0x30, 0x108];
+const EFF_V2 = 1;
+/** The effect that sets a weapon proficiency's pips. */
+const PROFICIENCY_OPCODE = 233;
+/** Parameter 2's high word that makes a proficiency effect add its pips instead of setting them (EE only, IESDP). */
+const ADD_PIPS = 1;
 /** Item slots before the selected weapon: equipment, quick items, 16 backpack slots, the magic weapon (IESDP, CRE V1.0). */
 export const ITEM_SLOT_COUNT = 38;
 const NO_ITEM = 0xffff;
@@ -206,6 +215,8 @@ export interface Cre {
   memorized: MemorizedSpell[];
   /** Per item slot (ITEM_SLOT_COUNT), the item in it or null. */
   slots: (Item | null)[];
+  /** Proficiency ID (STATS.IDS) -> pips, from the effect list. A decrement can leave them below 0. */
+  proficiencies: Map<number, number>;
 }
 
 export interface MemorizedSpell {
@@ -331,6 +342,7 @@ function readCre(cre: Reader, what: string, limits: ReadLimits): Cre {
     deathVariable,
     memorized: readMemorized(cre, what, limits),
     slots: readSlots(cre, what, limits),
+    proficiencies: readProficiencies(cre, what, limits),
   };
 }
 
@@ -385,6 +397,32 @@ function readSlots(cre: Reader, what: string, limits: ReadLimits): (Item | null)
       identified: (cre.u32(at + 0x10, what) & 1) === 1,
     };
   });
+}
+
+/**
+ * The weapon proficiencies: the proficiency effects in the effect list,
+ * applied in list order (§6.6.5). Each sets the pips of the proficiency that
+ * the low word of its parameter 2 names, or adds to them when the high word
+ * is ADD_PIPS. An effect format other than EFF V1 or V2 is damaged.
+ */
+function readProficiencies(cre: Reader, what: string, limits: ReadLimits): Map<number, number> {
+  const count = readCount(cre, 0x2c8, what, `effects in ${what}`, limits.effects);
+  const pips = new Map<number, number>();
+  if (count === 0) return pips;
+  const format = cre.u8(0x33, what);
+  const size = EFFECT_SIZES[format];
+  if (size === undefined) throw new Damaged(what);
+  const v2 = format === EFF_V2;
+  for (const at of cre.records(cre.u32(0x2c4, what), count, size, what)) {
+    const opcode = v2 ? cre.u32(at + 0x08, what) : cre.u16(at, what);
+    if (opcode !== PROFICIENCY_OPCODE) continue;
+    // Signed: an increment of -1 is a decrement (IESDP).
+    const amount = cre.i32(at + (v2 ? 0x14 : 0x04), what);
+    const param2 = cre.u32(at + (v2 ? 0x18 : 0x08), what);
+    const id = param2 & 0xffff;
+    pips.set(id, (param2 >>> 16 === ADD_PIPS ? (pips.get(id) ?? 0) : 0) + amount);
+  }
+  return pips;
 }
 
 /** The CHAPTER global: the only variable the kit reads (§6.6.4). */

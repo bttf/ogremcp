@@ -24,7 +24,7 @@ export const NOT_A_SAVE_MESSAGE = "This isn't a Baldur's Gate: Enhanced Edition 
  * The proposed limits on record counts (§0). They are config: pass others to
  * `createInterpreter`. The owner's saves hold at most 36 characters out of
  * the party, 227 variables, 100 journal entries, and 17 spell levels, 12
- * memorized spells, and 25 items per party member.
+ * memorized spells, 25 items, and 37 effects per party member.
  */
 export const DEFAULT_LIMITS: Readonly<ReadLimits> = {
   otherCharacters: 500,
@@ -33,6 +33,7 @@ export const DEFAULT_LIMITS: Readonly<ReadLimits> = {
   spellLevels: 64,
   memorizedSpells: 500,
   items: 500,
+  effects: 1_000,
 };
 
 /** The BG1 kit's interpreter, with `limits` in place of the defaults it names. */

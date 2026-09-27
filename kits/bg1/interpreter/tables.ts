@@ -20,7 +20,7 @@ export interface Tables {
   options: { [option in Option]: ReadonlyMap<number, string> };
 }
 
-export type Option = "alignment" | "class" | "gender" | "kit" | "race";
+export type Option = "alignment" | "class" | "gender" | "kit" | "proficiency" | "race";
 
 let tables: Tables | undefined;
 
@@ -48,6 +48,7 @@ function readTables(): Tables {
       class: byNumber(options.class),
       gender: byNumber(options.gender),
       kit: byNumber(options.kit),
+      proficiency: byNumber(options.proficiency),
       race: byNumber(options.race),
     },
   };
