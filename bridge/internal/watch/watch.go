@@ -38,6 +38,16 @@
 // resolves the globs again too, after the delay, since a folder may have
 // appeared between the resolve and the watch.
 //
+// When the folder that holds that segment does not exist yet, as BG1's save
+// folder before the first save, the watcher watches its nearest existing
+// ancestor inside the root instead, filtered by the segment that names the
+// next folder down: for BG1, the root, for an entry named save. An entry
+// created there makes the watcher resolve the globs again in the same way, so
+// the first save is uploaded after the debounce too (§7).
+//
+// Resync counts every instance as changed, as at start. The tray's Sync with
+// server calls it (§7).
+//
 // # Changes
 //
 // Each event that names an instance's file, other than a change of mode,
@@ -111,6 +121,8 @@ type Watcher struct {
 	mu   sync.Mutex
 	next []Kit
 	wake chan struct{}
+	// resync tells Run of a Resync.
+	resync chan struct{}
 
 	// clock makes the timers. Tests set a fake one.
 	clock clock
@@ -133,7 +145,9 @@ type Watcher struct {
 	due     chan *pending
 	tick    chan struct{}
 	// folders holds the folder watches: each folder that holds a source
-	// path's last folder segment with a "*", and those segments.
+	// path's last folder segment with a "*", or the nearest existing
+	// ancestor of one that does not exist, and the segments its entries
+	// match.
 	folders map[string][]string
 	// soon is the timer of a rescan that a folder watch asks for, or nil.
 	// soonDue gets its fire.
@@ -188,6 +202,7 @@ func New(debounce, interval time.Duration, log *slog.Logger, onChange func(Chang
 		log:      log,
 		onChange: onChange,
 		wake:     make(chan struct{}, 1),
+		resync:   make(chan struct{}, 1),
 		clock:    realClock{},
 	}
 }
@@ -201,6 +216,16 @@ func (w *Watcher) SetKits(kits []Kit) {
 	w.mu.Unlock()
 	select {
 	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Resync makes the watcher resolve the globs again and count every instance
+// as changed, as at start. It does not block, and it may be called before
+// Run.
+func (w *Watcher) Resync() {
+	select {
+	case w.resync <- struct{}{}:
 	default:
 	}
 }
@@ -248,6 +273,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-w.wake:
 			w.takeKits()
 			w.rescan()
+		case <-w.resync:
+			w.rescan()
+			for _, wt := range w.watches {
+				w.scheduleExisting(wt)
+			}
 		case <-w.tick:
 			w.rescan()
 			period = w.clock.AfterFunc(w.interval, w.tock)
@@ -412,10 +442,9 @@ func (w *Watcher) rescan() {
 			for _, wt := range list {
 				want[wt.watchKey] = wt
 			}
-			dirs, seg := folders(k, s)
-			for _, dir := range dirs {
-				if !slices.Contains(wantFolders[dir], seg) {
-					wantFolders[dir] = append(wantFolders[dir], seg)
+			for _, f := range folders(k, s) {
+				if !slices.Contains(wantFolders[f.dir], f.seg) {
+					wantFolders[f.dir] = append(wantFolders[f.dir], f.seg)
 				}
 			}
 		}
@@ -566,11 +595,17 @@ func resolve(k Kit, s manifest.Source) ([]*watch, error) {
 	return list, nil
 }
 
-// folders returns the folders of a source's folder watches: those under the
-// kit's root that hold the last folder segment of the source's path with a
-// "*". It also returns that segment. It returns no folders when no folder
+// folderWatch is a folder watch: an entry of dir that matches seg makes the
+// watcher resolve the globs again.
+type folderWatch struct{ dir, seg string }
+
+// folders returns a source's folder watches: each folder under the kit's root
+// that holds the last folder segment of the source's path with a "*", with
+// that segment. Where such a folder does not exist, it returns the nearest
+// existing folder on the way to it, the root or a folder under it, with the
+// segment that names the next folder down. It returns none when no folder
 // segment has a "*". Call it on a source that resolve accepts.
-func folders(k Kit, s manifest.Source) ([]string, string) {
+func folders(k Kit, s manifest.Source) []folderWatch {
 	root := filepath.Clean(k.Root)
 	segs := manifest.Segments(s.Path)
 	i := len(segs) - 2
@@ -578,24 +613,36 @@ func folders(k Kit, s manifest.Source) ([]string, string) {
 		i--
 	}
 	if i < 0 {
-		return nil, ""
+		return nil
 	}
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return nil
+	}
+	var list []folderWatch
+	// dirs are the folders that the first j segments match.
 	dirs := []string{root}
-	if i > 0 {
+	for j := range i {
 		// Glob checks that each folder is inside root. On an error, the
 		// source's new folders wait for the interval.
-		var err error
-		if dirs, err = locate.Glob(root, strings.Join(segs[:i], "/")); err != nil {
-			return nil, ""
+		found, err := locate.Glob(root, strings.Join(segs[:j+1], "/"))
+		if err != nil {
+			return list
 		}
+		found = slices.DeleteFunc(found, func(p string) bool {
+			info, err := os.Stat(p)
+			return err != nil || !info.IsDir()
+		})
+		for _, dir := range dirs {
+			if !slices.ContainsFunc(found, func(p string) bool { return filepath.Dir(p) == dir }) {
+				list = append(list, folderWatch{dir, segs[j]})
+			}
+		}
+		dirs = found
 	}
-	var list []string
 	for _, dir := range dirs {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			list = append(list, dir)
-		}
+		list = append(list, folderWatch{dir, segs[i]})
 	}
-	return list, segs[i]
+	return list
 }
 
 // warnOnce logs a warning, unless the problem named key was logged before.

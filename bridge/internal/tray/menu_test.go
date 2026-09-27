@@ -77,6 +77,28 @@ func TestRenderAdapters(t *testing.T) {
 	}
 }
 
+// §7: the Games submenu lists each enabled kit with its last upload, or
+// "folder not found".
+func TestRenderGames(t *testing.T) {
+	now := time.Date(2026, 9, 24, 18, 30, 0, 0, time.Local)
+	s := State{
+		Login:      LoginDone,
+		KitNames:   map[string]string{"wow": "World of Warcraft", "bg1": "Baldur's Gate"},
+		Games:      []Game{{Kit: "wow"}, {Kit: "bg1", NotFound: true}, {Kit: "other"}},
+		KitUploads: map[string]time.Time{"wow": now.Add(-time.Hour)},
+	}
+	want := []string{"World of Warcraft: last upload 17:30", "Baldur's Gate: folder not found", "other: no upload yet"}
+	if v := Render(s, now); !slices.Equal(v.Games, want) || !v.SyncEnabled {
+		t.Errorf("games %q, sync %v", v.Games, v.SyncEnabled)
+	}
+	if v := Render(State{Login: LoginDone, Games: []Game{}}, now); !slices.Equal(v.Games, []string{"No games enabled"}) {
+		t.Errorf("no games: %q", v.Games)
+	}
+	if v := Render(State{Login: LoginNeeded}, now); v.Games != nil || v.SyncEnabled {
+		t.Errorf("logged out: games %q, sync %v", v.Games, v.SyncEnabled)
+	}
+}
+
 func TestRenderAutostartBlocked(t *testing.T) {
 	v := Render(State{AutostartAvailable: true}, time.Now())
 	if v.AutostartTitle != TitleAutostart || !v.AutostartEnabled {

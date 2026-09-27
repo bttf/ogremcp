@@ -91,7 +91,7 @@ func syncAdapters(args []string) error {
 	api := kits.New(base, client)
 	if *watch {
 		go updater.Run(ctx, adapter.DefaultStagedInterval, show)
-		kits.NewPoller(api, settings.Interval(), onFetch).Run(ctx)
+		kits.NewPoller(api, settings.KitCheckEvery(), settings.Interval(), onFetch).Run(ctx)
 		return nil
 	}
 	list, err := api.Fetch(ctx)

@@ -27,7 +27,8 @@
 // # Answers
 //
 //   - stored, duplicate: the server holds the file's bytes. Status's
-//     LastUpload is set, and the instance's error is cleared.
+//     LastUpload and the instance's are set, and the instance's error is
+//     cleared.
 //   - parse_error, unsupported_flavor, too_large, bad_request: the server
 //     refuses these bytes. They are not sent again; the next change is. The
 //     message becomes the instance's error.
@@ -132,6 +133,9 @@ type Instance struct {
 	Err string
 	// ErrAt is when Err last changed.
 	ErrAt time.Time
+	// LastUpload is when the server last answered stored or duplicate for
+	// the instance, or zero.
+	LastUpload time.Time
 }
 
 // Uploader uploads the changes of source instances. Make one with New.
@@ -174,10 +178,11 @@ type entry struct {
 	// failures counts the attempts in a row that will be tried again.
 	failures int
 	// due is when the next attempt may start.
-	due     time.Time
-	stopped bool
-	err     string
-	errAt   time.Time
+	due        time.Time
+	stopped    bool
+	err        string
+	errAt      time.Time
+	lastUpload time.Time
 }
 
 // New returns an Uploader for the server at base, the base URL api holds
@@ -262,14 +267,15 @@ func (u *Uploader) Status() Status {
 	s := Status{LastUpload: u.lastUpload, LoginRequired: u.loginRequired}
 	for k, e := range u.entries {
 		s.Instances = append(s.Instances, Instance{
-			Kit:      k.kit,
-			SourceID: k.source,
-			Instance: k.instance,
-			Path:     e.change.Path,
-			Pending:  e.pending,
-			Stopped:  e.stopped,
-			Err:      e.err,
-			ErrAt:    e.errAt,
+			Kit:        k.kit,
+			SourceID:   k.source,
+			Instance:   k.instance,
+			Path:       e.change.Path,
+			Pending:    e.pending,
+			Stopped:    e.stopped,
+			Err:        e.err,
+			ErrAt:      e.errAt,
+			LastUpload: e.lastUpload,
 		})
 	}
 	slices.SortFunc(s.Instances, func(a, b Instance) int {
@@ -358,6 +364,7 @@ func (u *Uploader) finish(k key, seq uint64, sent map[string]int, res result) {
 	switch res.action {
 	case taken:
 		u.lastUpload = now
+		e.lastUpload = now
 		u.log.Info("uploaded", u.attrs(k, "status", res.status)...)
 		u.setErr(k, e, "", now)
 	case refused:

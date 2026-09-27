@@ -18,9 +18,10 @@ import (
 )
 
 // run is the dev command `bridge run`: it logs in when the bridge holds no
-// login, fetches the enabled kits every refresh interval, locates each game
-// folder, watches the kits' sources, and uploads each settled change (§7,
-// §8.3). When the server ends the login, it logs in again.
+// login, fetches the enabled kits every refresh interval and when the kit
+// list changes, locates each game folder, watches the kits' sources, and
+// uploads each settled change (§7, §8.3). When the server ends the login, it
+// logs in again.
 func run(args []string) error {
 	flags := flag.NewFlagSet("bridge run", flag.ContinueOnError)
 	rootFlag := flags.String("root", "", "answer the folder prompt with this folder; without it the prompt is skipped")
@@ -106,7 +107,7 @@ func run(args []string) error {
 		}
 		watcher.SetKits(located)
 	}
-	poller := kits.NewPoller(kits.New(base, client), settings.Interval(), onFetch)
+	poller := kits.NewPoller(kits.New(base, client), settings.KitCheckEvery(), settings.Interval(), onFetch)
 
 	// Log in again when the server ends the login.
 	go func() {

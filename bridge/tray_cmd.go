@@ -35,8 +35,9 @@ const relaunchWait = 30 * time.Second
 const envWaitForLock = "OGREMCP_WAIT_FOR_LOCK"
 
 // runTray runs the bridge as a tray app (§7): an icon in the macOS menu bar or
-// the Windows notification area, with a menu that shows the status and offers
-// the login, the folder picker, the server (§13.3), and start at login. A
+// the Windows notification area, with a menu that shows the status and the
+// enabled games, and offers Sync with server, the login, the folder picker,
+// the server (§13.3), and start at login. A
 // release build updates itself (§7). It logs to a file (package logfile), and
 // returns the exit status. On macOS it needs cgo; see tray_nocgo.go. On macOS
 // it first offers to move the app to ~/Applications (move_darwin.go).
@@ -233,6 +234,12 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 	}
 	ui.update = line()
 	systray.AddSeparator()
+	games := systray.AddMenuItem(tray.TitleGames, "")
+	for range tray.MaxGameLines {
+		ui.games = append(ui.games, subLine(games))
+	}
+	games.AddSeparator()
+	ui.sync = games.AddSubMenuItem(tray.TitleSync, "")
 	ui.login = systray.AddMenuItem("", "")
 	ui.login.Hide()
 	ui.folder = systray.AddMenuItem(tray.TitleChooseFolder, "")
@@ -270,6 +277,8 @@ func onReady(ctx context.Context, ctl *tray.Controller, logger *slog.Logger, sto
 				return
 			case <-changed:
 			case <-minute.C:
+			case <-ui.sync.ClickedCh:
+				ctl.Sync()
 			case <-ui.login.ClickedCh:
 				ctl.Login(ctx)
 			case <-ui.folder.ClickedCh:
@@ -305,11 +314,19 @@ func line() *systray.MenuItem {
 	return item
 }
 
+// subLine adds a line to the submenu of parent, as line does.
+func subLine(parent *systray.MenuItem) *systray.MenuItem {
+	item := parent.AddSubMenuItem("", "")
+	item.Disable()
+	item.Hide()
+	return item
+}
+
 type menu struct {
-	status, note, err, update *systray.MenuItem
-	adapters                  []*systray.MenuItem
-	login, folder, autostart  *systray.MenuItem
-	icon                      *bool
+	status, note, err, update      *systray.MenuItem
+	adapters, games                []*systray.MenuItem
+	sync, login, folder, autostart *systray.MenuItem
+	icon                           *bool
 }
 
 func (m *menu) apply(v tray.View) {
@@ -330,6 +347,14 @@ func (m *menu) apply(v tray.View) {
 		show(item, text)
 	}
 	show(m.update, v.Update)
+	for i, item := range m.games {
+		text := ""
+		if i < len(v.Games) {
+			text = v.Games[i]
+		}
+		show(item, text)
+	}
+	enable(m.sync, v.SyncEnabled)
 	show(m.login, v.Login)
 	enable(m.login, v.LoginEnabled)
 	if v.ChooseFolder {

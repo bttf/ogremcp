@@ -1,15 +1,17 @@
 // Package config is the bridge's settings file on this device
 // (docs/architecture.md §6.1, §7, §13.3). It holds the server, each kit's
 // game folder, as the locate chain found it or the user picked it, the
-// refresh interval, the debounce delay of the watcher, the upload cap, and
-// how often the bridge checks for a release of itself. It holds no secret: the refresh token is in the OS keychain (package
-// keychain).
+// refresh interval, the kit check interval, the debounce delay of the
+// watcher, the upload cap, and how often the bridge checks for a release of
+// itself. It holds no secret: the refresh token is in the OS keychain
+// (package keychain).
 //
 // The file is JSON, ogremcp-bridge/config.json in the user's config directory:
 //
 //	{
 //	  "server_url": "https://ogremcp.example.com",
 //	  "refresh_interval": "5m",
+//	  "kit_check_interval": "1m",
 //	  "debounce": "2s",
 //	  "max_upload_bytes": 5242880,
 //	  "update_interval": "6h",
@@ -51,6 +53,13 @@ const DefaultRefreshInterval = 5 * time.Minute
 // MinRefreshInterval is the shortest refresh_interval the file may set.
 const MinRefreshInterval = time.Minute
 
+// DefaultKitCheckInterval is how often the bridge checks whether the kit
+// list changed, unless the file sets kit_check_interval (§7, proposed).
+const DefaultKitCheckInterval = time.Minute
+
+// MinKitCheckInterval is the shortest kit_check_interval the file may set.
+const MinKitCheckInterval = 10 * time.Second
+
 // DefaultDebounce is how long a source instance's file must go without a
 // write before the watcher reports the change, unless the file sets debounce
 // (§7, proposed).
@@ -77,6 +86,9 @@ type File struct {
 	// RefreshInterval is how often the bridge fetches the kits and resolves
 	// the globs again. Zero means DefaultRefreshInterval.
 	RefreshInterval Duration `json:"refresh_interval,omitempty"`
+	// KitCheckInterval is how often the bridge checks whether the kit list
+	// changed. Zero means DefaultKitCheckInterval.
+	KitCheckInterval Duration `json:"kit_check_interval,omitempty"`
 	// Debounce is how long a source instance's file must go without a write
 	// before the watcher reports the change. Zero means DefaultDebounce.
 	Debounce Duration `json:"debounce,omitempty"`
@@ -118,6 +130,14 @@ func (f File) Interval() time.Duration {
 		return DefaultRefreshInterval
 	}
 	return time.Duration(f.RefreshInterval)
+}
+
+// KitCheckEvery is the kit check interval.
+func (f File) KitCheckEvery() time.Duration {
+	if f.KitCheckInterval == 0 {
+		return DefaultKitCheckInterval
+	}
+	return time.Duration(f.KitCheckInterval)
 }
 
 // DebounceDelay is the debounce delay.
@@ -184,6 +204,9 @@ func Load(path string) (File, error) {
 	}
 	if f.RefreshInterval != 0 && time.Duration(f.RefreshInterval) < MinRefreshInterval {
 		return File{}, fmt.Errorf("%s is not valid: refresh_interval must be at least %s", path, MinRefreshInterval)
+	}
+	if f.KitCheckInterval != 0 && time.Duration(f.KitCheckInterval) < MinKitCheckInterval {
+		return File{}, fmt.Errorf("%s is not valid: kit_check_interval must be at least %s", path, MinKitCheckInterval)
 	}
 	if f.Debounce < 0 {
 		return File{}, fmt.Errorf("%s is not valid: debounce may not be negative", path)

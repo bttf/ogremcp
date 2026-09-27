@@ -2,10 +2,12 @@ package kits
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,13 +15,18 @@ import (
 
 // server is the bridge API's kit routes. It serves the WoW kit's manifest,
 // read from the repo, and lists a kit it has no manifest for and a kit with
-// an invalid name.
+// an invalid name. The list's ETag is its version, and a matching
+// If-None-Match gets 304.
 type server struct {
 	*httptest.Server
 	manifest []byte
 
 	mu    sync.Mutex
 	paths []string
+	// checks holds the If-None-Match of each request of the list.
+	checks  []string
+	version int
+	extra   string
 }
 
 func newServer(t *testing.T) *server {
@@ -37,14 +44,23 @@ func newServer(t *testing.T) *server {
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.paths = append(s.paths, r.URL.Path)
+	etag, extra := fmt.Sprintf(`"v%d"`, s.version), s.extra
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	switch r.URL.Path {
 	case "/api/v1/kits":
+		s.mu.Lock()
+		s.checks = append(s.checks, r.Header.Get("If-None-Match"))
+		s.mu.Unlock()
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.Write([]byte(`{"kits": [
 			{"kit": "wow", "manifest_version": "0.1.0", "adapter": {"version": "0.1.0", "sha256": "` + zeros + `"}},
 			{"kit": "gone", "manifest_version": "1.0.0", "adapter": null},
-			{"kit": "../admin", "manifest_version": "1.0.0", "adapter": null}
+			{"kit": "../admin", "manifest_version": "1.0.0", "adapter": null}` + extra + `
 		]}`))
 	case "/api/v1/kits/wow/manifest":
 		w.Write(s.manifest)
@@ -88,12 +104,12 @@ func TestFetch(t *testing.T) {
 	}
 }
 
-// fetches runs a Poller and returns a channel of its results, and the Poller.
-func fetches(t *testing.T, interval time.Duration) (<-chan []Kit, *Poller) {
+// fetches runs a Poller of s and returns a channel of its results, and the
+// Poller.
+func fetches(t *testing.T, s *server, check, interval time.Duration) (<-chan []Kit, *Poller) {
 	t.Helper()
-	s := newServer(t)
 	results := make(chan []Kit, 16)
-	p := NewPoller(New(s.URL, s.Client()), interval, func(list []Kit, err error) {
+	p := NewPoller(New(s.URL, s.Client()), check, interval, func(list []Kit, err error) {
 		if err != nil {
 			t.Error(err)
 		}
@@ -128,15 +144,65 @@ func next(t *testing.T, results <-chan []Kit) {
 }
 
 func TestPollerFetchesAtStartAndEveryInterval(t *testing.T) {
-	results, _ := fetches(t, 10*time.Millisecond)
+	results, _ := fetches(t, newServer(t), time.Hour, 10*time.Millisecond)
 	for range 3 {
 		next(t, results)
 	}
 }
 
-func TestPollerFetchesWhenWoken(t *testing.T) {
-	results, p := fetches(t, time.Hour)
+func TestPollerFetchesOnSync(t *testing.T) {
+	results, p := fetches(t, newServer(t), time.Hour, time.Hour)
 	next(t, results) // at start
-	p.Wake()         // as after a login
+	p.Sync()
 	next(t, results)
+}
+
+// The check sends the list's ETag. A 304 fetches nothing; a changed list
+// fetches the manifests, and onFetch gets it (§7, §8.2).
+func TestPollerChecksTheList(t *testing.T) {
+	s := newServer(t)
+	results, _ := fetches(t, s, 10*time.Millisecond, time.Hour)
+	next(t, results) // at start
+	checks := func() []string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return slices.Clone(s.checks)
+	}
+	waitFor(t, "three checks", func() bool { return len(checks()) >= 4 })
+	if got := checks()[:4]; !slices.Equal(got, []string{"", `"v0"`, `"v0"`, `"v0"`}) {
+		t.Errorf("If-None-Match of each request: %q", got)
+	}
+	select {
+	case list := <-results:
+		t.Fatalf("a 304 fetched %+v", list)
+	default:
+	}
+	before := len(s.requests())
+
+	s.mu.Lock()
+	s.version++
+	s.extra = `, {"kit": "bg1", "name": "Baldur's Gate", "manifest_version": "1.0.0", "adapter": null}`
+	s.mu.Unlock()
+	select {
+	case list := <-results:
+		if len(list) != 4 || list[3].Kit != "bg1" {
+			t.Errorf("fetched %+v", list)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no fetch after the list changed")
+	}
+	if got := s.requests()[before:]; !slices.Contains(got, "/api/v1/kits/wow/manifest") {
+		t.Errorf("requests after the change: %q", got)
+	}
+}
+
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
