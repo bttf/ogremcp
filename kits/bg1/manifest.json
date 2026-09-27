@@ -1,0 +1,26 @@
+{
+  "kit": "bg1",
+  "version": "0.1.0",
+  "sdk": "^0.0.0",
+  "tool_prefix": "bg1",
+  "root": {
+    "locate": [
+      { "path": "{HOME}/Documents/Baldur's Gate - Enhanced Edition" },
+      { "path": "{HOME}/OneDrive/Documents/Baldur's Gate - Enhanced Edition" },
+      { "prompt": "Select the Baldur's Gate - Enhanced Edition folder in your Documents folder" }
+    ],
+    "verify": "Baldur.lua"
+  },
+  "sources": [
+    {
+      "id": "gam",
+      "type": "file",
+      "format": "binary",
+      "path": "save/*/BALDUR.gam",
+      "trigger": "on_change"
+    }
+  ],
+  "flavors": {
+    "bgee": { "status": "experimental" }
+  }
+}
