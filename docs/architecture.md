@@ -565,7 +565,8 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 - Tool-selection quality and context cost degrade as the tool list grows, so **consolidate**: a few tools with `sections` params beat many narrow tools.
 - **≤8 tools per kit; aim for 2–3.**
-- **Only tools for the user's enabled games are exposed**, computed per request. A change shows up the next time the client lists tools, which for some clients means a new chat. The stateless transport sends no `notifications/tools/list_changed` (D12).
+- **Every kit's tools are listed to every user**, whether or not the game is enabled, so enabling or turning off a game never changes the tool list. A call to a turned-off game's tool answers the §10.5 message. The list changes only when a deploy adds or removes a kit or tool. The stateless transport sends no `notifications/tools/list_changed` (D12).
+  - Why: claude.ai caches a connector's tool list and doesn't fetch it again when it changes, even for a new chat or after a reconnect (anthropics/claude-ai-mcp#137). "Refresh tool list" in the connector's settings is the manual fix. Owner decision, 2026-09-27 (RED-380), replacing "only tools for the user's enabled games are exposed". Revisit when claude.ai refetches changed tool lists.
 - **Paid-only tools are still exposed to free users** and return an upgrade message, so the tool list doesn't change on upgrade. The refusal doesn't count against the daily cap.
 - **Rejected:** a meta-dispatcher (`describe_tools` + `call_tool`). It loses typed args, adds a round trip, and makes every call look the same in approval UIs.
 
@@ -573,7 +574,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 
 | Tool | Purpose |
 |---|---|
-| `list_games` | Orientation call. Returns enabled games, the last-active game and flavor, recent characters per game (with flavor), and `snapshot_at` for each. With no snapshots yet, returns setup steps (install the bridge, then `/transmit` in WoW or save the game in BG1). |
+| `list_games` | Orientation call. Returns enabled games, the last-active game and flavor, recent characters per game (with flavor), and `snapshot_at` for each. Each enabled game names its tools, and the result says a missing one means the client's tool list is out of date (in claude.ai, Settings > Connectors > Ogre MCP > Refresh tool list; elsewhere, a new chat). With no snapshots yet, returns setup steps (install the bridge, then `/transmit` in WoW or save the game in BG1). |
 | `report_issue(game, note)` | Record a user-reported problem (§16.2). Only when the user asks. |
 
 ### 10.4 WoW tools
@@ -592,7 +593,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 - **Format:** return `structuredContent` plus the same JSON as a text block, because client support varies.
 - **Size:** one copy of a kit tool's result JSON is at most a configured cap (*proposed* 40 KB). The client gets the JSON twice and can have a tool-output limit. Over the cap, the kit trims its own result, because only the kit knows which of its fields matter least. The platform passes the kit the cap minus the bytes of the fixed `grounding` line in `ToolContext`, so the result with the line stays within the cap, and answers a result still over it with a user-facing error that asks for fewer `sections`. `wow_get_state` leaves out quest description text first, then shortens the bag list, and adds a note that says what it left out and suggests fewer `sections`. The player's current state stays accurate. Owner decision, 2026-09-25.
 - **Annotations:** `readOnlyHint: true` on every tool except `report_issue`. Clients use these to decide when to ask the user for confirmation.
-- **User-facing conditions** (cap reached, paid-only, no snapshot yet) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which a client can keep listing until a new chat (§10.2): the message says the game is turned off on the Games page. An unknown tool name is a protocol error. The `isError` rule applies to tools that need a snapshot. `list_games` is the orientation call, so it answers "no snapshot yet" and "no game enabled" with a normal result that carries the setup steps.
+- **User-facing conditions** (cap reached, paid-only, no snapshot yet) are tool results with `isError: true` and a plain-language message, not protocol errors, so the agent relays them. So is a call to a tool of a game the user has turned off, which every client lists (§10.2): the message says the game is turned off on the Games page, and the call isn't counted against the daily cap. An unknown tool name is a protocol error. The `isError` rule applies to tools that need a snapshot. `list_games` is the orientation call, so it answers "no snapshot yet" and "no game enabled" with a normal result that carries the setup steps.
 - **Tool descriptions name the game explicitly.** Together with the prefix and `list_games`, that's how the agent picks the right tool.
 - **Behavior rules** go in the server `instructions` *and* in the relevant tool descriptions, because some clients ignore `instructions`. This list is complete; don't port the prototype's rules. The WoW tools' flight-point and quest turn-in rules are in §10.4, and the BG1 tool's rules are in §10.6:
   - Friend-style, spoiler-free guidance ("head north, you'll know you're close when you see water"), not coordinates and kill counts.
@@ -685,7 +686,7 @@ Not needed in v1. If it's needed later (§17), the bridge polls for pending mess
 | Sign in | Google / Discord |
 | Get started | One-time onboarding: choose your games (the bridge installs addons only for enabled games, §8.2), download the bridge (one app for every game), approve it, connect an agent. Owner decision on the first step, 2026-09-25. |
 | Games | Enable/disable kits; per-game in-game tips (e.g. `/transmit`, restart WoW after the addon's first install, close WoW to finish an addon update; for BG1, save the game to send its state, §6.6.1). The bridge picks up a newly enabled game within about a minute, or at once with "Sync with server" in its menu (§7). |
-| Connect your agent | The MCP URL and steps for Claude, Claude Code, ChatGPT, and Perplexity |
+| Connect your agent | The MCP URL and steps for Claude, Claude Code, ChatGPT, and Perplexity. For claude.ai: after a deploy that adds a game, use Refresh tool list in the connector's settings (§10.2). |
 | Device approval (`/device`) | Confirm a bridge's code |
 | Agent consent | Approve an agent's OAuth request |
 | Devices | List, rename, revoke |
