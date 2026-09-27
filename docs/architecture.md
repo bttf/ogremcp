@@ -41,7 +41,7 @@ Ogre MCP is an open-source platform that connects a video game to **any AI agent
 
 - ✅ Interfaces and seams that a kit exercises: the manifest schema, the `Interpreter` interface, the locate chain.
 - ❌ Implementations for sources, games, or features no kit needs.
-- A second game is what justifies extracting more. BG1 is that game. It adds only what it uses: a `binary` source format (§6.1), a kit without an adapter, and name tables bundled in the kit (§6.6.3). It does not justify a shared Infinity Engine kit or a shared save parser: BG2:EE and the other Infinity Engine games are not planned.
+- A second game is what justifies extracting more. BG1 is the second game. It adds only what it uses: a `binary` source format (§6.1), a kit without an adapter, and name tables bundled in the kit (§6.6.3). It does not justify a shared Infinity Engine kit or a shared save parser: BG2:EE and the other Infinity Engine games are not planned.
 - **One `wow` kit covers every flavor** (§6.4). First target: **WoW Classic Era**, the only flavor we can play-test right now. Other flavors join the same kit as `experimental` until play-tested. Flavors not in the kit's registry are rejected at ingest.
 
 ## 3. Glossary
@@ -49,7 +49,7 @@ Ogre MCP is an open-source platform that connects a video game to **any AI agent
 | Term | Meaning |
 |---|---|
 | **Ogre MCP** (`ogremcp`) | The platform: web UI + MCP server + bridge + kits |
-| **Kit** | A per-game bundle: adapter + manifest + interpreter. One package per kit, under `kits/` (§5). One kit per game, not per version. |
+| **Kit** | A per-game bundle: manifest + interpreter, plus an adapter when the game needs one. One package per kit, under `kits/` (§5). One kit per game, not per version. |
 | **Flavor** | A version of a game with its own content, sharing the game's kit, e.g. WoW Classic Era, Season of Discovery, Forever. Derived from facts the adapter stamps (§6.3.1), and recorded on every snapshot. |
 | **Rules** | Realm rulesets that don't change content, e.g. `hardcore`, `fresh`. Recorded with the flavor; they change agent behavior, not content (§6.3.1). |
 | **Adapter** | Optional in-game component, e.g. the WoW Lua addon. Save-file games need none, e.g. BG1 (§6.6). |
@@ -124,7 +124,7 @@ ogremcp/
 
 | Path | Contents | May depend on | License* |
 |---|---|---|---|
-| `packages/sdk` | Manifest JSON Schema + TS types, `Interpreter` interface, shared types. **Small**: only what WoW uses. | Nothing | MIT |
+| `packages/sdk` | Manifest JSON Schema + TS types, `Interpreter` interface, shared types. **Small**: only what the first-class kits use. | Nothing | MIT |
 | `kits/wow` | Adapter, manifest, interpreter, fixtures | `@ogremcp/sdk` only | MIT |
 | `kits/bg1` | Manifest, interpreter, name tables, extraction script, fixtures. No adapter. | `@ogremcp/sdk` only | MIT, except `kits/bg1/data/` (§6.6.3) |
 | `platform` | Node service: web UI, MCP server, bridge API, OAuth server | `@ogremcp/sdk`, plus kits through the `Interpreter` interface only | AGPL-3.0-or-later |
@@ -136,7 +136,7 @@ ogremcp/
 - **Deploys:** Railway rebuilds the platform when `platform/`, `packages/sdk/`, `kits/`, or root workspace files change, and skips bridge-only changes. Set this with watch paths; the prototype hit this (RED-266).
 - **Visibility:** Blizzard requires addon code to be public before distribution. The repo went public on 2026-09-25, before the P9 listings (owner decision), after the previous-plan mapping was removed from this doc. Git history was not rewritten.
 - The repo is `bttf/ogremcp` under the personal account, public since 2026-09-25. It moves to the `ogremcp` org at P9 (§19.1 D4). Repo renames and transfers keep redirects. What happens to the prototype repo: D2.
-- `[later]`: community kits live in their own repos and depend on `@ogremcp/sdk` from npm. Extract `ogremcp-kit-template` from the WoW kit when a second kit exists.
+- `[later]`: community kits live in their own repos and depend on `@ogremcp/sdk` from npm. Extract `ogremcp-kit-template` from the first-class kits when community kits start. BG1 is a second kit, but it doesn't trigger the template: it is first-class and lives in this repo.
 
 \*Decided (§19.1 D11): AGPL-3.0-or-later on the platform so nobody can run a closed hosted clone; MIT elsewhere to maximize contributors. Each path has its own `LICENSE` file, and a root note says which license covers which path. Files outside these paths are MIT. The exception is `kits/bg1/data/`: it holds game text owned by Beamdog, which no license of ours covers. Its `NOTICE` file and the root note say so (§6.6.3, §19.1 D13). Contributions use a DCO (`Signed-off-by`), not a CLA, and CI checks every commit for the sign-off.
 
@@ -232,7 +232,7 @@ interface ToolContext<State> {
 
 - `ParseError` messages are user-facing. The bridge shows them to the player (§8.3).
 - Accept the current adapter schema and the previous one, because the addon can lag the server (CurseForge/Wago installs, §7).
-- Tool handlers read snapshots only through `ToolContext`. The platform resolves `character` (name or `Name-Realm`, case-insensitive; ambiguous → an error listing matches) and applies tier gating. Realms compare without spaces, hyphens, and periods, the form WoW chat shows (`Zoela-LivingFlame`). The same `Name-Realm` in two flavors is ambiguous unless `flavor` is given. A kit without realms, such as BG1 (§6.6.2), sets `realm` to an empty string: the platform then shows the name alone, and the name alone matches. `history` returns at most a configured number of snapshots (*proposed* 100). Bad arguments and unknown or ambiguous characters are user-facing errors (§10.5).
+- Tool handlers read snapshots only through `ToolContext`. The platform resolves `character` (name or `Name-Realm`, case-insensitive; ambiguous → an error listing matches) and applies tier gating. Realms compare without spaces, hyphens, and periods, the form WoW chat shows (`Zoela-LivingFlame`). The same `Name-Realm` in two flavors is ambiguous unless `flavor` is given. A kit without realms, such as BG1 (§6.6.2), sets `realm` to an empty string. The platform then shows the name alone. A `character` argument matches such a character when the whole argument equals its name; the platform doesn't split the argument at a hyphen for it. `history` returns at most a configured number of snapshots (*proposed* 100). Bad arguments and unknown or ambiguous characters are user-facing errors (§10.5).
 - **Parsing SavedVariables:** it's a Lua table literal. The WoW interpreter parses it with a literal-only parser (it never evaluates Lua) and enforces limits on size (the 5 MB cap, §8.3), nesting depth, and value count (proposed: 32 levels, 200k values). Going over is a `ParseError`. The parser lives in the WoW kit until a second kit needs it.
 
 ### 6.3 Adapter (WoW) `[v1]`
@@ -340,12 +340,13 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 ```json
 {
   "kit": "bg1",
+  "version": "0.1.0",
+  "sdk": "^0.0.0",
   "tool_prefix": "bg1",
   "root": {
     "locate": [
       { "path": "{HOME}/Documents/Baldur's Gate - Enhanced Edition" },
       { "path": "{HOME}/OneDrive/Documents/Baldur's Gate - Enhanced Edition" },
-      { "path": "{HOME}/Library/Containers/com.beamdog.baldursgateenhancededition/Data/Documents/Baldur's Gate - Enhanced Edition" },
       { "prompt": "Select the Baldur's Gate - Enhanced Edition folder in your Documents folder" }
     ],
     "verify": "Baldur.lua"
@@ -363,12 +364,13 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 }
 ```
 
-- **Root** is the game's folder in Documents, where it keeps its settings (`Baldur.lua`) and saves. The kit never reads the install folder. The same path works on Windows (`{HOME}` is the user profile) and macOS. The OneDrive entry covers a redirected Documents folder on Windows; it is an inference, not a documented path. The `Library/Containers` entry covers the Mac App Store build and comes from Aspyr's support page. Neither is tested; confirm them when a tester has one. The game takes the folder name from `engine_name` in the install's `engine.lua`. A player who changed it picks the folder at the prompt.
+- **Root** is the game's folder in Documents, where it keeps its settings (`Baldur.lua`) and saves. The kit never reads the install folder. The same path works on Windows (`{HOME}` is the user profile) and macOS. The OneDrive entry covers a redirected Documents folder on Windows. It is an inference, not a documented or tested path. The Mac App Store build keeps its saves in its own container under `~/Library/Containers`, per Aspyr's support page. The chain leaves that path out, because reading another app's container needs a second macOS permission; its players pick the folder at the prompt. The game takes the folder name from `engine_name` in the install's `engine.lua`. A player who changed it also picks the folder at the prompt.
+- **macOS permission:** macOS asks the player to let the bridge read the Documents folder. The bridge's `Info.plist` carries `NSDocumentsFolderUsageDescription`, which says why. If the player refuses, locate fails, and the tray says to allow it under System Settings > Privacy & Security > Files and Folders. The WoW kit never hits this, because it reads `/Applications`.
 - **`verify: "Baldur.lua"`:** the game writes it at first start, before any save exists.
 - **Instances:** each save folder (`save/<number>-<name>/`) is a source instance. The game writes `BALDUR.gam` on every save: manual saves, quick-saves, and autosaves. The bridge uploads each one. On its first run, it uploads every existing save; the per-device rate limit (§8.3) spreads those out.
 - **Only `BALDUR.gam`** (about 150 KB). `BALDUR.SAV` holds the visited areas, the world map, stores, and map notes. It is `[later]`: using it needs a way to combine two files of one save, and `parse` (§6.2) sees one upload at a time. The screenshot and portraits (`*.bmp`) are never read (D3).
 - **`snapshot_at`:** the save holds no wall-clock time, so `capturedAt` is null and the server uses the file's modification time (§6.2). The newest save is the latest snapshot. Loading an older save changes nothing until the player saves again.
-- **Freshness:** saving the game is BG1's `/transmit` (§15). A quick-save is the fastest way.
+- **Freshness:** in BG1, saving the game does what `/transmit` does in WoW (§15). A quick-save is the fastest way. The bridge sees a new save folder at once, because it watches `save/` itself (§7).
 
 #### 6.6.2 Flavor, rules, and character
 
@@ -380,15 +382,15 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
   | `SOD` | `sod` | ❌ not yet (§19.2) |
   | anything else, or a failed sanity check | `unknown` | ❌ |
 
-- **Sanity check:** the signature is `GAMEV2.0`, and the loading-progress field (0x0064) is 0 or 1, the BG1 and Tales of the Sword Coast XP limits. All 12 scouted saves hold 0. Per the IESDP, a BG2:EE save picked by mistake holds 2 or more (the Shadows of Amn and Throne of Bhaal limits). No BG2:EE save was available to confirm it.
+- **Sanity check:** the loading-progress field (0x0064) is 0 or 1, the BG1 and Tales of the Sword Coast XP limits. All 12 scouted saves hold 0. Per the IESDP, a BG2:EE save picked by mistake holds 2 or more (the Shadows of Amn and Throne of Bhaal limits). No BG2:EE save was available to confirm it.
 - **Siege of Dragonspear** saves go in `sodsave/`, not `save/`, so the manifest never reads them. The `sod` row covers a SoD save copied into `save/`. Registering `sod` means adding `sodsave/*/BALDUR.gam` to the manifest, and it waits until someone can play-test it (§19.2).
 - **Rules:** none (`[]`). The save doesn't hold the difficulty.
-- **Character:** the protagonist, the party member in slot 0. `key` and `name` are the protagonist's name as the GAM stores it (UTF-8). `realm` is empty. The save has no unique ID, so two playthroughs with the same protagonist name share one character. When the realm is empty, the platform shows the name alone, and a `character` argument matches the name (§6.2).
-- **`adapterSchema`** is 0, because there is no adapter. The interpreter accepts GAM V2.0 only.
+- **Character:** the protagonist, Player1: the first record in the GAM's list of party members. In all 12 scouted saves, it is the only party record with a name in the GAM's name field. `key` and `name` are that name (UTF-8). `realm` is empty. The save has no unique ID, so two playthroughs with the same protagonist name share one character. Confirm at implementation that reordering the party's portraits doesn't change the first record; if it does, pick the record whose party-order field (0x0002) is 0. When the realm is empty, the platform shows the name alone, and a `character` argument matches the whole name, even one with a hyphen (§6.2).
+- **`adapterSchema`** is 0, because there is no adapter. A file whose signature isn't `GAMEV2.0` is a `ParseError` ("This isn't a Baldur's Gate: Enhanced Edition save."), not a flavor.
 
 #### 6.6.3 Name tables
 
-- **The problem:** the save stores codes. Journal entries and creature names are strrefs, indexes into the game's `dialog.tlk`. Items, spells, and areas are resrefs, the names of game files. The text lives in the game install, not the save.
+- **Codes:** the save stores codes. Journal entries and creature names are strrefs, indexes into the game's `dialog.tlk`. Items, spells, and areas are resrefs, the names of game files. The text lives in the game install, not the save.
 - **The kit bundles name tables** in `kits/bg1/data/`. The interpreter looks each code up at parse time, and the snapshot stores readable text. The bridge uploads the save unchanged and reads no game files (§7). Owner decision, 2026-09-27 (§19.1 D13).
 - **Extraction:** a script in `kits/bg1/scripts/` builds the tables from a BG:EE install. A maintainer runs it by hand; CI never does, and players never do. It reads `lang/en_US/dialog.tlk`, `chitin.key` and the BIFF archives, and the game's UI Lua (`BGEE.LUA`). The tables record the game version they came from. Re-run the script when a game patch changes the text. A re-parse (§11) applies new tables to old uploads.
 - **Contents:**
@@ -442,7 +444,7 @@ Adding a flavor (e.g. Forever) is routine, not a refactor:
 - **Generic:** no game logic. Everything game-specific arrives as manifests and adapters from the platform, for the user's enabled kits (§8.2).
 - **Tray UI:** status (last upload, latest error message), device-code login, folder picker for `prompt`, start-at-login, and the server to use (saved in the bridge's settings, for self-hosters, §13.3).
 - **Credentials:** the refresh token lives in the OS keychain (Windows Credential Manager, macOS Keychain), never in a plain file.
-- **Watching:** `fsnotify` on the *parent directories* of resolved instances, filtered by file name. WoW may replace the file on save (it keeps `.bak` copies), which breaks file-level watches. Debounce until writes settle (proposed 2 s). Re-resolve globs at start and periodically (proposed every 5 min) to pick up new flavor folders and accounts.
+- **Watching:** `fsnotify` on the *parent directories* of resolved instances, filtered by file name. WoW may replace the file on save (it keeps `.bak` copies), which breaks file-level watches. Debounce until writes settle (proposed 2 s). Re-resolve globs at start and periodically (proposed every 5 min) to pick up new flavor folders and accounts. Also watch the folder that holds a glob's last wildcard folder segment (for BG1's `save/*/BALDUR.gam`, the `save/` folder), and re-resolve that glob when an entry there is created or renamed. A new save folder is then uploaded after the debounce, not at the next periodic pass, and so is a save folder the game deletes and writes again (RED-373 review).
 - **Upload:** §8.3. **Offline:** keep only the latest pending upload per source instance, never a backlog.
 - **Errors:** show each distinct error message once per instance, not on every upload.
 - **Adapter install/update:** after login, at each start, and on the same periodic timer as glob re-resolution, fetch manifests and adapters for enabled kits from the platform (§8.2; interpreters stay server-side). Update when the platform's version is newer; never downgrade.
@@ -849,7 +851,7 @@ Getting agent messages *into* the game UI. The design is recorded here so it isn
 | D10 | Review Blizzard's UI Add-On Development Policy against a paid hosted tier fed by a free addon | P9 | **Decided 2026-09-24 (RED-341):** keep the paid tier (§14), with the addon the same for every tier. No inquiry to Blizzard: the free tier still gives use of the service, with lower limits. The research is in RED-341. |
 | D11 | License layout: a `LICENSE` per directory (AGPL `platform/`, MIT elsewhere) plus a root note, or one license for the repo; confirm the DCO | P0 | **Decided 2026-09-24 (RED-280):** a `LICENSE` per directory (AGPL-3.0-or-later `platform/`, MIT elsewhere) plus a root note, with a DCO (§5). Community kits build on an MIT SDK. |
 | D12 | MCP transport: stateless or stateful (§9) | P6 | **Decided 2026-09-24 (RED-324):** stateless (§9). It survives deploys and multiple replicas with nothing extra, and §10.2 already assumes a new chat for tool-list changes. Cost: no `list_changed` and no MCP session IDs, so visits group by gap (§16). Stateful needs session state outside the process and a reconnect story. |
-| D13 | BG1: how the kit turns the save's codes into readable text (§6.6.3) | P12 | **Decided 2026-09-27 (RED-373):** name tables extracted from the game and bundled in `kits/bg1/data/`, including the journal text. The interpreter looks the codes up on the server at parse time, and the bridge uploads the save unchanged. English only. The text is Beamdog's, and a `NOTICE` says the repo's licenses don't cover it (§5). Rejected: codes only (journal entries can't be looked up on the web); names without the journal text (the agent can't tell which step of a quest the player reached); and uploading the player's own `dialog.tlk` (other languages exceed the 5 MB cap, and item names would still be missing). An in-game exporter isn't possible: the game's Lua has no file I/O, and EEex, which adds it, runs only on Windows. |
+| D13 | BG1: how the kit turns the save's codes into readable text (§6.6.3) | P12 | **Decided 2026-09-27 (RED-373):** name tables extracted from the game and bundled in `kits/bg1/data/`, including the journal text. The interpreter looks the codes up on the server at parse time, and the bridge uploads the save unchanged. English only. The text is Beamdog's, and a `NOTICE` says the repo's licenses don't cover it (§5). No review of Beamdog's terms was done; the owner accepted publishing the text. Once merged, it stays in the public git history and ships in the self-host image (§13.3). Rejected: codes only (journal entries can't be looked up on the web); names without the journal text (the agent can't tell which step of a quest the player reached); and uploading the player's own `dialog.tlk` (other languages exceed the 5 MB cap, and item names would still be missing). An in-game exporter isn't possible: the game's Lua has no file I/O, and EEex, which adds it, runs only on Windows. |
 
 ### 19.2 Parked (non-blocking)
 
