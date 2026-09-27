@@ -60,7 +60,7 @@ export function GetStarted() {
       ) : (
         <ol className="og-cards og-steps">
           <Step title="Choose your games" done={progress.games}>
-            <p>Enable the games you play. The bridge installs the addon for each one.</p>
+            <p>Enable the games you play. The bridge installs the addon of each game that uses one, such as World of Warcraft.</p>
             <p>
               <Link to="/games">Choose your games</Link>
             </p>

@@ -40,7 +40,7 @@ const DESCRIPTION = [
 
 /** The setup steps, for when no enabled game has a snapshot. In the Get started page's order (§13.2). */
 export const SETUP_STEPS: readonly string[] = [
-  "Enable the game on the Games page of the Ogre MCP website. The bridge installs a game's addon only when the game is enabled.",
+  "Enable the game on the Games page of the Ogre MCP website. For a game that uses an addon, such as World of Warcraft, the bridge installs it only when the game is enabled.",
   "Install the Ogre MCP bridge on the computer that runs the game, from the Get started page of the website.",
   "Approve the bridge on the website, with the code the bridge shows.",
   "Send the game's state. In World of Warcraft, type /transmit; if WoW was running when the bridge installed the addon, restart WoW first. In Baldur's Gate: Enhanced Edition, save the game; a quick-save is fastest.",

@@ -61,12 +61,16 @@ export function Privacy() {
       <h2>What the bridge reads from Baldur's Gate: Enhanced Edition</h2>
       <p>
         The game keeps its saves in its folder in Documents. Each time you save, the bridge sends that save's <code>BALDUR.gam</code>{" "}
-        file. On its first run, it sends the file of each save already there. It reads nothing else in the save folders: no screenshots,
-        portraits, or other files. The service stores the file and reads from it:
+        file. Each time the bridge starts, it sends the file of every save in the folder, and the service does not store a file it
+        already has. The bridge reads nothing else in the save folders: no screenshots, portraits, or other files. The service stores
+        the file and reads from it:
       </p>
       <ul>
         <li>The protagonist's name.</li>
-        <li>The party: each member's name, class, race, level, experience, hit points, ability scores, and spells.</li>
+        <li>
+          The party: each member's name, class, kit, race, alignment, gender, level, experience, hit points, ability scores, base THAC0,
+          saving throws, thief skills, status (such as dead), and memorized spells.
+        </li>
         <li>Each member's equipped and carried items.</li>
         <li>The journal: the quests and entries the game has shown you.</li>
         <li>The chapter, the game's day and hour, the party's gold and reputation, and the current area.</li>
