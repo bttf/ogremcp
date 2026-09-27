@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -65,6 +65,13 @@ function eraFixture(): Buffer {
 }
 
 const INSTANCE = sha256("_classic_era_/WTF/Account/TEST/SavedVariables/OgreMCP.lua");
+
+/** The BG1 kit's chapter 4 save (§6.6.5), in the kit's folder: BG1 has no adapter folder, only its path. */
+function bg1Fixture(): Buffer {
+  const bg1 = KIT_SOURCES.find((source) => source.package === "@ogremcp/kit-bg1");
+  if (bg1 === undefined) throw new Error("no bg1 kit");
+  return readFileSync(join(dirname(bg1.adapterDir), "fixtures/chapter4/BALDUR.gam"));
+}
 
 /** An upload of `text`: its gzip and its §8.3 meta, with `meta` over the defaults. */
 function upload(text: string | Buffer, meta: Partial<IngestMeta> = {}): { gz: Buffer; meta: IngestMeta } {
@@ -305,6 +312,84 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("POST /api/v1/ingest (§8.3)", 
       character_realm: "Test Realm",
       snapshot_at: new Date(1_790_341_553 * 1000),
       state: { location: { zone: "Redridge Mountains" } },
+    });
+  });
+
+  /**
+   * The `structuredContent` of an MCP `tools/call` of `name` by an agent with
+   * `accessToken`. By node:http, because fetch sends its own Host, and `/mcp`
+   * answers only ISSUER's host.
+   */
+  async function callTool(accessToken: string, name: string, args: unknown): Promise<Record<string, unknown>> {
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+    const text = await new Promise<string>((resolve, reject) => {
+      const req = request(
+        `${base}/mcp`,
+        {
+          method: "POST",
+          headers: {
+            host: new URL(ISSUER).host,
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+          },
+        },
+        (res) => {
+          let data = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => (data += chunk));
+          res.on("end", () => resolve(data));
+        },
+      );
+      req.on("error", reject);
+      req.end(body);
+    });
+    const { result } = JSON.parse(text) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } };
+    expect(result.isError).toBeUndefined();
+    return result.structuredContent;
+  }
+
+  it("stores a BG1 save, which bg1_get_state returns and list_games shows without a realm (§6.2, §6.6, §10.3)", async () => {
+    const user = await newUser();
+    const { accessToken } = await token(user);
+    const save = upload(bg1Fixture(), { kit: "bg1", source_id: "gam", instance: sha256("save/000000001-Quick-Save-2/BALDUR.gam") });
+    const stored = await post(accessToken, save);
+    expect(stored.res.status).toBe(201);
+    // The save holds no time, so snapshot_at is the file's mtime (§6.6.1).
+    const snapshotAt = new Date("2026-09-24T18:02:11Z");
+    const { rows } = await pool.query(
+      "select kit, flavor, rules, character_key, character_name, character_realm, snapshot_at from snapshots where uuid = $1",
+      [stored.body?.snapshot_uuid],
+    );
+    expect(rows).toEqual([
+      { kit: "bg1", flavor: "bgee", rules: [], character_key: "Buhldozier", character_name: "Buhldozier", character_realm: "", snapshot_at: snapshotAt },
+    ]);
+
+    await pool.query("insert into user_games (user_id, kit) values ($1, 'bg1')", [user.id]);
+    const agent = (await token(user, "read")).accessToken;
+    const state = await callTool(agent, "bg1_get_state", { character: "buhldozier" });
+    expect(state).toMatchObject({
+      snapshot_at: snapshotAt.toISOString(),
+      flavor: "bgee",
+      rules: [],
+      character: { name: "Buhldozier" },
+      state: { game: { chapter: 4 } },
+      grounding: expect.any(String),
+    });
+    expect(Object.keys(state["state"] as object)).toEqual(["game", "party", "inventory", "quests", "former_party"]);
+
+    expect(await callTool(agent, "list_games", {})).toEqual({
+      games: [
+        {
+          game: "bg1",
+          name: "Baldur's Gate: Enhanced Edition",
+          active_flavor: "bgee",
+          snapshot_at: snapshotAt.toISOString(),
+          characters: [{ name: "Buhldozier", flavor: "bgee", snapshot_at: snapshotAt.toISOString() }],
+        },
+      ],
+      last_active: { game: "bg1", flavor: "bgee", snapshot_at: snapshotAt.toISOString() },
     });
   });
 

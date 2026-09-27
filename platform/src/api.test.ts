@@ -182,7 +182,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
     const rows = async () =>
       (await pool.query("select u.uuid, g.kit from user_games g join users u on u.id = g.user_id order by g.id")).rows;
 
-    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: false }] });
+    const bg1 = { kit: "bg1", name: "Baldur's Gate: Enhanced Edition", enabled: false };
+    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: false }, bg1] });
 
     // Without this site's Origin, nothing changes.
     const crossSite = await fetch(`${url}/wow`, { method: "PUT", headers: { cookie: user.cookie } });
@@ -195,13 +196,13 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("against Postgres", () => {
     expect(await enable.json()).toEqual({ kit: "wow", name: "World of Warcraft", enabled: true });
     expect((await fetch(`${url}/wow`, { method: "PUT", headers })).status).toBe(200);
     expect(await rows()).toEqual([{ uuid: user.uuid, kit: "wow" }]);
-    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: true }] });
+    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: true }, bg1] });
 
     const disable = await fetch(`${url}/wow`, { method: "DELETE", headers });
     expect(disable.status).toBe(200);
     expect(await disable.json()).toEqual({ kit: "wow", name: "World of Warcraft", enabled: false });
     expect(await rows()).toEqual([]);
-    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: false }] });
+    expect(await list()).toEqual({ games: [{ kit: "wow", name: "World of Warcraft", enabled: false }, bg1] });
   });
 
   it("the Games API answers 404 for a kit the registry does not hold", async () => {

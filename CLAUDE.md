@@ -32,13 +32,14 @@ cannot see this one.
 |---|---|---|
 | `packages/sdk/` | `@ogremcp/sdk`. Manifest schema, `Interpreter` interface, shared types. Depends on nothing. | MIT |
 | `kits/wow/` | `@ogremcp/kit-wow`. `adapter/` (Lua addon), `interpreter/` (TS), `manifest.json`, `fixtures/`. Depends on `@ogremcp/sdk` only. | MIT |
+| `kits/bg1/` | `@ogremcp/kit-bg1`. Baldur's Gate: Enhanced Edition. `interpreter/` (TS), `data/` (name tables), `scripts/` (table extraction), `manifest.json`, `fixtures/`. No adapter. Depends on `@ogremcp/sdk` only. | MIT, except `kits/bg1/data/`: Beamdog's text, which no license of ours covers (`kits/bg1/data/NOTICE`) |
 | `platform/` | `@ogremcp/platform`. Node service: web UI, MCP server, bridge API, OAuth server. Depends on `@ogremcp/sdk`, and on kits only through the `Interpreter` interface. | AGPL-3.0-or-later |
 | `bridge/` | Go module `github.com/bttf/ogremcp/bridge`. Knows only manifest JSON and the HTTP API. | MIT |
 | `docs/` | `architecture.md` and process docs. | MIT |
 
-`packages/sdk`, `kits/wow`, and `platform` are pnpm workspace packages.
-`bridge/` is a standalone Go module. Files outside the four package paths are
-MIT (root `LICENSE`).
+`packages/sdk`, `kits/wow`, `kits/bg1`, and `platform` are pnpm workspace
+packages. `bridge/` is a standalone Go module. Files outside the package paths
+are MIT (root `LICENSE`).
 
 ## Package seams (§5)
 
