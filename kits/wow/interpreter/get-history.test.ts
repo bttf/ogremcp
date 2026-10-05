@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@ogremcp/sdk";
 import { beforeAll, expect, it, vi } from "vitest";
 import { DEFAULT_HISTORY_LIMIT } from "./get-history.js";
-import { FLIGHT_POINTS_RULE, QUEST_TURN_INS_RULE } from "./get-state.js";
+import { AUCTION_PRICES_RULE, FLIGHT_POINTS_RULE, QUEST_TURN_INS_RULE } from "./get-state.js";
 import { interpreter, type WowState } from "./index.js";
 import { SECTIONS } from "./sections.js";
 
@@ -80,6 +80,14 @@ it("is described as §10.1 and §10.5 ask, and is paid only (§14)", () => {
   expect(tool?.inputSchema.properties?.["sections"]?.["items"]).toEqual({ type: "string", enum: [...SECTIONS] });
   expect(tool?.description).toContain(FLIGHT_POINTS_RULE);
   expect(tool?.description).toContain(QUEST_TURN_INS_RULE);
+  expect(tool?.description).toContain(AUCTION_PRICES_RULE);
+});
+
+it("carries a bag item's `ah` in the inventory section, and none without a price (§10.4)", async () => {
+  const data = content((await call({ since: "2026-09-24", sections: ["inventory"] }, eraHistory(1))).result);
+  const { items } = data.snapshots[0]?.state["inventory"] as { items: { ah?: unknown }[] };
+
+  expect(items.map((item) => item.ah)).toEqual([{ price_copper: 12, age_days: 3, exact: true, source: "auctionator" }, undefined]);
 });
 
 it("returns the snapshots newest first under the newest one's envelope, with character and location by default", async () => {

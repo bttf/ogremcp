@@ -801,6 +801,54 @@ local function InstallStubs()
 			w.calls.cReload = w.calls.cReload + 1
 		end,
 	} or nil
+
+	-- The Auctionator addon, when the world has it: w.auctionator is
+	--   { ready = boolean, links = { [link] = { price, age, exact } },
+	--     idAges = { [itemID] = days }, broken = true or nil, noApi = true or nil }
+	-- The stub follows Auctionator.API.v1 of version 284. A caller ID that is
+	-- not a non-empty string raises, and so does an argument of the wrong
+	-- type. Until the database is set up (ready), a function returns nil, or
+	-- false for the exact check. broken makes every function raise. noApi
+	-- leaves a global named Auctionator that has no API table.
+	local a = w.auctionator
+	local function AuctionatorApi(argType, unready, read)
+		return function(callerID, arg)
+			if a.broken then
+				error("synthetic Auctionator failure")
+			end
+			if type(callerID) ~= "string" or callerID == "" then
+				error("Invalid callerID. Use the name of your add-on.")
+			end
+			if type(arg) ~= argType then
+				error("Contact the maintainer of " .. callerID .. " to resolve this problem.")
+			end
+			a.callerID = callerID
+			if not a.ready then
+				return unready
+			end
+			return read(arg)
+		end
+	end
+	local function OfLink(field)
+		return function(link)
+			local entry = a.links[link]
+			return entry and entry[field]
+		end
+	end
+	G.Auctionator = a and {
+		API = not a.noApi and {
+			v1 = {
+				GetAuctionPriceByItemLink = AuctionatorApi("string", nil, OfLink("price")),
+				GetAuctionAgeByItemLink = AuctionatorApi("string", nil, OfLink("age")),
+				GetAuctionAgeByItemID = AuctionatorApi("number", nil, function(itemID)
+					return a.idAges[itemID]
+				end),
+				IsAuctionDataExactByItemLink = AuctionatorApi("string", false, function(link)
+					return OfLink("exact")(link) == true
+				end),
+			},
+		} or nil,
+	} or nil
 end
 
 -- Start builds a fresh world, applies setup, runs saved (SavedVariables text
@@ -871,6 +919,13 @@ for _, client in ipairs({ "forever", "era" }) do
 		local setup = client == "era" and Era(function(w)
 			-- A name with multi-byte UTF-8, which must survive the file.
 			w.char.name = "Zo\195\171la"
+			-- Auctionator, with a price for the bread and none for the hide.
+			-- The forever world has no Auctionator.
+			w.auctionator = {
+				ready = true,
+				links = { [Link(2000, "Test Bread")] = { price = 12, age = 3, exact = true } },
+				idAges = {},
+			}
 		end) or nil
 		-- The file of an earlier session, from another character. None of it
 		-- is carried over.
@@ -952,6 +1007,14 @@ for _, client in ipairs({ "forever", "era" }) do
 		eq(inventory.items[1].count, 6, "count")
 		eq(inventory.items[1].sell_price, 1, "sell_price")
 		eq(inventory.items_pending, 0, "items_pending")
+		local ah = inventory.items[1].ah
+		if era then
+			eq(Keys(ah), "age_days,exact,price_copper,source", "ah of a priced bag item")
+			eq(ah.price_copper, 12, "ah price_copper")
+		else
+			eq(ah, nil, "no ah without Auctionator")
+		end
+		eq(inventory.items[2].ah, nil, "no ah without a price")
 		eq(Equipped(db, "HeadSlot").stats.armor, 41, "armor")
 		eq(Equipped(db, "HeadSlot").equip_loc, "INVTYPE_HEAD", "equip_loc")
 		local weapon = Equipped(db, "MainHandSlot").stats
@@ -1182,6 +1245,96 @@ test("location takes the zone above a micro map, and the zone text on a continen
 	eq(ns.CollectLocation().zone, "Test Forest", "the zone of a micro map")
 	world.loc.mapID, world.loc.zone = 1415, "Test Sea"
 	eq(ns.CollectLocation().zone, "Test Sea", "the zone text on a continent map")
+end)
+
+test("a bag item carries its Auctionator price, and none when bound, unpriced, or Auctionator fails", function()
+	local bread, hide, cap = Link(2000, "Test Bread"), Link(2001, "Test Hide"), Link(3000, "Test Cap")
+	-- A cloak with a random suffix, the seventh field of the item string.
+	local cloak = "|cff1eff00|Hitem:4000::::::1179::12:::::|h[Test Cloak of the Bear]|h|r"
+	-- Session runs one session in a Classic Era world whose Auctionator is
+	-- the result of change applied to a working one, or is missing when
+	-- change is false. It returns the bag items by item ID.
+	local function Session(change)
+		Start(Era(function(w)
+			w.bags[0].slots[6].isBound = true
+			w.bags[0].slots[7] = { itemID = 4000, hyperlink = cloak, stackCount = 1, isBound = false }
+			w.bags[0].slots[8] = { itemID = 2002, hyperlink = Link(2002, "Test Ore"), stackCount = 1 }
+			w.items[cloak] = {
+				info = { name = "Test Cloak of the Bear", quality = 2, itemLevel = 20, minLevel = 15, type = "Armor",
+					subType = "Cloth", equipLoc = "INVTYPE_CLOAK", sellPrice = 500 },
+				stats = { RESISTANCE0_NAME = 15 },
+			}
+			if change == false then
+				return
+			end
+			w.auctionator = {
+				ready = true,
+				links = {
+					[bread] = { price = 12, age = 3, exact = true },
+					-- Bound in the bags: no price, though Auctionator has one.
+					[hide] = { price = 40, age = 0, exact = true },
+					-- Equipped: no price either.
+					[cap] = { price = 900, age = 1, exact = true },
+					-- The item-ID fallback: a price, no link age, not exact.
+					[cloak] = { price = 2500, exact = false },
+					-- Not a whole number of copper.
+					[Link(2002, "Test Ore")] = { price = 12.5, age = 1, exact = true },
+				},
+				idAges = { [4000] = 5 },
+			}
+			if change then
+				change(w.auctionator)
+			end
+		end))
+		EnterWorld()
+		local db = Logout()
+		eq(#world.chat, 0, "nothing printed")
+		eq(Equipped(db, "HeadSlot").ah, nil, "no ah on an equipped item")
+		local byID = {}
+		for _, item in ipairs(db.state.inventory.items) do
+			byID[item.item_id] = item
+		end
+		eq(byID[2000].count, 6, "the inventory is collected")
+		return byID
+	end
+
+	local items = Session()
+	eq(world.auctionator.callerID, "OgreMCP", "caller ID")
+	local ah = items[2000].ah
+	eq(Keys(ah), "age_days,exact,price_copper,source", "ah keys")
+	eq(ah.price_copper, 12, "price_copper")
+	eq(ah.age_days, 3, "age_days")
+	eq(ah.exact, true, "exact")
+	eq(ah.source, "auctionator", "source")
+	eq(items[2001].ah, nil, "no ah on a bound item")
+	eq(items[2002].ah, nil, "no ah for a price out of range")
+	ah = items[4000].ah
+	eq(ah.price_copper, 2500, "fallback price_copper")
+	eq(ah.age_days, 5, "age_days from the item ID when the link has none")
+	eq(ah.exact, false, "a fallback price is not exact")
+
+	-- A price with no age at all keeps the price.
+	items = Session(function(a)
+		a.idAges = {}
+	end)
+	eq(Keys(items[4000].ah), "exact,price_copper,source", "ah without an age")
+
+	for label, change in pairs({
+		["Auctionator missing"] = false,
+		["Auctionator not set up yet"] = function(a)
+			a.ready = false
+		end,
+		["every Auctionator call raises"] = function(a)
+			a.broken = true
+		end,
+		["an Auctionator global without the API"] = function(a)
+			a.noApi = true
+		end,
+	}) do
+		items = Session(change)
+		eq(items[2000].ah, nil, label .. ": no ah")
+		eq(items[4000].ah, nil, label .. ": no ah on gear")
+	end
 end)
 
 test("/transmit reloads the UI and is the only command", function()

@@ -29,10 +29,17 @@ export const QUEST_TURN_INS_RULE =
   "When routing, turn in every completed quest whose turn-in NPC is on the way or at a stop, before any other step there. Turn-ins often unlock the next quest. Search the web for turn-in locations; the state doesn't include them.";
 
 /**
+ * The auction price sentence of both WoW tools' descriptions (§10.4, owner
+ * request 2026-10-05, RED-413).
+ */
+export const AUCTION_PRICES_RULE =
+  "Bag items' `ah` prices come from the player's last Auctionator scan and may be stale: check `age_days`.";
+
+/**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the flight-point and quest turn-in rules and the §10.5
- * behavior rules that act on game state (`stateRules`). Game text never goes
- * here, only into results (§10.5).
+ * the game and carries the flight-point and quest turn-in rules, the auction
+ * price sentence, and the §10.5 behavior rules that act on game state
+ * (`stateRules`). Game text never goes here, only into results (§10.5).
  */
 export function describeGetState(experimental: readonly string[]): string {
   return [
@@ -41,6 +48,7 @@ export function describeGetState(experimental: readonly string[]): string {
     "The result carries `snapshot_at` (when the game captured the state; /transmit in game saves a new snapshot), `flavor`, the realm's `rules`, and `character`.",
     FLIGHT_POINTS_RULE,
     QUEST_TURN_INS_RULE,
+    AUCTION_PRICES_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }

@@ -41,6 +41,7 @@ local ReadTable = ns.ReadTable
 local Api = ns.Api
 local NameFromLink = ns.NameFromLink
 local InCombat = ns.InCombat
+local AuctionPrice = ns.AuctionPrice
 
 -- The item APIs, each list in order of preference. The first form the client
 -- has is used. Adjust these lists when a probe shows another form
@@ -460,6 +461,10 @@ local function CollectInventory()
 						ApplyItemDetails(item, details)
 						-- The container gives the quality without the item cache.
 						item.quality = item.quality or ReadInteger(PlainField(info, "quality"), 0, 10)
+						-- The auction price (AuctionPrices.lua), read at each
+						-- collection and not cached: a scan changes it. The
+						-- item's first slot gives the link and the bound state.
+						item.ah = AuctionPrice(link, itemID, PlainField(info, "isBound"))
 						byKey[key] = item
 						items[#items + 1] = item
 					end
