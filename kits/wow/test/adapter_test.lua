@@ -170,6 +170,13 @@ local function Link(id, name)
 	return "|cffffffff|Hitem:" .. id .. "::::::::12:::::|h[" .. name .. "]|h|r"
 end
 
+-- GearLink is a link as Classic Era writes it, with an enchant ID, a suffix
+-- ID, and a unique ID. A field without a value is empty.
+local function GearLink(id, name, enchant, suffix, unique)
+	return "|cff1eff00|Hitem:" .. id .. ":" .. (enchant or "") .. ":::::" .. (suffix or "") .. ":" .. (unique or "")
+		.. ":12:::::::::|h[" .. name .. "]|h|r"
+end
+
 local SLOT_IDS = {
 	HeadSlot = 1, NeckSlot = 2, ShoulderSlot = 3, ShirtSlot = 4, ChestSlot = 5,
 	WaistSlot = 6, LegsSlot = 7, FeetSlot = 8, WristSlot = 9, HandsSlot = 10,
@@ -982,6 +989,98 @@ test("a part that fails at logout keeps its last polled value", function()
 	eq(db.character.name, "Grimble", "character key from the last poll")
 	eq(db.state.location.x, 0.25, "location read at logout")
 	eq(db.client.season_id, 3, "season_id")
+end)
+
+test("era: suffix and enchant text come from tooltip comparisons, out of combat (§6.3)", function()
+	-- A chest with a random suffix in the bags, an equipped chest with an armor
+	-- kit, an equipped weapon with an enchant, and a plain weapon in the bags.
+	local vest = GearLink(3100, "Test Vest of the Bear", nil, 1179, 7001)
+	local jerkin = GearLink(3101, "Test Jerkin", 16, nil, 7002)
+	local blade = GearLink(3102, "Test Blade", 1900, nil, 7003)
+	local axe = Link(3103, "Test Axe")
+	Start(Era(function(w)
+		w.bags[0].slots[7] = { itemID = 3100, hyperlink = vest, stackCount = 1 }
+		w.bags[0].slots[8] = { itemID = 3103, hyperlink = axe, stackCount = 1 }
+		w.gear = {
+			ChestSlot = { id = 3101, link = jerkin },
+			MainHandSlot = { id = 3102, link = blade },
+		}
+		local function chest(name)
+			return { name = name, quality = 2, itemLevel = 20, minLevel = 10, type = "Armor", subType = "Leather",
+				equipLoc = "INVTYPE_CHEST", sellPrice = 500 }
+		end
+		local function sword(name)
+			return { name = name, quality = 2, itemLevel = 20, minLevel = 10, type = "Weapon",
+				subType = "One-Handed Swords", equipLoc = "INVTYPE_WEAPON", sellPrice = 900 }
+		end
+		-- The stats API gives the base stats on a full link.
+		w.items[vest] = {
+			info = chest("Test Vest of the Bear"),
+			stats = { RESISTANCE0_NAME = 110 },
+			tooltip = {
+				{ "Test Vest of the Bear" }, { "Chest", "Leather" }, { "110 Armor" }, { "+2 Stamina" }, { "+2 Strength" },
+				{ "Durability 70 / 70" },
+			},
+		}
+		w.items[jerkin] = {
+			info = chest("Test Jerkin"),
+			stats = { RESISTANCE0_NAME = 100 },
+			tooltip = {
+				{ "Test Jerkin" }, { "Chest", "Leather" }, { "100 Armor" }, { "Reinforced Armor +16" }, { "Durability 70 / 70" },
+			},
+		}
+		w.items[blade] = {
+			info = sword("Test Blade"),
+			stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 12.5 },
+			tooltip = { { "Test Blade" }, { "One-Hand", "Sword" }, { "20 - 30 Damage", "Speed 2.00" }, { "Crusader" } },
+		}
+		w.items[axe] = {
+			info = sword("Test Axe"),
+			stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 15 },
+			tooltip = { { "Test Axe" }, { "One-Hand", "Axe" }, { "24 - 36 Damage", "Speed 2.00" } },
+		}
+		-- The tooltips of the links without the suffix ID or the enchant ID.
+		w.items[GearLink(3100, "Test Vest of the Bear", nil, nil, 7001)] = {
+			tooltip = {
+				{ "Test Vest" }, { "Chest", "Leather" }, { "110 Armor" }, { "Durability 70 / 70" }, { "<Random enchantment>" },
+			},
+		}
+		w.items[GearLink(3101, "Test Jerkin", nil, nil, 7002)] = {
+			tooltip = { { "Test Jerkin" }, { "Chest", "Leather" }, { "100 Armor" }, { "Durability 70 / 70" } },
+		}
+		w.items[GearLink(3102, "Test Blade", nil, nil, 7003)] = {
+			tooltip = { { "Test Blade" }, { "One-Hand", "Sword" }, { "20 - 30 Damage", "Speed 2.00" } },
+		}
+		w.state.lockdown = true
+	end))
+	EnterWorld()
+
+	-- In combat no tooltip is read. The three links with a suffix or an enchant
+	-- count as pending; the plain weapon does not.
+	local db = Logout()
+	eq(db.state.inventory.items_pending, 3, "items_pending in combat")
+	eq(Equipped(db, "ChestSlot").link, jerkin, "the link is stored without a tooltip read")
+	eq(Equipped(db, "ChestSlot").enchant_text, nil, "no enchant text in combat")
+
+	world.state.lockdown = false
+	Fire("PLAYER_REGEN_ENABLED")
+	Advance(2)
+	db = Logout("items")
+	local inventory = db.state.inventory
+	eq(inventory.items_pending, 0, "items_pending after combat")
+	eq(inventory.items[1].link, Link(2000, "Test Bread"), "the link of an item that cannot be equipped")
+	local bagVest = inventory.items[3]
+	eq(bagVest.link, vest, "bag item link")
+	eq(table.concat(bagVest.suffix_text, ","), "+2 Stamina,+2 Strength", "suffix_text")
+	eq(bagVest.enchant_text, nil, "no enchant on the vest")
+	eq(Keys(bagVest.stats), "armor", "stats stay the base stats")
+	eq(Equipped(db, "ChestSlot").enchant_text, "Reinforced Armor +16", "enchant_text of the armor kit")
+	eq(Equipped(db, "ChestSlot").suffix_text, nil, "no suffix on the jerkin")
+	local weapon = Equipped(db, "MainHandSlot")
+	eq(weapon.enchant_text, "Crusader", "enchant_text of the weapon")
+	eq(weapon.stats.max_damage, 30, "the same read gives the weapon's damage")
+	eq(inventory.items[4].suffix_text, nil, "a plain link has no text")
+	eq(inventory.items[4].stats.speed, 2, "the plain weapon's speed")
 end)
 
 test("raw values: a collapsed quest header sets quests.partial, and a level above 60 is kept", function()

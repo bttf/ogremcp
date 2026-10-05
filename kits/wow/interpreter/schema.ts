@@ -11,8 +11,9 @@
 // The screenshot schema is dropped (D3).
 //
 // Lua has no null: a nil field is an absent key. Every field the client can
-// report as nil is `nilable`, which reads an absent key as null. zod drops the
-// keys a schema does not name, so a field a newer adapter adds is ignored.
+// report as nil is `nilable`, which reads an absent key as null. The item
+// fields added in adapter 0.4.0 are optional instead. zod drops the keys a
+// schema does not name, so a field a newer adapter adds is ignored.
 // The parsed state holds only strings, finite numbers, booleans, null, arrays,
 // and plain objects, so it is JSON-serializable (§11 stores it as jsonb).
 
@@ -193,6 +194,12 @@ export const ITEM_STATS_KEY_MAX_LENGTH = 40;
 export const ITEM_STAT_MAX = 1_000_000;
 /** Longest `equip_loc`, `type`, and `sub_type`. */
 export const ITEM_TEXT_MAX_LENGTH = 60;
+/** Longest `link`. A Classic Era item link is about 100 bytes. */
+export const ITEM_LINK_MAX_LENGTH = 400;
+/** Longest line of `suffix_text`, and longest `enchant_text`. */
+export const ITEM_TOOLTIP_TEXT_MAX_LENGTH = 120;
+/** Most lines of `suffix_text`. */
+export const ITEM_SUFFIX_MAX_LINES = 8;
 
 /**
  * Stats of one item, numbers only. The adapter normalises the client's keys:
@@ -231,30 +238,98 @@ const itemDetailShape = {
   sub_type: nilable(z.string().max(ITEM_TEXT_MAX_LENGTH)),
   /** Vendor price of one item, in copper. */
   sell_price: nilable(z.number().int().min(0).max(2_147_483_647)),
+  /**
+   * The base item's stats: `GetItemStats` leaves out a random suffix and an
+   * enchant, on a full link too (§6.3).
+   */
   stats: nilable(itemStatsSchema),
+  // The three fields below are absent from the files of adapters before 0.4.0
+  // and from the snapshots stored from them, so they are optional and an
+  // absent key stays absent.
+  /**
+   * The client's full item link (§6.3), such as
+   * `|cff1eff00|Hitem:9786::::::1179:1234567890:25:::::::::|h[Raider's Cloak of the Bear]|h|r`.
+   */
+  link: z.string().min(1).max(ITEM_LINK_MAX_LENGTH).nullish(),
+  /**
+   * The tooltip lines of the link's random suffix, such as "+2 Stamina" and
+   * "+2 Strength". Absent when the link has no suffix ID or the adapter has
+   * not read the lines yet.
+   */
+  suffix_text: list(z.string().min(1).max(ITEM_TOOLTIP_TEXT_MAX_LENGTH))
+    .refine((lines) => lines.length <= ITEM_SUFFIX_MAX_LINES, { message: `at most ${ITEM_SUFFIX_MAX_LINES} suffix lines` })
+    .nullish(),
+  /**
+   * The tooltip line of the link's enchant, such as "Reinforced Armor +16".
+   * Absent when the link has no enchant ID or the adapter has not read the
+   * line yet.
+   */
+  enchant_text: z.string().min(1).max(ITEM_TOOLTIP_TEXT_MAX_LENGTH).nullish(),
 };
+
+/** The IDs an item link carries beside the item ID (§10.4). 0 is none. */
+export interface LinkIds {
+  enchant_id: number;
+  /** The ID of the random suffix. Negative in the clients that scale a suffix by the unique ID. */
+  suffix_id: number;
+  unique_id: number;
+}
+
+/**
+ * The enchant ID, suffix ID, and unique ID of an item link: fields 2, 7, and
+ * 8 of its item string, where field 1 is the item ID (§10.4). An empty or
+ * missing field is 0. Null when the link holds no item string, or one of the
+ * three fields is not a whole number.
+ */
+function parseItemLink(link: string): LinkIds | null {
+  const fields = /\|Hitem:([^|]*)\|h/.exec(link)?.[1]?.split(":");
+  if (fields === undefined) return null;
+  const id = (field: number): number | null => {
+    const text = fields[field - 1] ?? "";
+    if (text === "") return 0;
+    // `|| 0` turns "-0" into 0.
+    return /^-?\d{1,15}$/.test(text) ? Number(text) || 0 : null;
+  };
+  const [enchant_id, suffix_id, unique_id] = [id(2), id(7), id(8)];
+  if (enchant_id === null || suffix_id === null || unique_id === null) return null;
+  return { enchant_id, suffix_id, unique_id };
+}
+
+/**
+ * The item with the IDs of its link, which the snapshot keeps beside `link`
+ * (§10.4). An item without a link, or with a link that `parseItemLink` does
+ * not read, gets none.
+ */
+function withLinkIds<T extends { link?: string | null | undefined }>(item: T): T & Partial<LinkIds> {
+  const ids = item.link ? parseItemLink(item.link) : null;
+  return ids === null ? item : { ...item, ...ids };
+}
 
 /**
  * Every stack of one item across the backpack and bags, summed. Items that
  * can be equipped are summed per item link, because two items with one ID can
  * differ in their random suffix and so in their stats.
  */
-export const bagItemSchema = z.object({
-  item_id: nilable(z.number().int().positive()),
-  name: nilable(z.string()),
-  /** Null when the stack size of any contributing slot was unreadable. */
-  count: nilable(z.number().int().positive()),
-  ...itemDetailShape,
-});
+export const bagItemSchema = z
+  .object({
+    item_id: nilable(z.number().int().positive()),
+    name: nilable(z.string()),
+    /** Null when the stack size of any contributing slot was unreadable. */
+    count: nilable(z.number().int().positive()),
+    ...itemDetailShape,
+  })
+  .transform(withLinkIds);
 
 /** One filled equipment slot. Empty slots are left out. */
-export const equippedItemSchema = z.object({
-  /** Inventory slot name as passed to `GetInventorySlotInfo`, e.g. "HeadSlot". */
-  slot: z.string().min(1),
-  item_id: nilable(z.number().int().positive()),
-  name: nilable(z.string()),
-  ...itemDetailShape,
-});
+export const equippedItemSchema = z
+  .object({
+    /** Inventory slot name as passed to `GetInventorySlotInfo`, e.g. "HeadSlot". */
+    slot: z.string().min(1),
+    item_id: nilable(z.number().int().positive()),
+    name: nilable(z.string()),
+    ...itemDetailShape,
+  })
+  .transform(withLinkIds);
 
 /** Largest `inventory.items_pending`. */
 export const ITEMS_PENDING_MAX = 1000;
@@ -266,8 +341,9 @@ export const inventorySchema = z.object({
    * Distinct item links in the bags and the equipment whose details the
    * adapter did not read: the client had not cached the item yet (right after
    * login), the read failed, or the client has no item info API. Such an item
-   * has no `equip_loc`, so a consumer cannot tell which slot it fits. While
-   * this is above 0 a gear comparison is incomplete.
+   * has no `equip_loc`, so a consumer cannot tell which slot it fits. From
+   * adapter 0.4.0 it also counts a link whose suffix or enchant text is not
+   * read yet (§6.3). While this is above 0 a gear comparison is incomplete.
    */
   items_pending: nilable(z.number().int().min(0).max(ITEMS_PENDING_MAX)),
 });

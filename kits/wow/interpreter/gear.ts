@@ -5,12 +5,10 @@
 // Adapted from bttf/wow-guide@df80260:cloud/src/mcpTools.ts (GEAR_MEASURES to
 // summariseGear), without the detail levels (§10.5) and the text rendering.
 // Item fields are the snapshot's snake_case ones, and the item level measure
-// is `item_level`.
-import type { WowState } from "./schema.js";
+// is `item_level`. The items are the built ones (items.ts): their `stats`
+// include the suffix stats, and an enchant counts toward the measure (RED-413).
+import type { BagItem, EquippedItem, ItemEnchant } from "./items.js";
 
-type Inventory = NonNullable<WowState["inventory"]>;
-export type BagItem = Inventory["items"][number];
-export type EquippedItem = Inventory["equipped"][number];
 type Item = BagItem | EquippedItem;
 
 /** What two items of one slot are compared on. */
@@ -90,8 +88,15 @@ const GROUP_BY_EQUIP_LOC: Record<string, { group: string; measure: GearMeasure }
   ),
 };
 
+/**
+ * The measured value of an item (§10.4): its `stats` value plus its enchant's
+ * stat of the same name, so an armor kit counts toward armor. Null when
+ * `stats` has no such value. The item level has no enchant stat.
+ */
 function measured(item: Item, measure: GearMeasure): number | null {
-  return measure === "item_level" ? item.item_level : (item.stats?.[measure] ?? null);
+  if (measure === "item_level") return item.item_level;
+  const value = item.stats?.[measure] ?? null;
+  return value === null ? null : value + (item.enchant?.stats?.[measure] ?? 0);
 }
 
 /**
@@ -124,6 +129,11 @@ export interface SlotSummary {
   /** Bag items that fit the slot and need a higher level than the character has. */
   aboveLevel: number;
   better: { item: BagItem; measure: GearMeasure; value: number; equippedValue: number }[];
+  /**
+   * The equipped item's enchant, when the slot reads `better_in_bags`: the
+   * swap would lose it (§10.4). Null otherwise.
+   */
+  losesEnchant: Pick<ItemEnchant, "id" | "text"> | null;
 }
 
 /**
@@ -133,12 +143,12 @@ export interface SlotSummary {
  * proficiency are not in the data, so they are not checked. The required
  * level is.
  */
-export function summariseGear(inventory: Inventory, level: number | null): SlotSummary[] {
+export function summariseGear(inventory: { items: readonly BagItem[]; equipped: readonly EquippedItem[] }, level: number | null): SlotSummary[] {
   const bySlot = new Map<string, SlotSummary>();
   const summary = (slot: string, equipped: EquippedItem | null): SlotSummary => {
     let entry = bySlot.get(slot);
     if (entry === undefined) {
-      entry = { slot, equipped, measure: null, comparison: "no_candidates", candidates: 0, notCompared: 0, aboveLevel: 0, better: [] };
+      entry = { slot, equipped, measure: null, comparison: "no_candidates", candidates: 0, notCompared: 0, aboveLevel: 0, better: [], losesEnchant: null };
       bySlot.set(slot, entry);
     }
     return entry;
@@ -187,6 +197,8 @@ export function summariseGear(inventory: Inventory, level: number | null): SlotS
     else if (entry.notCompared === entry.candidates) entry.comparison = "not_compared";
     else if (entry.equipped === null) entry.comparison = "fills_empty_slot";
     else entry.comparison = "none_better";
+    const enchant = entry.equipped?.enchant;
+    if (entry.comparison === "better_in_bags" && enchant !== undefined) entry.losesEnchant = { id: enchant.id, text: enchant.text };
   }
   const order = (slot: string) => GEAR_SLOT_ORDER.indexOf(slot) + 1 || GEAR_SLOT_ORDER.length + 1;
   const filled = inventory.equipped.map((item) => item.slot);
