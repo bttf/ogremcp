@@ -805,6 +805,7 @@ local function InstallStubs()
 	-- The Auctionator addon, when the world has it: w.auctionator is
 	--   { ready = boolean, links = { [link] = { price, age, exact } },
 	--     idAges = { [itemID] = days }, broken = true or nil, noApi = true or nil }
+	-- The stub counts every call in calls.
 	-- The stub follows Auctionator.API.v1 of version 284. A caller ID that is
 	-- not a non-empty string raises, and so does an argument of the wrong
 	-- type. Until the database is set up (ready), a function returns nil, or
@@ -813,6 +814,7 @@ local function InstallStubs()
 	local a = w.auctionator
 	local function AuctionatorApi(argType, unready, read)
 		return function(callerID, arg)
+			a.calls = (a.calls or 0) + 1
 			if a.broken then
 				error("synthetic Auctionator failure")
 			end
@@ -1256,6 +1258,9 @@ test("a bag item carries its Auctionator price, and none when bound, unpriced, o
 	-- change is false. It returns the bag items by item ID.
 	local function Session(change)
 		Start(Era(function(w)
+			-- The bread is in two slots. The first is bound and the second
+			-- is not, so the bread has a price. The hide's one slot is bound.
+			w.bags[0].slots[1].isBound = true
 			w.bags[0].slots[6].isBound = true
 			w.bags[0].slots[7] = { itemID = 4000, hyperlink = cloak, stackCount = 1, isBound = false }
 			w.bags[0].slots[8] = { itemID = 2002, hyperlink = Link(2002, "Test Ore"), stackCount = 1 }
@@ -1335,6 +1340,51 @@ test("a bag item carries its Auctionator price, and none when bound, unpriced, o
 		eq(items[2000].ah, nil, label .. ": no ah")
 		eq(items[4000].ah, nil, label .. ": no ah on gear")
 	end
+end)
+
+test("auction prices are cached per link: read again after the interval, never in combat, always at logout", function()
+	local bread = Link(2000, "Test Bread")
+	local ns = Start(Era(function(w)
+		w.auctionator = { ready = true, links = { [bread] = { price = 12, age = 3, exact = true } }, idAges = {} }
+	end))
+	local a = world.auctionator
+	-- Price runs one inventory collection that is not the logout one, and
+	-- returns the bread's price.
+	local function Price()
+		return ns.CollectInventory().items[1].ah.price_copper
+	end
+	EnterWorld()
+	eq(Price(), 12, "price")
+
+	-- A link that left the bags and came back is read again.
+	local hideSlot = world.bags[0].slots[6]
+	world.bags[0].slots[6] = nil
+	Fire("BAG_UPDATE_DELAYED")
+	Advance(2)
+	local calls = a.calls
+	world.bags[0].slots[6] = hideSlot
+	Fire("BAG_UPDATE_DELAYED")
+	Advance(2)
+	eq(a.calls, calls + 1, "one call for the link that came back, none for the bread")
+
+	calls = a.calls
+	a.links[bread].price = 15
+	Advance(30)
+	eq(a.calls, calls, "no Auctionator call within the refresh interval")
+	eq(Price(), 12, "the cached price")
+
+	world.state.lockdown = true
+	Advance(120)
+	eq(a.calls, calls, "no Auctionator call in combat")
+	eq(Price(), 12, "the cached price stays in combat")
+	world.state.lockdown = false
+	eq(Price(), 15, "read again after the interval")
+
+	-- The logout collection reads again, within the interval and in combat.
+	a.links[bread].price = 20
+	world.state.lockdown = true
+	eq(Price(), 15, "still cached before the logout")
+	eq(Logout().state.inventory.items[1].ah.price_copper, 20, "the price read at logout")
 end)
 
 test("/transmit reloads the UI and is the only command", function()

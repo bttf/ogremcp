@@ -26,6 +26,14 @@
 -- Every function is looked up when it is called and runs in pcall. With
 -- Auctionator missing, not set up yet, or failing, the item gets no price,
 -- nothing is printed, and no error leaves this file.
+--
+-- A price is cached per item link, like the item details (Items.lua), so an
+-- unchanged inventory costs no Auctionator call on the 5-second collection.
+-- A link is read again AH_REFRESH_SECONDS after its last read, because a scan
+-- changes the prices and fires no event the adapter listens to. In combat no
+-- call is made and the cached value stays. The collection at PLAYER_LOGOUT
+-- reads every link again, in combat too: its values are the ones the client
+-- writes to disk.
 
 local _, ns = ...
 
@@ -33,6 +41,7 @@ local Lookup = ns.Lookup
 local ReadString = ns.ReadString
 local ReadInteger = ns.ReadInteger
 local ReadBoolean = ns.ReadBoolean
+local Now = ns.Now
 
 local AUCTIONATOR_API = "Auctionator.API.v1."
 local CALLER_ID = "OgreMCP"
@@ -44,6 +53,12 @@ local AH_PRICE_MAX = 2147483647
 -- no scan has seen for years is that long. A value above 100 years is not
 -- an age.
 local AH_AGE_MAX_DAYS = 36500
+-- A cached price is read again after this many seconds.
+local AH_REFRESH_SECONDS = 60
+
+-- [link] = { ah = table or nil, at = Now() at the read }. A link without a
+-- price has an entry too, so it is not asked for on every collection.
+local priceCache = {}
 
 -- Ask returns the first value of the Auctionator API function name, called
 -- with the caller ID and arg. It returns nil when Auctionator or the function
@@ -60,16 +75,10 @@ local function Ask(name, arg)
 	return nil
 end
 
--- AuctionPrice returns the ah table of a bag item, or nil: the item has no
--- link, the client reports it as bound, or Auctionator has no price for it.
--- bound is the container's isBound. Only true counts as bound, so an item
--- whose bound state is unreadable is priced. A price of 0 is no price:
--- Auctionator leaves out auctions without a buyout.
-local function AuctionPrice(link, itemID, bound)
-	link = ReadString(link)
-	if not link or ReadBoolean(bound) == true then
-		return nil
-	end
+-- ReadPrice asks Auctionator for the ah table of a link, or nil without a
+-- price. A price of 0 is no price: Auctionator leaves out auctions without a
+-- buyout.
+local function ReadPrice(link, itemID)
 	local price = ReadInteger(Ask("GetAuctionPriceByItemLink", link), 1, AH_PRICE_MAX)
 	if not price then
 		return nil
@@ -87,5 +96,48 @@ local function AuctionPrice(link, itemID, bound)
 	}
 end
 
+-- AuctionPrice returns the ah table of one bag slot, or nil: the slot has no
+-- link, the client reports its item as bound, or Auctionator has no price for
+-- the link. bound is the container's isBound. Only true counts as bound, so
+-- an item whose bound state is unreadable is priced.
+--
+-- ctx is the state of one inventory collection (Items.lua). The value comes
+-- from the cache unless the link has none, its entry is older than
+-- AH_REFRESH_SECONDS, or ctx.logout is set. In combat (ctx.inCombat) and not
+-- at logout, it always comes from the cache, and a link without an entry
+-- gets nil. A link is read at most once per collection.
+local function AuctionPrice(link, itemID, bound, ctx)
+	link = ReadString(link)
+	if not link or ReadBoolean(bound) == true then
+		return nil
+	end
+	local entry = priceCache[link]
+	ctx.pricedLinks = ctx.pricedLinks or {}
+	if ctx.pricedLinks[link] then
+		return entry and entry.ah
+	end
+	ctx.pricedLinks[link] = true
+	local now = Now()
+	if not ctx.logout and (ctx.inCombat or (entry and now - entry.at < AH_REFRESH_SECONDS)) then
+		return entry and entry.ah
+	end
+	entry = { ah = ReadPrice(link, itemID), at = now }
+	priceCache[link] = entry
+	return entry.ah
+end
+
+-- ForgetAuctionPrices drops the cached prices of the links this collection
+-- did not ask for: they left the bags, or every slot that holds them is
+-- bound.
+local function ForgetAuctionPrices(ctx)
+	local priced = ctx.pricedLinks or {}
+	for link in pairs(priceCache) do
+		if not priced[link] then
+			priceCache[link] = nil
+		end
+	end
+end
+
 -- Read by the files after this one.
 ns.AuctionPrice = AuctionPrice
+ns.ForgetAuctionPrices = ForgetAuctionPrices
