@@ -5,12 +5,10 @@
 // Adapted from bttf/wow-guide@df80260:cloud/src/mcpTools.ts (GEAR_MEASURES to
 // summariseGear), without the detail levels (§10.5) and the text rendering.
 // Item fields are the snapshot's snake_case ones, and the item level measure
-// is `item_level`.
-import type { WowState } from "./schema.js";
+// is `item_level`. The items are the built ones (items.ts): their `stats`
+// include the suffix stats, and an enchant counts toward the measure (RED-413).
+import type { BagItem, EquippedItem, ItemEnchant } from "./items.js";
 
-type Inventory = NonNullable<WowState["inventory"]>;
-export type BagItem = Inventory["items"][number];
-export type EquippedItem = Inventory["equipped"][number];
 type Item = BagItem | EquippedItem;
 
 /** What two items of one slot are compared on. */
@@ -25,7 +23,10 @@ export type GearMeasure = "armor" | "dps" | "item_level";
  * - `incomplete`: the details of some items were not read, so a bag item that
  *   fits the slot, or a better one, may be missing. The inventory section puts
  *   it in place of `none_better` and `no_candidates`, which would claim more
- *   than the data holds.
+ *   than the data holds. A slot also reads `incomplete` in place of
+ *   `better_in_bags` when the equipped item has an enchant whose text is not
+ *   read: its measured value may lack the enchant's stat, so the bag items
+ *   listed as better may not be.
  */
 export type GearComparison = "better_in_bags" | "none_better" | "not_compared" | "fills_empty_slot" | "no_candidates" | "incomplete";
 
@@ -90,8 +91,15 @@ const GROUP_BY_EQUIP_LOC: Record<string, { group: string; measure: GearMeasure }
   ),
 };
 
+/**
+ * The measured value of an item (§10.4): its `stats` value plus its enchant's
+ * stat of the same name, so an armor kit counts toward armor. Null when
+ * `stats` has no such value. The item level has no enchant stat.
+ */
 function measured(item: Item, measure: GearMeasure): number | null {
-  return measure === "item_level" ? item.item_level : (item.stats?.[measure] ?? null);
+  if (measure === "item_level") return item.item_level;
+  const value = item.stats?.[measure] ?? null;
+  return value === null ? null : value + (item.enchant?.stats?.[measure] ?? 0);
 }
 
 /**
@@ -124,6 +132,11 @@ export interface SlotSummary {
   /** Bag items that fit the slot and need a higher level than the character has. */
   aboveLevel: number;
   better: { item: BagItem; measure: GearMeasure; value: number; equippedValue: number }[];
+  /**
+   * The equipped item's enchant, when the slot reads `better_in_bags`: the
+   * swap would lose it (§10.4). Null otherwise.
+   */
+  losesEnchant: Pick<ItemEnchant, "id" | "text"> | null;
 }
 
 /**
@@ -133,12 +146,12 @@ export interface SlotSummary {
  * proficiency are not in the data, so they are not checked. The required
  * level is.
  */
-export function summariseGear(inventory: Inventory, level: number | null): SlotSummary[] {
+export function summariseGear(inventory: { items: readonly BagItem[]; equipped: readonly EquippedItem[] }, level: number | null): SlotSummary[] {
   const bySlot = new Map<string, SlotSummary>();
   const summary = (slot: string, equipped: EquippedItem | null): SlotSummary => {
     let entry = bySlot.get(slot);
     if (entry === undefined) {
-      entry = { slot, equipped, measure: null, comparison: "no_candidates", candidates: 0, notCompared: 0, aboveLevel: 0, better: [] };
+      entry = { slot, equipped, measure: null, comparison: "no_candidates", candidates: 0, notCompared: 0, aboveLevel: 0, better: [], losesEnchant: null };
       bySlot.set(slot, entry);
     }
     return entry;
@@ -182,11 +195,13 @@ export function summariseGear(inventory: Inventory, level: number | null): SlotS
     // The measure of the first listed better item. Without one, the measure
     // of the slot's first comparison.
     entry.measure = entry.better[0]?.measure ?? entry.measure;
+    const enchant = entry.equipped?.enchant;
     if (entry.candidates === 0) entry.comparison = "no_candidates";
-    else if (entry.better.length > 0) entry.comparison = "better_in_bags";
+    else if (entry.better.length > 0) entry.comparison = enchant?.text === null ? "incomplete" : "better_in_bags";
     else if (entry.notCompared === entry.candidates) entry.comparison = "not_compared";
     else if (entry.equipped === null) entry.comparison = "fills_empty_slot";
     else entry.comparison = "none_better";
+    if (entry.comparison === "better_in_bags" && enchant !== undefined) entry.losesEnchant = { id: enchant.id, text: enchant.text };
   }
   const order = (slot: string) => GEAR_SLOT_ORDER.indexOf(slot) + 1 || GEAR_SLOT_ORDER.length + 1;
   const filled = inventory.equipped.map((item) => item.slot);

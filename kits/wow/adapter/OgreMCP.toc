@@ -5,7 +5,7 @@
 ## Title: Ogre MCP
 ## Notes: Saves your character's state so your AI agent can give spoiler-free guidance.
 ## Author: red pine software
-## Version: 0.5.0
+## Version: 0.6.0
 ## SavedVariables: OgreMCPDB
 ## SavedVariablesPerCharacter: OgreMCPCharDB
 # Auctionator is the source of auction prices. When it is installed and

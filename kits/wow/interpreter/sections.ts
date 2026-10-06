@@ -11,9 +11,10 @@
 // buildPath) and cloud/src/mcpSkills.ts (buildSkills), without the detail
 // levels (§10.5) and the text rendering: the text block is the result's JSON
 // (§10.5). Without the detail levels, the quests section is the snapshot's as
-// it is. flight_points is new (RED-371). Fields are snake_case, like the
-// snapshot's.
+// it is. flight_points is new (RED-371), and so are an item's suffix and
+// enchant (RED-413, items.ts). Fields are snake_case, like the snapshot's.
 import { type GearComparison, summariseGear } from "./gear.js";
+import { buildItem } from "./items.js";
 import { SKILL_CATEGORIES, type WowState } from "./schema.js";
 
 /** The sections, in the order a result lists them (§10.4). */
@@ -141,27 +142,33 @@ export const GEAR_CAVEAT =
   "Class and weapon or armor proficiency are not in the data and are not checked: this character may not be able to use the bag item.";
 
 /**
- * The items with their quality as a word, and `gear`: per equipment slot, the
- * equipped item and whether a bag item for the slot is better (gear.ts).
+ * The items with their suffix and enchant (items.ts) and their quality as a
+ * word, and `gear`: per equipment slot, the equipped item and whether a bag
+ * item for the slot is better (gear.ts). A slot that reads `better_in_bags`
+ * carries `loses_enchant` when the equipped item has an enchant (§10.4).
  * `gear_incomplete` is true when the adapter did not read the details of every
  * item (`items_pending` is not 0), so a bag item that fits a slot, or a better
  * one, may be missing: a slot then reads `incomplete` in place of
- * `none_better` or `no_candidates`.
+ * `none_better` or `no_candidates`. A slot whose equipped item has an enchant
+ * with unread text reads `incomplete` in place of `better_in_bags` (gear.ts).
  */
 function buildInventory(inventory: Inventory, level: number | null) {
   const gearIncomplete = inventory.items_pending !== 0;
   const honest = (comparison: GearComparison): GearComparison =>
     gearIncomplete && (comparison === "none_better" || comparison === "no_candidates") ? "incomplete" : comparison;
+  const equipped = inventory.equipped.map(buildItem);
+  const items = inventory.items.map(buildItem);
   return {
     items_pending: inventory.items_pending,
     gear_incomplete: gearIncomplete,
-    equipped: inventory.equipped.map(withQualityWord),
-    items: inventory.items.map(withQualityWord),
-    gear: summariseGear(inventory, level).map((entry) => ({
+    equipped: equipped.map(withQualityWord),
+    items: items.map(withQualityWord),
+    gear: summariseGear({ equipped, items }, level).map((entry) => ({
       slot: entry.slot,
       equipped: entry.equipped && { item_id: entry.equipped.item_id, name: entry.equipped.name },
       comparison: honest(entry.comparison),
       ...((entry.comparison === "better_in_bags" || entry.comparison === "fills_empty_slot") && { caveat: GEAR_CAVEAT }),
+      ...(entry.losesEnchant !== null && { loses_enchant: entry.losesEnchant }),
       measure: entry.measure,
       candidates: entry.candidates,
       not_compared: entry.notCompared,

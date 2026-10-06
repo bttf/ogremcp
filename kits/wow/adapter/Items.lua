@@ -1,9 +1,10 @@
 -- Section: item details ------------------------------------------------------
 --
--- Details of one item: quality, levels, equip location, type, sell price, and
--- stats. Every field is optional. A missing API, a nil return for an item the
--- client has not cached, a secret value, and an error all leave the field out,
--- and never fail the inventory section.
+-- Details of one item: quality, levels, equip location, type, sell price,
+-- stats, and the text of its random suffix and its enchant. Every field is
+-- optional. A missing API, a nil return for an item the client has not cached,
+-- a secret value, and an error all leave the field out, and never fail the
+-- inventory section.
 --
 -- API choice, by function existence:
 --   item info   C_Item.GetItemInfo, else GetItemInfo
@@ -16,6 +17,15 @@
 --               never touched, and neither call is protected. The texts are
 --               matched against the client's own format strings
 --               (DAMAGE_TEMPLATE, SPEED), so the match follows the locale.
+--   suffix and enchant text (docs/architecture.md §6.3). The stats API
+--               returns the base item's stats, on a full link too, so a
+--               random suffix ("of the Bear") and an enchant are not in the
+--               stats table. The same tooltip read gives them: the link's
+--               tooltip is compared with the tooltip of the link without its
+--               suffix ID, and with the tooltip of the link without its
+--               enchant ID. The lines that only the full link has are the
+--               suffix's lines or the enchant's line. They are stored as
+--               text. The interpreter reads the numbers out of them (§10.4).
 --
 -- Details are cached per item link for the session. A link encodes the item
 -- with its enchant and random suffix, so the details of a link never change.
@@ -24,7 +34,8 @@
 -- mark the cache stale: the next collection drops the links that are gone and
 -- retries the entries that are incomplete. GET_ITEM_INFO_RECEIVED and the end
 -- of combat do the same when an entry is waiting. Tooltips are not read in
--- combat, and at most ITEM_TOOLTIP_SCANS_PER_COLLECTION per collection.
+-- combat, and at most ITEM_TOOLTIP_SCANS_PER_COLLECTION per collection. An
+-- item with a suffix and an enchant takes three of them.
 
 local _, ns = ...
 
@@ -67,9 +78,11 @@ local function FirstApi(paths)
 	return nil
 end
 
--- An entry whose item info stays unreadable is tried this many times. After
--- that it is left alone until its link leaves the inventory and comes back,
--- so a link the client never resolves cannot cause endless calls.
+-- An entry whose item info stays unreadable, or whose suffix or enchant text
+-- stays unread because the client does not fill a tooltip, is tried this many
+-- times in all. After that it is left alone until its link leaves the
+-- inventory and comes back, so a link the client never resolves cannot cause
+-- endless calls.
 local ITEM_DETAIL_MAX_ATTEMPTS = 5
 
 -- The bounds of bttf/wow-guide@df80260:shared/src/snapshot.ts.
@@ -81,6 +94,15 @@ local ITEM_SELL_PRICE_MAX = 2147483647
 local ITEM_TOOLTIP_SCANS_PER_COLLECTION = 8
 local ITEM_TOOLTIP_MAX_LINES = 30
 local ITEMS_PENDING_MAX = 1000
+-- A longer link is left out. A Classic Era item link is about 100 bytes.
+local ITEM_LINK_MAX_LENGTH = 400
+-- The longest tooltip line kept as suffix or enchant text, and the most lines
+-- kept for one suffix. The interpreter has the same bounds (schema.ts).
+local ITEM_TOOLTIP_TEXT_MAX_LENGTH = 120
+local ITEM_SUFFIX_MAX_LINES = 8
+-- The fields of an item string that hold the enchant ID and the suffix ID.
+-- Field 1 is the item ID.
+local LINK_FIELDS = { enchant = 2, suffix = 7 }
 
 local ITEM_STAT_KEYS = {
 	RESISTANCE0_NAME = "armor",
@@ -109,8 +131,14 @@ local WEAPON_EQUIP_LOCS = {
 	INVTYPE_THROWN = true,
 }
 
--- [link] = { details = table or nil, pending = "info", "tooltip", "error", or nil,
---            attempts = n, gaveUp = true or nil }
+-- [link] = { details = table or nil,
+--            pending = "info", "tooltip", "text", "error", or nil,
+--            attempts = n, gaveUp = true or nil, textPending = true or nil,
+--            texts = { suffix = list, false, or nil, enchant = string, false, or nil } }
+-- pending "tooltip" waits for the scan budget or the end of combat. pending
+-- "text" met a tooltip the client had not filled. textPending marks an entry
+-- whose suffix or enchant text is not read, and stays set after the entry gave
+-- up. texts holds each text once it is read, false when there is none.
 local itemDetailCache = {}
 local itemCacheStale = true
 local itemsPending = 0
@@ -189,6 +217,10 @@ end
 
 -- Created on first use and reused; frames cannot be destroyed. false when the
 -- client cannot create it.
+--
+-- SetHyperlink closes a tooltip that already shows the same link
+-- (warcraft.wiki.gg, GameTooltip:SetHyperlink). Each read hides the tooltip
+-- afterwards, and the reads of one item all use different links.
 local scanTooltip
 
 local function HiddenTooltipLines(link)
@@ -330,9 +362,98 @@ local function AddWeaponNumbers(stats, lines)
 	return stats
 end
 
+-- LinkWithout returns link with one field of its item string emptied, which
+-- the client reads as 0: Classic Era writes its own zero fields that way. nil
+-- when the link has no item string or holds no ID in that field. Only the item
+-- string changes, so the link text still names the suffix.
+local function LinkWithout(link, field)
+	local head, body, tail = string.match(link, "^(.-|Hitem:)([^|]*)(|h.*)$")
+	if not body then
+		return nil
+	end
+	local fields = {}
+	for value in string.gmatch(body .. ":", "([^:]*):") do
+		fields[#fields + 1] = value
+	end
+	local id = tonumber(fields[field])
+	if not id or id == 0 then
+		return nil
+	end
+	fields[field] = ""
+	return head .. table.concat(fields, ":") .. tail
+end
+
+-- Filled reports whether the client filled a tooltip: it has a row after the
+-- item name. Without the item's data the client gives no rows, or the name
+-- alone.
+local function Filled(lines)
+	return lines ~= nil and #lines >= 2
+end
+
+-- ExtraLines returns the left texts that the rows of full have and the rows
+-- of base lack, in the order of full. The first row of each, the item name,
+-- is skipped, and so is a blank text. Texts are counted: a text that full has
+-- twice and base has once is returned once. Both tooltips must be filled.
+local function ExtraLines(full, base)
+	local counts = {}
+	for i = 2, #base do
+		local text = base[i].left
+		if text then
+			counts[text] = (counts[text] or 0) + 1
+		end
+	end
+	local extra = {}
+	for i = 2, #full do
+		local text = full[i].left
+		if text and string.find(text, "%S") then
+			if (counts[text] or 0) > 0 then
+				counts[text] = counts[text] - 1
+			else
+				extra[#extra + 1] = text
+			end
+		end
+	end
+	return extra
+end
+
+-- ReadLinkTexts reads the suffix and enchant text of a link into texts
+-- (§6.3). lines are the tooltip rows of the link, and without holds the link
+-- without its suffix ID and the link without its enchant ID, each nil when the
+-- link has no such ID or that text is read already. Each one given costs one
+-- more tooltip read. texts.suffix becomes every line that the suffix adds, and
+-- texts.enchant the first line that the enchant adds: false when there is
+-- none of at most ITEM_TOOLTIP_TEXT_MAX_LENGTH bytes. A comparison with a
+-- tooltip the client did not fill would count every line of the other one as
+-- extra, so it sets nothing: that text is still unread.
+local function ReadLinkTexts(texts, lines, without)
+	if not Filled(lines) then
+		return
+	end
+	if without.suffix then
+		local base = TooltipLines(without.suffix)
+		if Filled(base) then
+			local kept = {}
+			for _, text in ipairs(ExtraLines(lines, base)) do
+				if #kept < ITEM_SUFFIX_MAX_LINES and #text <= ITEM_TOOLTIP_TEXT_MAX_LENGTH then
+					kept[#kept + 1] = text
+				end
+			end
+			texts.suffix = kept[1] and kept or false
+		end
+	end
+	if without.enchant then
+		local base = TooltipLines(without.enchant)
+		if Filled(base) then
+			local text = ExtraLines(lines, base)[1]
+			texts.enchant = text and #text <= ITEM_TOOLTIP_TEXT_MAX_LENGTH and text or false
+		end
+	end
+end
+
 -- BuildItemDetails fills entry for a link. ctx is the state of one collection.
 local function BuildItemDetails(link, entry, ctx)
 	entry.pending = nil
+	entry.textPending = nil
 	local getInfo = FirstApi(ITEM_INFO_APIS)
 	if not getInfo then
 		-- Nothing to wait for: the client has no item info API.
@@ -370,25 +491,55 @@ local function BuildItemDetails(link, entry, ctx)
 	details.stats = entry.stats or ReadItemStats(link)
 	entry.stats = details.stats
 
+	-- The tooltip reads this link needs: its own tooltip for a weapon's damage
+	-- and speed and as the full side of each comparison, and one more for
+	-- each of the suffix ID and the enchant ID it holds. Only an item that can
+	-- be equipped has a suffix or an enchant.
 	local stats = details.stats
-	if WEAPON_EQUIP_LOCS[equipLoc] and not (stats and stats.min_damage and stats.max_damage and stats.speed) then
-		if ctx.inCombat or ctx.tooltipBudget <= 0 then
-			entry.pending = "tooltip"
-			ctx.budgetExhausted = ctx.budgetExhausted or not ctx.inCombat
-			return
+	local weapon = WEAPON_EQUIP_LOCS[equipLoc] and not (stats and stats.min_damage and stats.max_damage and stats.speed)
+	-- A text read in an earlier attempt is kept and not read again.
+	local texts = entry.texts or {}
+	entry.texts = texts
+	local without = {}
+	if texts.suffix == nil then
+		without.suffix = LinkWithout(link, LINK_FIELDS.suffix)
+	end
+	if texts.enchant == nil then
+		without.enchant = LinkWithout(link, LINK_FIELDS.enchant)
+	end
+	details.suffix_text, details.enchant_text = texts.suffix or nil, texts.enchant or nil
+	local unread = (without.suffix or without.enchant) and true or nil
+	if not (weapon or unread) then
+		return
+	end
+	local reads = 1 + (without.suffix and 1 or 0) + (without.enchant and 1 or 0)
+	-- A link waits until the budget covers all of its reads.
+	if ctx.inCombat or ctx.tooltipBudget < reads then
+		entry.pending = "tooltip"
+		entry.textPending = unread
+		ctx.budgetExhausted = ctx.budgetExhausted or not ctx.inCombat
+		return
+	end
+	ctx.tooltipBudget = ctx.tooltipBudget - reads
+	-- The tooltip step has its own protected call: an error here keeps
+	-- what was read above. A weapon whose damage and speed the tooltip does
+	-- not give is not pending afterwards, so that read is not repeated.
+	pcall(function()
+		local lines = TooltipLines(link)
+		if weapon and lines then
+			local merged = AddWeaponNumbers(stats, lines)
+			details.stats = merged
+			entry.stats = merged
 		end
-		ctx.tooltipBudget = ctx.tooltipBudget - 1
-		-- The tooltip step has its own protected call: an error here keeps
-		-- what was read above. The entry is not pending afterwards, so a
-		-- tooltip that fails is not read again for this link.
-		pcall(function()
-			local lines = TooltipLines(link)
-			if lines then
-				local merged = AddWeaponNumbers(stats, lines)
-				details.stats = merged
-				entry.stats = merged
-			end
-		end)
+		ReadLinkTexts(texts, lines, without)
+	end)
+	details.suffix_text, details.enchant_text = texts.suffix or nil, texts.enchant or nil
+	-- A text that met an unfilled tooltip, or an error, is still unread. The
+	-- entry counts in items_pending and is tried again like an entry without
+	-- item info, at most ITEM_DETAIL_MAX_ATTEMPTS times (ItemDetails).
+	if (without.suffix and texts.suffix == nil) or (without.enchant and texts.enchant == nil) then
+		entry.pending = "text"
+		entry.textPending = true
 	end
 end
 
@@ -410,7 +561,7 @@ local function ItemDetails(link, ctx)
 	if not ok and not entry.details then
 		entry.pending = "error"
 	end
-	if entry.pending == "info" or entry.pending == "error" then
+	if entry.pending == "info" or entry.pending == "text" or entry.pending == "error" then
 		entry.attempts = (entry.attempts or 0) + 1
 		if entry.attempts >= ITEM_DETAIL_MAX_ATTEMPTS then
 			entry.pending = nil
@@ -418,6 +569,15 @@ local function ItemDetails(link, ctx)
 		end
 	end
 	return entry.details
+end
+
+-- StoredLink returns the link an item carries (§6.3), or nil for an empty or
+-- an overlong one.
+local function StoredLink(link)
+	if link and link ~= "" and #link <= ITEM_LINK_MAX_LENGTH then
+		return link
+	end
+	return nil
 end
 
 local function ApplyItemDetails(item, details)
@@ -461,7 +621,7 @@ local function CollectInventory(status)
 				if key then
 					local item = byKey[key]
 					if not item then
-						item = { item_id = itemID, name = name, count = 0 }
+						item = { item_id = itemID, name = name, count = 0, link = StoredLink(link) }
 						ApplyItemDetails(item, details)
 						-- The container gives the quality without the item cache.
 						item.quality = item.quality or ReadInteger(PlainField(info, "quality"), 0, 10)
@@ -495,7 +655,7 @@ local function CollectInventory(status)
 			local link = ReadString(Api("GetInventoryItemLink", "player", slotID))
 			local itemID = ReadInteger(Api("GetInventoryItemID", "player", slotID), 1)
 			if link or itemID then
-				local item = { slot = slotName, item_id = itemID, name = NameFromLink(link) }
+				local item = { slot = slotName, item_id = itemID, name = NameFromLink(link), link = StoredLink(link) }
 				ApplyItemDetails(item, ItemDetails(link, ctx))
 				equipped[#equipped + 1] = item
 			end
@@ -523,12 +683,14 @@ local function CollectInventory(status)
 	itemsPending = pending
 	-- Links of this inventory whose details were not read: the client had not
 	-- cached the item, the read failed, or the client has no item info API.
+	-- And links whose suffix or enchant text is not read (§6.3): it waits for
+	-- a tooltip read, or the client did not fill a tooltip.
 	-- A consumer must not take the bag items for complete while this is
 	-- above zero.
 	local unread = 0
 	for link in pairs(ctx.seen) do
 		local entry = itemDetailCache[link]
-		if not (entry and entry.details) then
+		if not (entry and entry.details) or entry.textPending then
 			unread = unread + 1
 		end
 	end

@@ -1,6 +1,7 @@
 // wow_get_state (§10.4) against a fake ToolContext, with snapshots parsed from
 // the SavedVariables files that the adapter's Lua tests write from two stub
-// worlds (test/adapter_test.lua, synthetic data only).
+// worlds, and from a third with suffixed and enchanted gear
+// (test/adapter_test.lua, synthetic data only).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,7 @@ import { interpreter, type WowState } from "./index.js";
 import { GEAR_CAVEAT, SECTIONS } from "./sections.js";
 
 const SNAPSHOT_AT = new Date("2026-09-24T12:00:00.000Z");
-const snapshots = {} as Record<"era" | "forever", Snapshot<WowState>>;
+const snapshots = {} as Record<"era" | "forever" | "items", Snapshot<WowState>>;
 
 beforeAll(() => {
   const out = mkdtempSync(join(tmpdir(), "ogremcp-get-state-"));
@@ -34,7 +35,7 @@ beforeAll(() => {
       throw new Error(`These tests run the adapter's Lua tests and need luajit on PATH: ${run.error.message}`);
     }
     expect(run.status, run.stdout + run.stderr).toBe(0);
-    for (const client of ["era", "forever"] as const) {
+    for (const client of ["era", "forever", "items"] as const) {
       const parsed = interpreter.parse("savedvariables", readFileSync(join(out, `${client}.lua`)));
       const { flavor, rules, character, state } = parsed;
       snapshots[client] = { snapshotAt: SNAPSHOT_AT, flavor, rules, character, state };
@@ -209,6 +210,76 @@ it("puts the class and proficiency caveat beside better bag items, and lists at 
   expect(gear[0]?.better.map((item) => item.value)).toEqual([80, 70, 60]);
   expect(gear[1]).toMatchObject({ slot: "MainHandSlot", better: [] });
   expect(gear[1]).not.toHaveProperty("caveat");
+});
+
+describe("item suffixes and enchants (§10.4)", () => {
+  type Item = { name: string; slot?: string; [key: string]: unknown };
+  type Slot = { slot: string; [key: string]: unknown };
+  const inventoryOf = async (snapshot: Snapshot<WowState>) =>
+    content((await call({ sections: ["inventory"] }, snapshot)).result).state.inventory as { items: Item[]; equipped: Item[]; gear: Slot[] };
+
+  it("adds the suffix stats to an item's stats and gives an enchant its own", async () => {
+    // The snapshot keeps the link and its three IDs.
+    const stored = snapshots.items.state.inventory?.items.find((item) => item.name === "Test Vest of the Bear");
+    expect(stored).toMatchObject({ link: expect.stringContaining("|Hitem:3100::::::1179:7001:"), enchant_id: 0, suffix_id: 1179, unique_id: 7001 });
+    expect(stored?.stats).toEqual({ armor: 110 });
+
+    const { items, equipped } = await inventoryOf(snapshots.items);
+    const vest = items.find((item) => item.name === "Test Vest of the Bear");
+    expect(vest).toMatchObject({
+      stats: { armor: 110, stamina: 2, strength: 2 },
+      suffix: { id: 1179, text: ["+2 Stamina", "+2 Strength"] },
+    });
+    // The result leaves out the link, the unique ID, and the adapter's fields.
+    for (const key of ["link", "unique_id", "suffix_id", "enchant_id", "suffix_text", "enchant_text", "enchant"]) {
+      expect(vest).not.toHaveProperty(key);
+    }
+    expect(equipped.find((item) => item.slot === "ChestSlot")).toMatchObject({
+      stats: { armor: 100 },
+      enchant: { id: 16, text: "Reinforced Armor +16", stats: { armor: 16 } },
+    });
+    expect(equipped.find((item) => item.slot === "MainHandSlot")).toMatchObject({ enchant: { id: 1900, text: "Crusader", stats: null } });
+  });
+
+  it("counts an armor kit toward armor, and names the enchant a better bag item would replace", async () => {
+    const { gear } = await inventoryOf(snapshots.items);
+    // The bag chest has 110 armor, and the equipped one 100 plus 16 from its kit.
+    const chest = gear.find((slot) => slot.slot === "ChestSlot");
+    expect(chest).toMatchObject({ comparison: "none_better", measure: "armor", better: [] });
+    expect(chest).not.toHaveProperty("loses_enchant");
+    // "Crusader" gives no dps, so the bag weapon's 15 dps beats 12.5.
+    expect(gear.find((slot) => slot.slot === "MainHandSlot")).toMatchObject({
+      comparison: "better_in_bags",
+      measure: "dps",
+      loses_enchant: { id: 1900, text: "Crusader" },
+      better: [{ name: "Test Axe", value: 15, equipped_value: 12.5 }],
+    });
+  });
+
+  it("reads a slot as incomplete, not better_in_bags, while the equipped item's enchant text is unread", async () => {
+    const snapshot = structuredClone(snapshots.items);
+    const blade = snapshot.state.inventory?.equipped.find((item) => item.slot === "MainHandSlot");
+    if (blade === undefined) throw new Error("The items stub has no main hand.");
+    delete blade.enchant_text;
+
+    const { equipped, gear } = await inventoryOf(snapshot);
+    expect(equipped.find((item) => item.slot === "MainHandSlot")).toMatchObject({ enchant: { id: 1900, text: null, stats: null } });
+    const slot = gear.find((entry) => entry.slot === "MainHandSlot");
+    expect(slot).toMatchObject({ comparison: "incomplete", better: [{ name: "Test Axe" }] });
+    expect(slot).not.toHaveProperty("loses_enchant");
+    expect(slot).not.toHaveProperty("caveat");
+  });
+
+  it("returns the items of an upload from before adapter 0.6.0 as they were", async () => {
+    // The golden fixture is from addon 0.1.1, which wrote no link and no text.
+    const parsed = interpreter.parse("savedvariables", readFileSync(new URL("../fixtures/classic_era/OgreMCP.lua", import.meta.url)));
+    const gloves = parsed.state.inventory?.items.find((item) => item.name === "Black Whelp Gloves");
+    expect(gloves).toEqual(expect.objectContaining({ stats: { armor: 46, agility: 3, strength: 2 } }));
+    for (const key of ["link", "enchant_id", "suffix_id", "unique_id"]) expect(gloves).not.toHaveProperty(key);
+
+    const { items } = await inventoryOf({ ...snapshots.era, state: parsed.state });
+    expect(items.find((item) => item.name === "Black Whelp Gloves")).toEqual({ ...gloves, quality: "uncommon" });
+  });
 });
 
 it("gives a path time out of a Date's range as null", async () => {

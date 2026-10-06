@@ -14,3 +14,12 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^kits/wow/adapter/AuctionPrices\.lua$''']
 regexes = ['''^Auctionator\.API\.v1\.$''']
+
+# The same table name in the addon policy doc, where it follows the words
+# "public API" (RED-413).
+[[allowlists]]
+description = "The name of Auctionator's public API table in the addon policy doc"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/addon-policy\.md$''']
+regexes = ['''^Auctionator\.API\.v1$''']
