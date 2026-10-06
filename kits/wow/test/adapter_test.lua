@@ -1080,13 +1080,14 @@ test("era: suffix and enchant text come from tooltip comparisons, out of combat 
 			return { name = name, quality = 2, itemLevel = 20, minLevel = 10, type = "Weapon",
 				subType = "One-Handed Swords", equipLoc = "INVTYPE_WEAPON", sellPrice = 900 }
 		end
-		-- The stats API gives the base stats on a full link.
+		-- The stats API gives the base stats on a full link. Classic Era 1.15.9
+		-- gives each suffix line inside a color escape.
 		w.items[vest] = {
 			info = chest("Test Vest of the Bear"),
 			stats = { RESISTANCE0_NAME = 110 },
 			tooltip = {
-				{ "Test Vest of the Bear" }, { "Chest", "Leather" }, { "110 Armor" }, { "+2 Stamina" }, { "+2 Strength" },
-				{ "Durability 70 / 70" },
+				{ "Test Vest of the Bear" }, { "Chest", "Leather" }, { "110 Armor" }, { "|cffffffff+2 Stamina|r" },
+				{ "|cffffffff+2 Strength|r" }, { "Durability 70 / 70" },
 			},
 		}
 		w.items[jerkin] = {
@@ -1138,7 +1139,7 @@ test("era: suffix and enchant text come from tooltip comparisons, out of combat 
 	eq(inventory.items[1].link, Link(2000, "Test Bread"), "the link of an item that cannot be equipped")
 	local bagVest = inventory.items[3]
 	eq(bagVest.link, vest, "bag item link")
-	eq(table.concat(bagVest.suffix_text, ","), "+2 Stamina,+2 Strength", "suffix_text")
+	eq(table.concat(bagVest.suffix_text, ","), "|cffffffff+2 Stamina|r,|cffffffff+2 Strength|r", "suffix_text, as the client gives it")
 	eq(bagVest.enchant_text, nil, "no enchant on the vest")
 	eq(Keys(bagVest.stats), "armor", "stats stay the base stats")
 	eq(Equipped(db, "ChestSlot").enchant_text, "Reinforced Armor +16", "enchant_text of the armor kit")
