@@ -1,6 +1,16 @@
 # gitleaks configuration. CI scans the full git history on every PR.
 # Allowlist entries are for confirmed false positives only. Each entry names
 # the file and the exact fabricated value, so a real secret in the same file
-# still fails the scan. There are none yet.
+# still fails the scan.
 [extend]
 useDefault = true
+
+# The dotted path of the Auctionator addon's public API table, a Lua global
+# name and not a credential. The generic-api-key rule matches it because the
+# constant that holds it is named AUCTIONATOR_API (RED-413).
+[[allowlists]]
+description = "The path of Auctionator's public API table in the WoW adapter"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^kits/wow/adapter/AuctionPrices\.lua$''']
+regexes = ['''^Auctionator\.API\.v1\.$''']

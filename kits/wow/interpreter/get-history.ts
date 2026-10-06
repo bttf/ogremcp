@@ -6,6 +6,7 @@
 // JSON in a text block, trimmed to the size cap (§10.5).
 import { jsonResult, type Snapshot, type ToolDef, userError, utf8Length } from "@ogremcp/sdk";
 import {
+  AUCTION_PRICES_RULE,
   type Cut,
   cutBags,
   envelope,
@@ -43,9 +44,9 @@ export const HISTORY_DEFAULT_SECTIONS: readonly Section[] = ["character", "locat
 
 /**
  * The description, with `experimental` as the experimental flavors. It names
- * the game and carries the flight-point and quest turn-in rules and the §10.5
- * behavior rules that act on game state, like `wow_get_state`'s. Game text
- * never goes here, only into results (§10.5).
+ * the game and carries the flight-point and quest turn-in rules, the auction
+ * price sentence, and the §10.5 behavior rules that act on game state, like
+ * `wow_get_state`'s. Game text never goes here, only into results (§10.5).
  */
 export function describeGetHistory(experimental: readonly string[]): string {
   return [
@@ -54,6 +55,7 @@ export function describeGetHistory(experimental: readonly string[]): string {
     "Each snapshot carries `snapshot_at` (when the game captured it), `flavor`, the realm's `rules`, and `character`; the result's own are the newest snapshot's.",
     FLIGHT_POINTS_RULE,
     QUEST_TURN_INS_RULE,
+    AUCTION_PRICES_RULE,
     ...stateRules(experimental),
   ].join(" ");
 }

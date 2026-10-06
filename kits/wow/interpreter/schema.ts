@@ -234,6 +234,30 @@ const itemDetailShape = {
   stats: nilable(itemStatsSchema),
 };
 
+/** Largest `ah.price_copper`: the client's money cap, in copper. */
+export const AH_PRICE_MAX = 2_147_483_647;
+/** Largest `ah.age_days`: 100 years. */
+export const AH_AGE_MAX_DAYS = 36_500;
+
+/**
+ * The auction house price of one bag item (§6.3), from the Auctionator addon
+ * (kits/wow/adapter/AuctionPrices.lua). The adapter writes none for an item
+ * without a price, so `price_copper` is required.
+ */
+export const auctionPriceSchema = z.object({
+  /** The lowest buyout of one item in Auctionator's last scan that saw the item, in copper. */
+  price_copper: z.number().int().min(1).max(AH_PRICE_MAX),
+  /** Whole days since a scan last saw the item. Null when Auctionator gives no age. */
+  age_days: nilable(z.number().int().min(0).max(AH_AGE_MAX_DAYS)),
+  /**
+   * False when the price is Auctionator's fallback to the item ID alone: it
+   * is for the base item with any random suffix.
+   */
+  exact: nilable(z.boolean()),
+  /** The addon the price is from. */
+  source: z.literal("auctionator"),
+});
+
 /**
  * Every stack of one item across the backpack and bags, summed. Items that
  * can be equipped are summed per item link, because two items with one ID can
@@ -245,6 +269,14 @@ export const bagItemSchema = z.object({
   /** Null when the stack size of any contributing slot was unreadable. */
   count: nilable(z.number().int().positive()),
   ...itemDetailShape,
+  /**
+   * Absent without a price: the player has no Auctionator, no scan has seen
+   * the item, the item is bound, or the adapter is older than 0.5.0. It is
+   * optional and not `nilable`, so that a tool result carries `ah` only on an
+   * item with a price (§10.4), and a snapshot stored before the field existed
+   * has the same shape as a new one.
+   */
+  ah: auctionPriceSchema.optional(),
 });
 
 /** One filled equipment slot. Empty slots are left out. */

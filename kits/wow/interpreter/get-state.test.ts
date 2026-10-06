@@ -10,6 +10,7 @@ import { type Snapshot, type ToolContext, type ToolResult, utf8Length } from "@o
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json" with { type: "json" };
 import {
+  AUCTION_PRICES_RULE,
   describeGetState,
   EXPERIMENTAL_FLAVORS,
   FLIGHT_POINTS_RULE,
@@ -83,6 +84,20 @@ it("is described as §10.1 and §10.5 ask", () => {
   expect(SECTIONS).toContain("flight_points");
   expect(tool?.description).toContain(FLIGHT_POINTS_RULE);
   expect(tool?.description).toContain(QUEST_TURN_INS_RULE);
+  expect(tool?.description).toContain(AUCTION_PRICES_RULE);
+});
+
+it("gives a bag item its Auctionator price as `ah`, and no `ah` without one (§10.4)", async () => {
+  // The era stub world has Auctionator, with a price for the first bag item only.
+  const data = content((await call({ sections: ["inventory"] }, snapshots.era)).result);
+  const { items, equipped } = data.state.inventory as { items: { item_id: number; ah?: unknown }[]; equipped: object[] };
+
+  expect(items.map((item) => item.item_id)).toEqual([2000, 2001]);
+  expect(items[0]?.ah).toEqual({ price_copper: 12, age_days: 3, exact: true, source: "auctionator" });
+  expect(items[1]).not.toHaveProperty("ah");
+  for (const item of equipped) expect(item).not.toHaveProperty("ah");
+  // The forever stub world has no Auctionator.
+  expect(snapshots.forever.state.inventory?.items.some((item) => "ah" in item)).toBe(false);
 });
 
 it("by default returns every section of the latest snapshot of any flavor", async () => {
