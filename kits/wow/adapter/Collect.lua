@@ -14,7 +14,13 @@ local COLLECT_EVENTS = ns.COLLECT_EVENTS
 local Now = ns.Now
 local MarkItemCacheStale = ns.MarkItemCacheStale
 local ItemsPending = ns.ItemsPending
+local Clean = ns.Clean
 local Write = ns.Write
+
+-- The two parts that show whether the client still has the player's data
+-- (PlayerDataGone).
+local INVENTORY_PART = { key = "inventory", fn = ns.CollectInventory }
+local SKILLS_PART = { key = "skills", fn = ns.CollectSkills }
 
 -- The parts of OgreMCPDB read from the client, in collection order. A
 -- part with top set goes to the top level of the table, every other part
@@ -26,8 +32,8 @@ local COLLECT_PARTS = {
 	{ key = "location", fn = ns.CollectLocation },
 	{ key = "recent_path", fn = ns.CollectRecentPath },
 	{ key = "quests", fn = ns.CollectQuests },
-	{ key = "inventory", fn = ns.CollectInventory },
-	{ key = "skills", fn = ns.CollectSkills },
+	INVENTORY_PART,
+	SKILLS_PART,
 	{ key = "flight_points", fn = ns.CollectFlightPoints },
 }
 
@@ -63,14 +69,64 @@ local function Collect(logout)
 	end
 end
 
+-- Entries returns the number of entries in the list at field of a part's
+-- value, and 0 when the part has no value.
+local function Entries(value, field)
+	local list = type(value) == "table" and value[field]
+	return type(list) == "table" and #list or 0
+end
+
+-- PlayerDataGone tells whether fresh, the values of the logout collection,
+-- were read after the client dropped the player's data (§6.3, "Exit Game").
+-- On Exit Game the client drops that data before PLAYER_LOGOUT. The reads
+-- then succeed and come back empty: Classic Era 1.15.9 gave no bag or
+-- equipped items, no skill lines, no quest objectives, and no map position
+-- (2026-10-06, RED-414). A reload keeps the data.
+--
+-- The sign is a part that had entries in polled, the values of the last
+-- poll, and has none in fresh: no skill line, or neither a bag item nor an
+-- equipped item. A character whose polled skills and inventory were empty
+-- gives no sign, and neither does a part that failed in the logout
+-- collection, because it still holds its polled value.
+local function PlayerDataGone(polled, fresh)
+	local function SkillLines(parts)
+		return Entries(parts[SKILLS_PART], "lines")
+	end
+	local function Items(parts)
+		return Entries(parts[INVENTORY_PART], "items") + Entries(parts[INVENTORY_PART], "equipped")
+	end
+	return (SkillLines(polled) > 0 and SkillLines(fresh) == 0) or (Items(polled) > 0 and Items(fresh) == 0)
+end
+
 -- At PLAYER_LOGOUT every part is collected again, so the state and
 -- captured_at match the moment the client writes SavedVariables. Without
 -- this, position would lag by up to one collection interval. A part that
 -- fails here keeps its last polled value.
+--
+-- When the logout collection finds the player's data gone (PlayerDataGone),
+-- the whole collection is discarded and the polled value of every part is
+-- written. Write still stamps captured_at, so the state can then be up to
+-- one collection interval older than the stamp. The polls are not checked
+-- this way.
+--
+-- The polled values are copied before the logout collection runs, because a
+-- collector can change a value it returned earlier: recent_path is one list
+-- for the session, and an item's stats table gains the weapon numbers when
+-- its tooltip is read. Clean copies. So a discarded collection changes
+-- nothing in what is written. It still changes the collectors' caches in
+-- memory. No write reads them afterwards: OgreMCPDB is written at this
+-- event only, when the session ends.
 local logoutFrame = CreateFrame("Frame")
 logoutFrame:RegisterEvent("PLAYER_LOGOUT")
 logoutFrame:SetScript("OnEvent", function()
+	local polled = {}
+	for _, part in ipairs(COLLECT_PARTS) do
+		polled[part] = Clean(latest[part], 0)
+	end
 	Collect(true)
+	if PlayerDataGone(polled, latest) then
+		latest = polled
+	end
 	Write(latest, COLLECT_PARTS)
 end)
 
