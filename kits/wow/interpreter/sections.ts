@@ -149,7 +149,8 @@ export const GEAR_CAVEAT =
  * `gear_incomplete` is true when the adapter did not read the details of every
  * item (`items_pending` is not 0), so a bag item that fits a slot, or a better
  * one, may be missing: a slot then reads `incomplete` in place of
- * `none_better` or `no_candidates`.
+ * `none_better` or `no_candidates`. A slot whose equipped item has an enchant
+ * with unread text reads `incomplete` in place of `better_in_bags` (gear.ts).
  */
 function buildInventory(inventory: Inventory, level: number | null) {
   const gearIncomplete = inventory.items_pending !== 0;

@@ -241,6 +241,20 @@ describe("item suffixes and enchants (§10.4)", () => {
     });
   });
 
+  it("reads a slot as incomplete, not better_in_bags, while the equipped item's enchant text is unread", async () => {
+    const snapshot = structuredClone(snapshots.items);
+    const blade = snapshot.state.inventory?.equipped.find((item) => item.slot === "MainHandSlot");
+    if (blade === undefined) throw new Error("The items stub has no main hand.");
+    delete blade.enchant_text;
+
+    const { equipped, gear } = await inventoryOf(snapshot);
+    expect(equipped.find((item) => item.slot === "MainHandSlot")).toMatchObject({ enchant: { id: 1900, text: null, stats: null } });
+    const slot = gear.find((entry) => entry.slot === "MainHandSlot");
+    expect(slot).toMatchObject({ comparison: "incomplete", better: [{ name: "Test Axe" }] });
+    expect(slot).not.toHaveProperty("loses_enchant");
+    expect(slot).not.toHaveProperty("caveat");
+  });
+
   it("returns the items of an upload from before adapter 0.4.0 as they were", async () => {
     // The golden fixture is from addon 0.1.1, which wrote no link and no text.
     const parsed = interpreter.parse("savedvariables", readFileSync(new URL("../fixtures/classic_era/OgreMCP.lua", import.meta.url)));

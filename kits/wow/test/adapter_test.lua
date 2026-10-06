@@ -291,7 +291,8 @@ local function DefaultWorld()
 		timers = {},
 		frames = {},
 		chat = {},
-		calls = { reloadUI = 0, cReload = 0 },
+		-- tooltips counts the tooltip reads, through either API.
+		calls = { reloadUI = 0, cReload = 0, tooltips = 0 },
 		reload = { global = true, c = true },
 	}
 end
@@ -705,6 +706,7 @@ local function InstallStubs()
 		return item and (item.stats or {}) or nil
 	end
 	local function tooltipRows(key)
+		w.calls.tooltips = w.calls.tooltips + 1
 		local item = w.items[key]
 		return item and item.tooltip or {}
 	end
@@ -1081,6 +1083,59 @@ test("era: suffix and enchant text come from tooltip comparisons, out of combat 
 	eq(weapon.stats.max_damage, 30, "the same read gives the weapon's damage")
 	eq(inventory.items[4].suffix_text, nil, "a plain link has no text")
 	eq(inventory.items[4].stats.speed, 2, "the plain weapon's speed")
+end)
+
+test("era: a tooltip the client did not fill leaves the text unread, pending, and retried (§6.3)", function()
+	local jerkin = GearLink(3101, "Test Jerkin", 16, nil, 7002)
+	local bare = GearLink(3101, "Test Jerkin", nil, nil, 7002)
+	local filled = { { "Test Jerkin" }, { "Chest", "Leather" }, { "100 Armor" }, { "Durability 70 / 70" } }
+	local function Setup(fullRows, bareRows)
+		return Era(function(w)
+			w.gear = { ChestSlot = { id = 3101, link = jerkin } }
+			w.items[jerkin] = {
+				info = { name = "Test Jerkin", quality = 2, itemLevel = 20, minLevel = 10, type = "Armor",
+					subType = "Leather", equipLoc = "INVTYPE_CHEST", sellPrice = 500 },
+				stats = { RESISTANCE0_NAME = 100 },
+				tooltip = fullRows,
+			}
+			w.items[bare] = { tooltip = bareRows }
+		end)
+	end
+	local full = { filled[1], filled[2], filled[3], { "Reinforced Armor +16" }, filled[4] }
+	local function Retry()
+		Fire("GET_ITEM_INFO_RECEIVED")
+		Advance(2)
+	end
+
+	-- The tooltip of the link without the enchant ID has the name row alone.
+	Start(Setup(full, { { "Test Jerkin" } }))
+	EnterWorld()
+	local db = Logout()
+	eq(Equipped(db, "ChestSlot").enchant_text, nil, "no text from an unfilled tooltip")
+	eq(db.state.inventory.items_pending, 1, "the item counts as pending")
+	-- The client fills the tooltip, and the next attempt reads the text.
+	world.items[bare].tooltip = filled
+	Retry()
+	db = Logout()
+	eq(Equipped(db, "ChestSlot").enchant_text, "Reinforced Armor +16", "enchant_text after the retry")
+	eq(db.state.inventory.items_pending, 0, "nothing pending after the retry")
+
+	-- The link's own tooltip stays empty. The adapter gives up, reads no more
+	-- tooltips, and the item still counts as pending.
+	local ns = Start(Setup({}, filled))
+	EnterWorld()
+	for _ = 1, 6 do
+		Retry()
+	end
+	local reads = world.calls.tooltips
+	truthy(reads > 0, "tooltip reads")
+	truthy(not ns.ItemsPending(), "no entry waits after giving up")
+	world.items[jerkin].tooltip = full
+	Retry()
+	eq(world.calls.tooltips, reads, "no read after giving up")
+	db = Logout()
+	eq(Equipped(db, "ChestSlot").enchant_text, nil, "no text")
+	eq(db.state.inventory.items_pending, 1, "still pending")
 end)
 
 test("raw values: a collapsed quest header sets quests.partial, and a level above 60 is kept", function()

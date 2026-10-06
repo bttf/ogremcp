@@ -23,7 +23,10 @@ export type GearMeasure = "armor" | "dps" | "item_level";
  * - `incomplete`: the details of some items were not read, so a bag item that
  *   fits the slot, or a better one, may be missing. The inventory section puts
  *   it in place of `none_better` and `no_candidates`, which would claim more
- *   than the data holds.
+ *   than the data holds. A slot also reads `incomplete` in place of
+ *   `better_in_bags` when the equipped item has an enchant whose text is not
+ *   read: its measured value may lack the enchant's stat, so the bag items
+ *   listed as better may not be.
  */
 export type GearComparison = "better_in_bags" | "none_better" | "not_compared" | "fills_empty_slot" | "no_candidates" | "incomplete";
 
@@ -192,12 +195,12 @@ export function summariseGear(inventory: { items: readonly BagItem[]; equipped: 
     // The measure of the first listed better item. Without one, the measure
     // of the slot's first comparison.
     entry.measure = entry.better[0]?.measure ?? entry.measure;
+    const enchant = entry.equipped?.enchant;
     if (entry.candidates === 0) entry.comparison = "no_candidates";
-    else if (entry.better.length > 0) entry.comparison = "better_in_bags";
+    else if (entry.better.length > 0) entry.comparison = enchant?.text === null ? "incomplete" : "better_in_bags";
     else if (entry.notCompared === entry.candidates) entry.comparison = "not_compared";
     else if (entry.equipped === null) entry.comparison = "fills_empty_slot";
     else entry.comparison = "none_better";
-    const enchant = entry.equipped?.enchant;
     if (entry.comparison === "better_in_bags" && enchant !== undefined) entry.losesEnchant = { id: enchant.id, text: enchant.text };
   }
   const order = (slot: string) => GEAR_SLOT_ORDER.indexOf(slot) + 1 || GEAR_SLOT_ORDER.length + 1;
