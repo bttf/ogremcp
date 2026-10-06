@@ -1058,6 +1058,90 @@ test("a part that fails at logout keeps its last polled value", function()
 	eq(db.client.season_id, 3, "season_id")
 end)
 
+-- DropPlayerData makes the stub client answer as Classic Era 1.15.9 did at
+-- PLAYER_LOGOUT on Exit Game (RED-414): no bag or equipped items, no skill
+-- lines, no quest objectives, and no map, position, or facing. The zone text,
+-- the quest titles, the level, and the money stay.
+local function DropPlayerData(w)
+	w.bags, w.gear, w.skills = {}, {}, {}
+	w.loc.mapID, w.loc.x, w.loc.y, w.loc.facing = nil, nil, nil, nil
+	for _, row in ipairs(w.questLog) do
+		row.objectives = {}
+	end
+end
+
+test("PLAYER_LOGOUT keeps the polled values when the client has dropped the player's data (§6.3)", function()
+	-- The first two are the two signs of the rule, each alone.
+	local drops = {
+		["no skill lines"] = function(w)
+			w.skills = {}
+		end,
+		["no bag or equipped items"] = function(w)
+			w.bags, w.gear = {}, {}
+		end,
+		["Exit Game"] = DropPlayerData,
+	}
+	for label, drop in pairs(drops) do
+		Start(Era())
+		EnterWorld()
+		world.taxi.nodes = { { name = "Test Village", state = 0 } }
+		Fire("TAXIMAP_OPENED")
+		-- The poll at 10 seconds reads the flight points. The logout is 4
+		-- seconds after it, before the next poll.
+		Advance(8)
+		drop(world)
+		-- What the client still reports. The discarded collection reads it,
+		-- and its new subzone replaces the newest entry of the session's
+		-- recent_path list.
+		world.char.money = 999
+		world.loc.subzone = "Test Dock"
+		local db = Logout()
+
+		eq(db.captured_at, GetServerTime(), label .. ": captured_at is the time of the logout")
+		local state = db.state
+		eq(#state.inventory.items, 2, label .. ": bag items")
+		eq(#state.inventory.equipped, 2, label .. ": equipped items")
+		eq(state.inventory.items_pending, 0, label .. ": items_pending")
+		eq(#state.skills.lines, 3, label .. ": skill lines")
+		eq(#state.quests.entries[1].objectives, 1, label .. ": quest objectives")
+		eq(state.character.copper, 12345, label .. ": copper")
+		eq(state.location.map_id, 1429, label .. ": map_id")
+		eq(state.location.subzone, "Test Village", label .. ": subzone")
+		eq(#state.recent_path, 1, label .. ": recent_path entries")
+		eq(state.recent_path[1].subzone, "Test Village", label .. ": recent_path subzone")
+		eq(state.recent_path[1].x, 0.4312, label .. ": recent_path x")
+		eq(table.concat(state.flight_points.continents[1].known, ","), "Test Village", label .. ": flight points")
+	end
+end)
+
+test("PLAYER_LOGOUT writes the fresh values when the player's data is there, or was empty at the last poll", function()
+	-- Fewer entries than at the last poll, and not none: the bags are empty
+	-- and the equipment is not, and one skill line is gone.
+	Start(Era())
+	EnterWorld()
+	world.bags = {}
+	table.remove(world.skills)
+	world.char.money = 999
+	local db = Logout()
+	eq(#db.state.inventory.items, 0, "bag items read at logout")
+	eq(#db.state.inventory.equipped, 2, "equipped items")
+	eq(#db.state.skills.lines, 2, "skill lines read at logout")
+	eq(db.state.character.copper, 999, "copper read at logout")
+
+	-- A character with no item and no skill line at the last poll.
+	Start(Era(function(w)
+		w.bags, w.gear, w.skills = {}, {}, {}
+	end))
+	EnterWorld()
+	DropPlayerData(world)
+	world.char.money = 999
+	db = Logout()
+	eq(#db.state.inventory.items + #db.state.inventory.equipped, 0, "no items")
+	eq(#db.state.skills.lines, 0, "no skill lines")
+	eq(db.state.location.map_id, nil, "map_id read at logout")
+	eq(db.state.character.copper, 999, "copper read at logout, with nothing to compare")
+end)
+
 test("era: suffix and enchant text come from tooltip comparisons, out of combat (§6.3)", function()
 	-- A chest with a random suffix in the bags, an equipped chest with an armor
 	-- kit, an equipped weapon with an enchant, and a plain weapon in the bags.

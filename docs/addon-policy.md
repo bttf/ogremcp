@@ -9,7 +9,7 @@ Policy. Source:
 
 The addon is the adapter of the WoW kit, in `kits/wow/adapter/`. Players
 install it as the folder `OgreMCP` (`OgreMCP.toc`). This doc was checked
-against adapter version 0.6.0.
+against adapter version 0.6.1.
 
 The policy has 8 rules.
 
