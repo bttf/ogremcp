@@ -9,7 +9,7 @@ Policy. Source:
 
 The addon is the adapter of the WoW kit, in `kits/wow/adapter/`. Players
 install it as the folder `OgreMCP` (`OgreMCP.toc`). This doc was checked
-against adapter version 0.3.0.
+against adapter version 0.6.0.
 
 The policy has 8 rules.
 
@@ -76,11 +76,21 @@ players.
   `Collectors.lua`), because position changes fire no event. Game events
   schedule one collection 1 second out (`COLLECT_DEBOUNCE`), and further
   events before it runs coalesce into it (`Collect.lua`).
-- Item details are cached per item link for the session (`Items.lua`). An
-  unchanged inventory costs no item API call. Tooltip reads are skipped in
-  combat and capped at 8 per collection. Item info that stays unreadable is
-  asked for at most 5 times, until the item leaves the inventory and comes
-  back.
+- Item details are cached per item link for the session (`Items.lua`). On an
+  unchanged inventory, a collection reads the bag and equipment slots and
+  makes no item info, item stats, or tooltip call. Tooltip reads give a
+  weapon's damage and speed, and the text of an item's random suffix and
+  enchant. They are skipped in combat and capped at 8 per collection. Item
+  info that stays unreadable, or text that a tooltip does not give, is asked
+  for at most 5 times, until the item leaves the inventory and comes back.
+- When the player has the Auctionator addon, the addon reads the auction
+  price of each unbound bag item from Auctionator's public API,
+  `Auctionator.API.v1` (`AuctionPrices.lua`). Auctionator is an optional
+  dependency (`OptionalDeps` in the TOC). The prices are from the player's
+  own Auctionator scans: the addon sends no auction house query and never
+  reads `AUCTIONATOR_PRICE_DATABASE`. A price is cached per item link for 60
+  seconds, and no call is made in combat. The collection at `PLAYER_LOGOUT`
+  reads each price again, in combat too.
 - Quest text is cached per quest for the session. Empty text is retried with
   a growing delay, at most 10 times, until the quest leaves the log and comes
   back (`Collectors.lua`).
@@ -110,7 +120,8 @@ The addon asks for no donation, tip, or payment, in chat or in any frame.
 
 The addon ships no image and no sound: its folder holds Lua files and a TOC.
 Its only text is its status lines. Game text it stores (quest, item, zone,
-continent, flight point, and character names) comes from the client.
+continent, flight point, and character names, item links, and item tooltip
+lines) comes from the client.
 
 ## 7. Terms of Use and EULA
 
@@ -122,10 +133,12 @@ continent, flight point, and character names) comes from the client.
   then restores the player's selection. It does this only while the quest log
   is closed and the player is out of combat (`FetchQuestTexts` in
   `Collectors.lua`).
-- To read weapon damage and speed where the client lacks `C_TooltipInfo`, the
-  addon fills its own tooltip, `OgreMCPScanTooltip`. The tooltip is set with
-  `ANCHOR_NONE` and no position, and is hidden after each read. `GameTooltip`
-  is never touched (`Items.lua`).
+- To read weapon damage and speed, and the text of an item's random suffix
+  and enchant, where the client lacks `C_TooltipInfo`, the addon fills its own
+  tooltip, `OgreMCPScanTooltip`. For the suffix and the enchant it also reads
+  the tooltip of the same link without that ID, and keeps the lines only the
+  full link has. The tooltip is set with `ANCHOR_NONE` and no position, and is
+  hidden after each read. `GameTooltip` is never touched (`Items.lua`).
 - The bridge reads the SavedVariables file after the client writes it. It
   also installs the addon folder, and updates it only while the game is not
   running (§7). To tell whether the game runs, it reads the names in the

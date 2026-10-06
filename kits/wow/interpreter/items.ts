@@ -81,7 +81,7 @@ function addStats(base: ItemStats | null, lines: readonly string[]): ItemStats |
  * `suffix`, and its `stats` are the base stats plus the suffix stats. An item
  * whose link has an enchant ID has `enchant`. The enchant's stats are not
  * added to `stats`. `link` and the unique ID are left out, to save space.
- * An item of an adapter before 0.4.0 has no link, so it stays as it is.
+ * An item of an adapter before 0.6.0 has no link, so it stays as it is.
  */
 export function buildItem<T extends SnapshotBagItem | SnapshotEquippedItem>(item: T): Built<T> {
   const { link: _link, unique_id: _unique, enchant_id, suffix_id, suffix_text, enchant_text, ...rest } = item;

@@ -270,7 +270,7 @@ describe("item suffixes and enchants (§10.4)", () => {
     expect(slot).not.toHaveProperty("caveat");
   });
 
-  it("returns the items of an upload from before adapter 0.4.0 as they were", async () => {
+  it("returns the items of an upload from before adapter 0.6.0 as they were", async () => {
     // The golden fixture is from addon 0.1.1, which wrote no link and no text.
     const parsed = interpreter.parse("savedvariables", readFileSync(new URL("../fixtures/classic_era/OgreMCP.lua", import.meta.url)));
     const gloves = parsed.state.inventory?.items.find((item) => item.name === "Black Whelp Gloves");
