@@ -219,16 +219,18 @@ describe("item suffixes and enchants (§10.4)", () => {
     content((await call({ sections: ["inventory"] }, snapshot)).result).state.inventory as { items: Item[]; equipped: Item[]; gear: Slot[] };
 
   it("adds the suffix stats to an item's stats and gives an enchant its own", async () => {
-    // The snapshot keeps the link and its three IDs.
+    // The snapshot keeps the link and its three IDs, and the suffix lines as
+    // the client gives them, inside color escapes.
     const stored = snapshots.items.state.inventory?.items.find((item) => item.name === "Test Vest of the Bear");
     expect(stored).toMatchObject({ link: expect.stringContaining("|Hitem:3100::::::1179:7001:"), enchant_id: 0, suffix_id: 1179, unique_id: 7001 });
+    expect(stored?.suffix_text).toEqual(["|cffffffff+2 Stamina|r", "|cffffffff+2 Strength|r"]);
     expect(stored?.stats).toEqual({ armor: 110 });
 
     const { items, equipped } = await inventoryOf(snapshots.items);
     const vest = items.find((item) => item.name === "Test Vest of the Bear");
     expect(vest).toMatchObject({
       stats: { armor: 110, stamina: 2, strength: 2 },
-      suffix: { id: 1179, text: ["+2 Stamina", "+2 Strength"] },
+      suffix: { id: 1179, text: "+2 Stamina, +2 Strength" },
     });
     // The result leaves out the link, the unique ID, and the adapter's fields.
     for (const key of ["link", "unique_id", "suffix_id", "enchant_id", "suffix_text", "enchant_text", "enchant"]) {
@@ -239,6 +241,38 @@ describe("item suffixes and enchants (§10.4)", () => {
       enchant: { id: 16, text: "Reinforced Armor +16", stats: { armor: 16 } },
     });
     expect(equipped.find((item) => item.slot === "MainHandSlot")).toMatchObject({ enchant: { id: 1900, text: "Crusader", stats: null } });
+  });
+
+  it("removes color escapes before it reads stats, and gives the suffix text as one string", async () => {
+    // The lines of the owner's check in Classic Era 1.15.9. The IDs are made up.
+    const snapshot = structuredClone(snapshots.items);
+    snapshot.state.inventory?.items.push({
+      item_id: 3200,
+      name: "Battleforge Shoulderguards of the Gorilla",
+      count: 1,
+      quality: 2,
+      item_level: 30,
+      min_level: 25,
+      equip_loc: "INVTYPE_SHOULDER",
+      type: "Armor",
+      sub_type: "Mail",
+      sell_price: 900,
+      stats: { armor: 144 },
+      link: "|cff1eff00|Hitem:3200:15:::::9001:7004:12:::::::::|h[Battleforge Shoulderguards of the Gorilla]|h|r",
+      suffix_text: ["|cffffffff+5 Intellect|r", "|cffffffff+5 Strength|r"],
+      // The named color form.
+      enchant_text: "|cnGREEN_FONT_COLOR:Reinforced Armor +8|r",
+      enchant_id: 15,
+      suffix_id: 9001,
+      unique_id: 7004,
+    });
+
+    const { items } = await inventoryOf(snapshot);
+    expect(items.find((item) => item.name === "Battleforge Shoulderguards of the Gorilla")).toMatchObject({
+      stats: { armor: 144, intellect: 5, strength: 5 },
+      suffix: { id: 9001, text: "+5 Intellect, +5 Strength" },
+      enchant: { id: 15, text: "Reinforced Armor +8", stats: { armor: 8 } },
+    });
   });
 
   it("counts an armor kit toward armor, and names the enchant a better bag item would replace", async () => {
