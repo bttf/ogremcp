@@ -12,7 +12,7 @@
 //
 // Lua has no null: a nil field is an absent key. Every field the client can
 // report as nil is `nilable`, which reads an absent key as null. The item
-// fields added in adapter 0.4.0 are optional instead. zod drops the keys a
+// fields added since adapter 0.5.0 are optional instead. zod drops the keys a
 // schema does not name, so a field a newer adapter adds is ignored.
 // The parsed state holds only strings, finite numbers, booleans, null, arrays,
 // and plain objects, so it is JSON-serializable (§11 stores it as jsonb).
@@ -243,7 +243,7 @@ const itemDetailShape = {
    * enchant, on a full link too (§6.3).
    */
   stats: nilable(itemStatsSchema),
-  // The three fields below are absent from the files of adapters before 0.4.0
+  // The three fields below are absent from the files of adapters before 0.6.0
   // and from the snapshots stored from them, so they are optional and an
   // absent key stays absent.
   /**
@@ -305,6 +305,30 @@ function withLinkIds<T extends { link?: string | null | undefined }>(item: T): T
   return ids === null ? item : { ...item, ...ids };
 }
 
+/** Largest `ah.price_copper`: the client's money cap, in copper. */
+export const AH_PRICE_MAX = 2_147_483_647;
+/** Largest `ah.age_days`: 100 years. */
+export const AH_AGE_MAX_DAYS = 36_500;
+
+/**
+ * The auction house price of one bag item (§6.3), from the Auctionator addon
+ * (kits/wow/adapter/AuctionPrices.lua). The adapter writes none for an item
+ * without a price, so `price_copper` is required.
+ */
+export const auctionPriceSchema = z.object({
+  /** The lowest buyout of one item in Auctionator's last scan that saw the item, in copper. */
+  price_copper: z.number().int().min(1).max(AH_PRICE_MAX),
+  /** Whole days since a scan last saw the item. Null when Auctionator gives no age. */
+  age_days: nilable(z.number().int().min(0).max(AH_AGE_MAX_DAYS)),
+  /**
+   * False when the price is Auctionator's fallback to the item ID alone: it
+   * is for the base item with any random suffix.
+   */
+  exact: nilable(z.boolean()),
+  /** The addon the price is from. */
+  source: z.literal("auctionator"),
+});
+
 /**
  * Every stack of one item across the backpack and bags, summed. Items that
  * can be equipped are summed per item link, because two items with one ID can
@@ -317,6 +341,14 @@ export const bagItemSchema = z
     /** Null when the stack size of any contributing slot was unreadable. */
     count: nilable(z.number().int().positive()),
     ...itemDetailShape,
+    /**
+     * Absent without a price: the player has no Auctionator, no scan has seen
+     * the item, the item is bound, or the adapter is older than 0.5.0. It is
+     * optional and not `nilable`, so that a tool result carries `ah` only on an
+     * item with a price (§10.4), and a snapshot stored before the field existed
+     * has the same shape as a new one.
+     */
+    ah: auctionPriceSchema.optional(),
   })
   .transform(withLinkIds);
 
@@ -342,7 +374,7 @@ export const inventorySchema = z.object({
    * adapter did not read: the client had not cached the item yet (right after
    * login), the read failed, or the client has no item info API. Such an item
    * has no `equip_loc`, so a consumer cannot tell which slot it fits. From
-   * adapter 0.4.0 it also counts a link whose suffix or enchant text is not
+   * adapter 0.6.0 it also counts a link whose suffix or enchant text is not
    * read yet (§6.3). While this is above 0 a gear comparison is incomplete.
    */
   items_pending: nilable(z.number().int().min(0).max(ITEMS_PENDING_MAX)),

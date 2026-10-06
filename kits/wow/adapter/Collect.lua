@@ -40,15 +40,16 @@ local latest = {}
 -- failure leaves the others intact, and a part that fails keeps the value of
 -- its last successful collection. A call while a collection is already
 -- running does nothing; that can only happen if an API it calls re-enters it
--- through an event.
-local function Collect()
+-- through an event. logout is true for the collection at PLAYER_LOGOUT.
+local function Collect(logout)
 	if collecting then
 		return
 	end
 	collecting = true
 	-- The quests collector sets selectionChanged when it changed the quest
-	-- log selection.
-	local status = {}
+	-- log selection. The inventory collector reads logout: the values of
+	-- this collection are the ones written, so it reads auction prices again.
+	local status = { logout = logout == true }
 	for _, part in ipairs(COLLECT_PARTS) do
 		local ok, result = pcall(part.fn, status)
 		if ok then
@@ -69,7 +70,7 @@ end
 local logoutFrame = CreateFrame("Frame")
 logoutFrame:RegisterEvent("PLAYER_LOGOUT")
 logoutFrame:SetScript("OnEvent", function()
-	Collect()
+	Collect(true)
 	Write(latest, COLLECT_PARTS)
 end)
 

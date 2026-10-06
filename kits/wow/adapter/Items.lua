@@ -52,6 +52,8 @@ local ReadTable = ns.ReadTable
 local Api = ns.Api
 local NameFromLink = ns.NameFromLink
 local InCombat = ns.InCombat
+local AuctionPrice = ns.AuctionPrice
+local ForgetAuctionPrices = ns.ForgetAuctionPrices
 
 -- The item APIs, each list in order of preference. The first form the client
 -- has is used. Adjust these lists when a probe shows another form
@@ -589,11 +591,14 @@ end
 
 -- Section: inventory ---------------------------------------------------------
 
-local function CollectInventory()
+-- status is the state of one collection (Collect.lua). Its logout is true in
+-- the collection at PLAYER_LOGOUT.
+local function CollectInventory(status)
 	local ctx = {
 		seen = {},
 		retry = itemCacheStale,
 		inCombat = InCombat(),
+		logout = type(status) == "table" and status.logout == true,
 		tooltipBudget = ITEM_TOOLTIP_SCANS_PER_COLLECTION,
 	}
 
@@ -624,6 +629,10 @@ local function CollectInventory()
 						items[#items + 1] = item
 					end
 					item.name = item.name or name
+					-- The auction price, cached per link (AuctionPrices.lua). A
+					-- bound slot gives none, so an item summed from several
+					-- slots has a price when at least one of them is not bound.
+					item.ah = item.ah or AuctionPrice(link, itemID, PlainField(info, "isBound"), ctx)
 					if count then
 						item.count = item.count + count
 					else
@@ -653,14 +662,16 @@ local function CollectInventory()
 		end
 	end
 
-	-- A stale cache drops the links that are gone. It stays stale while
-	-- tooltips wait for the next collection's budget.
+	-- A stale cache drops the links that are gone, and so does the price
+	-- cache. It stays stale while tooltips wait for the next collection's
+	-- budget.
 	if ctx.retry then
 		for link in pairs(itemDetailCache) do
 			if not ctx.seen[link] then
 				itemDetailCache[link] = nil
 			end
 		end
+		ForgetAuctionPrices(ctx)
 	end
 	itemCacheStale = ctx.budgetExhausted == true
 	local pending = 0

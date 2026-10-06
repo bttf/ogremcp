@@ -5,13 +5,17 @@
 ## Title: Ogre MCP
 ## Notes: Saves your character's state so your AI agent can give spoiler-free guidance.
 ## Author: red pine software
-## Version: 0.4.0
+## Version: 0.6.0
 ## SavedVariables: OgreMCPDB
 ## SavedVariablesPerCharacter: OgreMCPCharDB
+# Auctionator is the source of auction prices. When it is installed and
+# enabled, the client loads it first. The addon works without it.
+## OptionalDeps: Auctionator
 
 # Load order matters: a file reads what earlier files put in the addon table.
 OgreMCP.lua
 Collectors.lua
+AuctionPrices.lua
 Items.lua
 RecentPath.lua
 FlightPoints.lua

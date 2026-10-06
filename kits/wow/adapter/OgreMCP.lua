@@ -8,6 +8,8 @@
 --   OgreMCP.lua  this overview, and the secret-value helpers every file uses
 --   Collectors.lua    value readers and the character, location, quests, and
 --                     skills sections
+--   AuctionPrices.lua the auction price of a bag item, from the Auctionator
+--                     addon when the player has it
 --   Items.lua         item details and the inventory section
 --   RecentPath.lua    the recent_path section, the one section carried across
 --                     reloads
